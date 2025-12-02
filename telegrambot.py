@@ -155,6 +155,13 @@ async def autopost():
     feeds = [feedparser.parse(url) for url in RSS_FEEDS]
     articles = [entry for feed in feeds for entry in feed.entries]
 
+    print("DEBUG: len(feeds) =", len(feeds))
+    for i, feed in enumerate(feeds):
+        print(f"DEBUG FEED {i} status:", getattr(feed, "status", None))
+        print(f"DEBUG FEED {i} entries:", len(feed.entries))
+
+    print("DEBUG: всего статей в RSS:", len(articles))
+
     art = pick_article(articles)
 
     # Fallback: если по ключам ничего не нашли — берём свежую статью
@@ -212,10 +219,6 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 
-async def main():
-    await autopost()
 
-if __name__ == "__main__":
-    asyncio.run(main())
 
 

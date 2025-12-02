@@ -212,10 +212,10 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 
-# ===== Основная функция =====
 async def main():
     await autopost()
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 

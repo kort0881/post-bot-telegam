@@ -9,17 +9,13 @@ from aiogram.client.bot import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from openai import OpenAI
-from google import genai
-from google.genai import types
 
 # ===== Настройки =====
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 print("DEBUG OPENAI KEY LEN:", len(OPENAI_API_KEY) if OPENAI_API_KEY else 0)
-print("DEBUG GEMINI KEY LEN:", len(GEMINI_API_KEY) if GEMINI_API_KEY else 0)
 
 bot = Bot(
     token=TELEGRAM_BOT_TOKEN,
@@ -27,7 +23,6 @@ bot = Bot(
 )
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
-gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 HEADERS = {
     "User-Agent": (
@@ -312,38 +307,7 @@ def short_summary(title: str, summary: str) -> str:
     return content[:650].rstrip()
 
 
-# ===== Генерация картинки (Gemini) =====
-def get_img_from_gemini(title: str):
-    prompt = (
-        f"Реалистичное, детализированное изображение к новости: '{title}', "
-        "в стиле технологичных иллюстраций про интернет, VPN, мессенджеры, "
-        "кибербезопасность и цифровую инфраструктуру."
-    )
-    try:
-        print("DEBUG GEMINI PROMPT:", prompt[:200])
-
-        resp = gemini_client.images.generate(
-            model="imagen-4.0-generate-001",
-            prompt=prompt,
-            config=types.GenerateImagesConfig(number_of_images=1),
-        )
-
-        if not getattr(resp, "images", None):
-            print("Gemini: пустой список images")
-            return None
-
-        img_data = resp.images[0].data
-        tmp_path = f"temp_{int(datetime.now().timestamp())}.png"
-        with open(tmp_path, "wb") as f:
-            f.write(img_data)
-        return tmp_path
-
-    except Exception as e:
-        print("Ошибка генерации картинки Gemini:", repr(e))
-        return None
-
-
-# ===== Автопостинг =====
+# ===== Автопостинг (только текст) =====
 async def autopost():
     articles = load_articles_from_sites()
 
@@ -377,15 +341,7 @@ async def autopost():
 
     caption = f"{news}\n\n{' '.join(hashtags)}"
 
-    img_path = get_img_from_gemini(title)
-
-    if not img_path:
-        print("Картинку Gemini сгенерировать не удалось, пост не отправлён")
-        return
-
-    with open(img_path, "rb") as ph:
-        await bot.send_photo(CHANNEL_ID, ph, caption=caption)
-    os.remove(img_path)
+    await bot.send_message(CHANNEL_ID, caption)
 
     save_posted(article_id)
     print("[OK]", datetime.now(), "-", title)
@@ -398,6 +354,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

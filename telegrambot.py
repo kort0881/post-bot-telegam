@@ -20,7 +20,7 @@ print("DEBUG OPENAI KEY LEN:", len(OPENAI_API_KEY) if OPENAI_API_KEY else 0)
 
 bot = Bot(
     token=TELEGRAM_BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML),
 )
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -31,28 +31,43 @@ HEADERS = {
     )
 }
 
+# ===== Ключевые слова (жёстко по теме канала) =====
 STRONG_KEYWORDS = [
+    # VPN / обход / цензура
     "vpn", "впн", "прокси", "proxy", "tor", "shadowsocks",
     "wireguard", "openvpn", "ikev2",
     "обход блокировок", "обход цензуры", "анонимность",
-    "роскомнадзор", "ркн", "суверенный интернет",
+    "роскомнадзор", "ркн",
     "интернет-цензура", "цензура в интернете",
-    "блокировка сайтов", "реестр запрещенных сайтов",
-    "ограничение доступа", "фильтрация трафика",
-    "телеграм", "telegram", "мессенджер", "канал в телеграме",
-    "блокировка telegram",
+    "блокировка сайтов", "блокировка ресурса",
+    "реестр запрещенных сайтов", "ограничение доступа",
+    "фильтрация трафика", "dpi", "deep packet inspection",
+
+    # мессенджеры / соцсети
+    "телеграм", "telegram",
+    "whatsapp", "signal", "viber",
+    "messenger", "мессенджер",
+
+    # технологии и софт (без акцента на игры)
+    "обновление безопасности", "патч безопасности",
+    "антивирус", "firewall", "фаервол",
+    "браузер", "браузер tor",
+    "клиент vpn", "vpn-клиент",
 ]
 
 SOFT_KEYWORDS = [
-    "кибербезопасность", "информационная безопасность",
-    "утечка данных", "взлом", "хакеры", "ddos", "фишинг",
-    "malware", "вредоносное по", "ransomware",
+    # техно / ИИ / софт
+    "приложение для пк", "desktop-приложение", "утилита для windows",
+    "программа для macos", "open source",
     "искусственный интеллект", "нейросеть", "нейросети",
-    "machine learning", "ml", "ai", "large language model",
-    "chatgpt", "gpt", "генеративный ии",
-    "новый закон об интернете", "штраф за vpn",
-    "ограничение интернета", "регулирование интернета",
-    "экстремистский контент",
+    "ai", "machine learning",
+    "кибербезопасность", "информационная безопасность",
+    "конфиденциальность в интернете", "privacy",
+    "суверенный интернет", "ограничение интернета",
+
+    # игры как часть техно-контекста (но не единственная тема)
+    "онлайн-игра", "игровой сервис", "игровая платформа",
+    "гейминг", "игровые сервера",
 ]
 
 POSTED_FILE = "posted_articles.json"
@@ -269,26 +284,41 @@ def pick_article(articles):
 # ===== Генерация текста =====
 def short_summary(title: str, summary: str) -> str:
     prompt = (
-        "Сделай информативный новостной пост 4–6 предложений "
-        "(~550–560 символов) по статье ниже. "
-        "Добавь реализм и детализацию, не используй ссылки и хештеги.\n"
-        f"Заголовок: {title}\nКратко: {summary or 'краткое описание отсутствует, сгенерируй сам по заголовку'}"
+        "Сделай новостной пост для Telegram‑канала про VPN, анонимность, "
+        "интернет‑цензуру, мессенджеры и технологии.\n"
+        "Требования к тексту:\n"
+        "1) 4–6 предложений, 500–650 символов.\n"
+        "2) Стиль техно‑новостей: факты, минимум воды, понятный язык.\n"
+        "3) Структура:\n"
+        "   - 1 предложение: что произошло и почему это важно.\n"
+        "   - 2–3 предложения: суть изменения/события, чем отличается от старого.\n"
+        "   - 1–2 предложения: вывод для обычного пользователя "
+        "(конфиденциальность, блокировки, безопасность, удобство).\n"
+        "4) Не используй ссылки и эмодзи. Не упоминай источники.\n"
+        "5) В конце добавь отдельной строкой: "
+        "PS: \"Кто за ключами — https://t.me/+EdEfIkn83Wg3ZTE6\".\n"
+        "6) Хэштеги не пиши — они будут добавлены отдельно.\n\n"
+        f"Заголовок новости: {title}\n"
+        f"Краткое описание/лид: {summary or 'краткое описание отсутствует, сгенерируй сам по заголовку'}\n"
+        "Сгенерируй только текст поста без лишних пояснений."
     )
     result = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
     )
     content = result.choices[0].message.content.strip()
-    return content[:560].rstrip()
+    return content[:650].rstrip()
 
 
-# ===== Генерация картинки =====
+# ===== Генерация картинки (обязательна) =====
 def get_img_from_dalle(title: str):
     prompt = (
         f"Реалистичное, детализированное изображение к новости: '{title}', "
-        "с акцентом на реализм, детализацию, современные технологии."
+        "в стиле технологичных иллюстраций. Акцент на интернет‑технологиях, "
+        "цифровой безопасности, VPN, мессенджерах или сетевой инфраструктуре."
     )
     try:
+        print("DEBUG DALL-E PROMPT:", prompt[:200])
         resp = openai_client.images.generate(
             model="dall-e-3",
             prompt=prompt,
@@ -301,7 +331,7 @@ def get_img_from_dalle(title: str):
         img.save(tmp)
         return tmp
     except Exception as e:
-        print("Ошибка генерации картинки:", e)
+        print("Ошибка генерации картинки DALL-E:", repr(e))
         return None
 
 
@@ -310,25 +340,14 @@ async def autopost():
     articles = load_articles_from_sites()
 
     if not articles:
-        print("Вообще нет статей, отправляем технический пост")
-        fallback_title = "Короткое техническое обновление"
-        fallback_summary = (
-            "Источники новостей временно не вернули ни одной статьи, "
-            "поэтому бот отправляет служебное сообщение."
-        )
-        news = short_summary(fallback_title, fallback_summary)
-        caption = f"{news}\n\n#Новости #Telegram #Канал"
-        await bot.send_message(CHANNEL_ID, caption)
+        print("Вообще нет статей, пост пропущен")
         return
 
     art = pick_article(articles)
 
-    if not art and articles:
-        print("Fallback: берём первую статью без фильтра")
-        art = articles[0]
-
+    # Жёстко: если нет статьи по тематике — не постим
     if not art:
-        print("Нет статей даже после fallback")
+        print("Нет подходящих статей по тематике (VPN/интернет/софт), пост пропущен")
         return
 
     article_id = art.get("id", art.get("link", art.get("title")))
@@ -353,12 +372,14 @@ async def autopost():
 
     img_path = get_img_from_dalle(title)
 
-    if img_path:
-        with open(img_path, "rb") as ph:
-            await bot.send_photo(CHANNEL_ID, ph, caption=caption)
-        os.remove(img_path)
-    else:
-        await bot.send_message(CHANNEL_ID, caption)
+    # Картинка обязательна
+    if not img_path:
+        print("Картинку сгенерировать не удалось, пост не отправлён")
+        return
+
+    with open(img_path, "rb") as ph:
+        await bot.send_photo(CHANNEL_ID, ph, caption=caption)
+    os.remove(img_path)
 
     save_posted(article_id)
     print("[OK]", datetime.now(), "-", title)
@@ -371,6 +392,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

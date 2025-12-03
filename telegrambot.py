@@ -2,27 +2,35 @@ import os
 import json
 import asyncio
 from datetime import datetime
-from io import BytesIO
 
 import requests
-from openai import OpenAI
 from aiogram import Bot
 from aiogram.client.bot import DefaultBotProperties
 from aiogram.enums import ParseMode
-from PIL import Image
+
+from google import genai
+from google.genai import types
 
 # ===== Настройки =====
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 print("DEBUG OPENAI KEY LEN:", len(OPENAI_API_KEY) if OPENAI_API_KEY else 0)
+print("DEBUG GEMINI KEY LEN:", len(GEMINI_API_KEY) if GEMINI_API_KEY else 0)
 
 bot = Bot(
     token=TELEGRAM_BOT_TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
 )
+
+# OpenAI для текста
+from openai import OpenAI
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
+# Gemini для картинок
+gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 HEADERS = {
     "User-Agent": (
@@ -31,7 +39,7 @@ HEADERS = {
     )
 }
 
-# ===== Ключевые слова (жёстко по теме канала) =====
+# ===== Ключевые слова =====
 STRONG_KEYWORDS = [
     # VPN / обход / цензура
     "vpn", "впн", "прокси", "proxy", "tor", "shadowsocks",
@@ -48,7 +56,7 @@ STRONG_KEYWORDS = [
     "whatsapp", "signal", "viber",
     "messenger", "мессенджер",
 
-    # технологии и софт (без акцента на игры)
+    # технологии и софт
     "обновление безопасности", "патч безопасности",
     "антивирус", "firewall", "фаервол",
     "браузер", "браузер tor",
@@ -56,7 +64,6 @@ STRONG_KEYWORDS = [
 ]
 
 SOFT_KEYWORDS = [
-    # техно / ИИ / софт
     "приложение для пк", "desktop-приложение", "утилита для windows",
     "программа для macos", "open source",
     "искусственный интеллект", "нейросеть", "нейросети",
@@ -64,8 +71,6 @@ SOFT_KEYWORDS = [
     "кибербезопасность", "информационная безопасность",
     "конфиденциальность в интернете", "privacy",
     "суверенный интернет", "ограничение интернета",
-
-    # игры как часть техно-контекста (но не единственная тема)
     "онлайн-игра", "игровой сервис", "игровая платформа",
     "гейминг", "игровые сервера",
 ]
@@ -281,7 +286,7 @@ def pick_article(articles):
     return None
 
 
-# ===== Генерация текста =====
+# ===== Генерация текста (OpenAI) =====
 def short_summary(title: str, summary: str) -> str:
     prompt = (
         "Сделай новостной пост для Telegram‑канала про VPN, анонимность, "
@@ -310,28 +315,32 @@ def short_summary(title: str, summary: str) -> str:
     return content[:650].rstrip()
 
 
-# ===== Генерация картинки (обязательна) =====
-def get_img_from_dalle(title: str):
+# ===== Генерация картинки (Gemini Imagen) =====
+def get_img_from_gemini(title: str):
     prompt = (
         f"Реалистичное, детализированное изображение к новости: '{title}', "
-        "в стиле технологичных иллюстраций. Акцент на интернет‑технологиях, "
-        "цифровой безопасности, VPN, мессенджерах или сетевой инфраструктуре."
+        "в стиле технологичных иллюстраций про интернет, VPN, мессенджеры, "
+        "кибербезопасность и цифровую инфраструктуру."
     )
     try:
-        print("DEBUG DALL-E PROMPT:", prompt[:200])
-        resp = openai_client.images.generate(
-            model="dall-e-3",
+        print("DEBUG GEMINI PROMPT:", prompt[:200])
+        resp = gemini_client.models.generate_images(
+            model="imagen-4.0-generate-001",
             prompt=prompt,
-            size="1024x1024",
-            n=1,
+            config=types.GenerateImagesConfig(number_of_images=1),
         )
-        img_url = resp.data[0].url
-        img = Image.open(BytesIO(requests.get(img_url).content))
-        tmp = f"temp_{int(datetime.now().timestamp())}.png"
-        img.save(tmp)
-        return tmp
+        if not resp.generated_images:
+            print("Gemini: пустой список generated_images")
+            return None
+
+        img = resp.generated_images[0].image
+        # image уже binary / PIL‑совместимый объект в SDK
+        tmp_path = f"temp_{int(datetime.now().timestamp())}.png"
+        with open(tmp_path, "wb") as f:
+            f.write(img.bytes)
+        return tmp_path
     except Exception as e:
-        print("Ошибка генерации картинки DALL-E:", repr(e))
+        print("Ошибка генерации картинки Gemini:", repr(e))
         return None
 
 
@@ -345,7 +354,6 @@ async def autopost():
 
     art = pick_article(articles)
 
-    # Жёстко: если нет статьи по тематике — не постим
     if not art:
         print("Нет подходящих статей по тематике (VPN/интернет/софт), пост пропущен")
         return
@@ -370,11 +378,10 @@ async def autopost():
 
     caption = f"{news}\n\n{' '.join(hashtags)}"
 
-    img_path = get_img_from_dalle(title)
+    img_path = get_img_from_gemini(title)
 
-    # Картинка обязательна
     if not img_path:
-        print("Картинку сгенерировать не удалось, пост не отправлён")
+        print("Картинку Gemini сгенерировать не удалось, пост не отправлён")
         return
 
     with open(img_path, "rb") as ph:
@@ -392,6 +399,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

@@ -2,7 +2,7 @@ name: Telegram Post Bot
 
 on:
   schedule:
-    - cron: '0 9,13,19 * * *'  # 3 раза в день (UTC)
+    - cron: '0 6,12,18 * * *'  # 9:00, 15:00, 21:00 по Москве (UTC+3)
   workflow_dispatch:
 
 jobs:
@@ -24,7 +24,6 @@ jobs:
       - name: Run bot
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
         run: python telegrambot.py

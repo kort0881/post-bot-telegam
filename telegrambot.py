@@ -1,15 +1,15 @@
 import os
 import json
 import asyncio
-import feedparser
+from datetime import datetime
+from io import BytesIO
+
+import requests
 from openai import OpenAI
 from aiogram import Bot
 from aiogram.client.bot import DefaultBotProperties
 from aiogram.enums import ParseMode
-from datetime import datetime
-import requests
 from PIL import Image
-from io import BytesIO
 
 # ===== Настройки =====
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -22,42 +22,35 @@ bot = Bot(
 )
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-RSS_FEEDS = [
-    "https://3dnews.ru/rss/news/",
-    "https://habr.com/ru/feed/",
-]
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+    )
+}
 
 STRONG_KEYWORDS = [
-    # VPN / обход блокировок
     "vpn", "впн", "прокси", "proxy", "tor", "shadowsocks",
     "wireguard", "openvpn", "ikev2",
     "обход блокировок", "обход цензуры", "анонимность",
-
-    # цензура и контроль интернета
     "роскомнадзор", "ркн", "суверенный интернет",
     "интернет-цензура", "цензура в интернете",
     "блокировка сайтов", "реестр запрещенных сайтов",
     "ограничение доступа", "фильтрация трафика",
-
-    # Telegram / мессенджеры
     "телеграм", "telegram", "мессенджер", "канал в телеграме",
     "блокировка telegram",
 ]
 
 SOFT_KEYWORDS = [
-    # безопасность и кибератаки
     "кибербезопасность", "информационная безопасность",
     "утечка данных", "взлом", "хакеры", "ddos", "фишинг",
     "malware", "вредоносное по", "ransomware",
-
-    # ИИ и технологии
     "искусственный интеллект", "нейросеть", "нейросети",
     "machine learning", "ml", "ai", "large language model",
     "chatgpt", "gpt", "генеративный ии",
-
-    # законы и регулирование интернета
-    "новый закон об интернете", "штраф за vpn", "ограничение интернета",
-    "регулирование интернета", "экстремистский контент",
+    "новый закон об интернете", "штраф за vpn",
+    "ограничение интернета", "регулирование интернета",
+    "экстремистский контент",
 ]
 
 POSTED_FILE = "posted_articles.json"
@@ -74,6 +67,172 @@ def save_posted(article_id: str) -> None:
     posted_articles.add(article_id)
     with open(POSTED_FILE, "w", encoding="utf-8") as f:
         json.dump(list(posted_articles), f, ensure_ascii=False, indent=2)
+
+
+# ===== Утилиты парсинга =====
+def safe_get(url: str) -> str | None:
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=15)
+        if resp.status_code != 200:
+            print(f"HTTP {resp.status_code} для {url}")
+            return None
+        return resp.text
+    except Exception as e:
+        print(f"Ошибка при запросе {url}:", e)
+        return None
+
+
+def clean_text(text: str) -> str:
+    return " ".join(text.replace("\n", " ").replace("\r", " ").split())
+
+
+# ===== Парсинг 3DNews =====
+def load_3dnews():
+    url = "https://3dnews.ru/"
+    html = safe_get(url)
+    if not html:
+        return []
+
+    articles = []
+    # Очень упрощённый парсинг главного блока новостей
+    # Ищем куски вида: <a href="/...">Заголовок</a>
+    parts = html.split('<a href="/')
+    for part in parts[1:10]:  # первые несколько ссылок, чтобы не перебирать всё
+        href_end = part.find('"')
+        title_start = part.find(">")
+        title_end = part.find("</a>")
+        if href_end == -1 or title_start == -1 or title_end == -1:
+            continue
+
+        href = part[:href_end]
+        title = clean_text(part[title_start + 1:title_end])
+        if not title:
+            continue
+
+        link = "https://3dnews.ru/" + href.lstrip("/")
+        summary = ""  # 3DNews часто даёт длинные тексты, здесь берём только заголовок
+
+        articles.append(
+            {
+                "id": link,
+                "title": title,
+                "summary": summary,
+                "link": link,
+                "published_parsed": datetime.now(),
+            }
+        )
+
+    print("DEBUG: статей из 3DNews:", len(articles))
+    return articles
+
+
+# ===== Парсинг Хабра =====
+def load_habr():
+    url = "https://habr.com/ru/feed/"
+    html = safe_get(url)
+    if not html:
+        return []
+
+    articles = []
+    # Ищем блоки статей по тегу <article ...
+    chunks = html.split("<article")
+    for chunk in chunks[1:8]:
+        # Заголовок
+        title_marker = 'data-test-id="article-title-link"'
+        idx = chunk.find(title_marker)
+        if idx == -1:
+            continue
+        sub = chunk[idx:]
+        href_pos = sub.find('href="')
+        if href_pos == -1:
+            continue
+        href_start = href_pos + len('href="')
+        href_end = sub.find('"', href_start)
+        href = sub[href_start:href_end]
+
+        # Текст заголовка
+        title_start = sub.find(">", href_end) + 1
+        title_end = sub.find("</a>", title_start)
+        title = clean_text(sub[title_start:title_end])
+
+        link = "https://habr.com" + href
+        # Краткое описание: ищем первый <p> после заголовка
+        p_start = chunk.find("<p")
+        if p_start != -1:
+            p_start = chunk.find(">", p_start) + 1
+            p_end = chunk.find("</p>", p_start)
+            summary = clean_text(chunk[p_start:p_end])
+        else:
+            summary = ""
+
+        articles.append(
+            {
+                "id": link,
+                "title": title,
+                "summary": summary,
+                "link": link,
+                "published_parsed": datetime.now(),
+            }
+        )
+
+    print("DEBUG: статей из Хабра:", len(articles))
+    return articles
+
+
+# ===== Парсинг Tproger =====
+def load_tproger():
+    url = "https://tproger.ru/news"
+    html = safe_get(url)
+    if not html:
+        return []
+
+    articles = []
+    # Ищем карточки новостей по <a ... class="news-link" (упрощённо)
+    parts = html.split('<a ')
+    for part in parts[1:12]:
+        if "href=" not in part or "news" not in part:
+            continue
+
+        href_pos = part.find('href="')
+        href_start = href_pos + len('href="')
+        href_end = part.find('"', href_start)
+        href = part[href_start:href_end]
+
+        title_start = part.find(">", href_end) + 1
+        title_end = part.find("</a>", title_start)
+        title = clean_text(part[title_start:title_end])
+        if not title:
+            continue
+
+        if href.startswith("http"):
+            link = href
+        else:
+            link = "https://tproger.ru" + href
+
+        summary = ""  # на Tproger можно потом отдельно вытащить лид
+
+        articles.append(
+            {
+                "id": link,
+                "title": title,
+                "summary": summary,
+                "link": link,
+                "published_parsed": datetime.now(),
+            }
+        )
+
+    print("DEBUG: статей из Tproger:", len(articles))
+    return articles
+
+
+# ===== Сбор всех статей =====
+def load_articles_from_sites():
+    articles = []
+    articles.extend(load_3dnews())
+    articles.extend(load_habr())
+    articles.extend(load_tproger())
+    print("DEBUG: всего статей из сайтов:", len(articles))
+    return articles
 
 
 # ===== Фильтрация и выбор статьи =====
@@ -117,7 +276,7 @@ def short_summary(title: str, summary: str) -> str:
         "Сделай информативный новостной пост 4–6 предложений "
         "(~550–560 символов) по статье ниже. "
         "Добавь реализм и детализацию, не используй ссылки и хештеги.\n"
-        f"Заголовок: {title}\nКратко: {summary}"
+        f"Заголовок: {title}\nКратко: {summary or 'краткое описание отсутствует, сгенерируй сам по заголовку'}"
     )
     result = openai_client.chat.completions.create(
         model="gpt-4o-mini",
@@ -152,29 +311,29 @@ def get_img_from_dalle(title: str):
 
 # ===== Автопостинг =====
 async def autopost():
-    feeds = [feedparser.parse(url) for url in RSS_FEEDS]
-    articles = [entry for feed in feeds for entry in feed.entries]
+    articles = load_articles_from_sites()
 
-    print("DEBUG: len(feeds) =", len(feeds))
-    for i, feed in enumerate(feeds):
-        print(f"DEBUG FEED {i} status:", getattr(feed, "status", None))
-        print(f"DEBUG FEED {i} entries:", len(feed.entries))
-
-    print("DEBUG: всего статей в RSS:", len(articles))
+    if not articles:
+        print("Вообще нет статей, отправляем технический пост")
+        fallback_title = "Короткое техническое обновление"
+        fallback_summary = (
+            "Источники новостей временно не вернули ни одной статьи, "
+            "поэтому бот отправляет служебное сообщение."
+        )
+        news = short_summary(fallback_title, fallback_summary)
+        caption = f"{news}\n\n#Новости #Telegram #Канал"
+        await bot.send_message(CHANNEL_ID, caption)
+        return
 
     art = pick_article(articles)
 
-    # Fallback: если по ключам ничего не нашли — берём свежую статью
+    # Fallback: если по ключам ничего не нашли — берём самую свежую
     if not art and articles:
         print("Fallback: берём первую статью без фильтра")
-        art = sorted(
-            articles,
-            key=lambda e: e.get("published_parsed", datetime.now()),
-            reverse=True,
-        )[0]
+        art = articles[0]
 
     if not art:
-        print("Вообще нет статей в RSS")
+        print("Нет статей даже после fallback")
         return
 
     article_id = art.get("id", art.get("link", art.get("title")))
@@ -186,7 +345,6 @@ async def autopost():
     summary = art.get("summary", "")[:400]
     news = short_summary(title, summary)
 
-    # для хэштегов используем объединённый список
     all_keywords = STRONG_KEYWORDS + SOFT_KEYWORDS
     text_for_tags = (title + " " + summary).lower()
     hashtags = [
@@ -218,6 +376,12 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
 
 
 

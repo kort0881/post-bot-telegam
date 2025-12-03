@@ -16,6 +16,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
+print("DEBUG OPENAI KEY LEN:", len(OPENAI_API_KEY) if OPENAI_API_KEY else 0)
+
 bot = Bot(
     token=TELEGRAM_BOT_TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
@@ -94,10 +96,8 @@ def load_3dnews():
         return []
 
     articles = []
-    # Очень упрощённый парсинг главного блока новостей
-    # Ищем куски вида: <a href="/...">Заголовок</a>
     parts = html.split('<a href="/')
-    for part in parts[1:10]:  # первые несколько ссылок, чтобы не перебирать всё
+    for part in parts[1:10]:
         href_end = part.find('"')
         title_start = part.find(">")
         title_end = part.find("</a>")
@@ -110,7 +110,7 @@ def load_3dnews():
             continue
 
         link = "https://3dnews.ru/" + href.lstrip("/")
-        summary = ""  # 3DNews часто даёт длинные тексты, здесь берём только заголовок
+        summary = ""
 
         articles.append(
             {
@@ -134,10 +134,8 @@ def load_habr():
         return []
 
     articles = []
-    # Ищем блоки статей по тегу <article ...
     chunks = html.split("<article")
     for chunk in chunks[1:8]:
-        # Заголовок
         title_marker = 'data-test-id="article-title-link"'
         idx = chunk.find(title_marker)
         if idx == -1:
@@ -150,13 +148,12 @@ def load_habr():
         href_end = sub.find('"', href_start)
         href = sub[href_start:href_end]
 
-        # Текст заголовка
         title_start = sub.find(">", href_end) + 1
         title_end = sub.find("</a>", title_start)
         title = clean_text(sub[title_start:title_end])
 
         link = "https://habr.com" + href
-        # Краткое описание: ищем первый <p> после заголовка
+
         p_start = chunk.find("<p")
         if p_start != -1:
             p_start = chunk.find(">", p_start) + 1
@@ -187,7 +184,6 @@ def load_tproger():
         return []
 
     articles = []
-    # Ищем карточки новостей по <a ... class="news-link" (упрощённо)
     parts = html.split('<a ')
     for part in parts[1:12]:
         if "href=" not in part or "news" not in part:
@@ -209,7 +205,7 @@ def load_tproger():
         else:
             link = "https://tproger.ru" + href
 
-        summary = ""  # на Tproger можно потом отдельно вытащить лид
+        summary = ""
 
         articles.append(
             {
@@ -327,7 +323,6 @@ async def autopost():
 
     art = pick_article(articles)
 
-    # Fallback: если по ключам ничего не нашли — берём самую свежую
     if not art and articles:
         print("Fallback: берём первую статью без фильтра")
         art = articles[0]
@@ -377,10 +372,6 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
 
 
 

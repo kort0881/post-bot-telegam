@@ -8,6 +8,7 @@ from aiogram import Bot
 from aiogram.client.bot import DefaultBotProperties
 from aiogram.enums import ParseMode
 
+from openai import OpenAI
 from google import genai
 from google.genai import types
 
@@ -25,11 +26,7 @@ bot = Bot(
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
 )
 
-# OpenAI для текста
-from openai import OpenAI
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
-
-# Gemini для картинок
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 HEADERS = {
@@ -315,7 +312,7 @@ def short_summary(title: str, summary: str) -> str:
     return content[:650].rstrip()
 
 
-# ===== Генерация картинки (Gemini Imagen) =====
+# ===== Генерация картинки (Gemini) =====
 def get_img_from_gemini(title: str):
     prompt = (
         f"Реалистичное, детализированное изображение к новости: '{title}', "
@@ -324,21 +321,23 @@ def get_img_from_gemini(title: str):
     )
     try:
         print("DEBUG GEMINI PROMPT:", prompt[:200])
-        resp = gemini_client.models.generate_images(
+
+        resp = gemini_client.images.generate(
             model="imagen-4.0-generate-001",
             prompt=prompt,
             config=types.GenerateImagesConfig(number_of_images=1),
         )
-        if not resp.generated_images:
-            print("Gemini: пустой список generated_images")
+
+        if not getattr(resp, "images", None):
+            print("Gemini: пустой список images")
             return None
 
-        img = resp.generated_images[0].image
-        # image уже binary / PIL‑совместимый объект в SDK
+        img_data = resp.images[0].data
         tmp_path = f"temp_{int(datetime.now().timestamp())}.png"
         with open(tmp_path, "wb") as f:
-            f.write(img.bytes)
+            f.write(img_data)
         return tmp_path
+
     except Exception as e:
         print("Ошибка генерации картинки Gemini:", repr(e))
         return None
@@ -399,6 +398,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

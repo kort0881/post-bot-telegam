@@ -1,8 +1,8 @@
 aiogram==3.17.0
-feedparser==6.0.11
 openai==1.59.2
-pillow==11.0.0
 requests==2.32.3
-google-genai==0.3.0
+replicate
+
+
 
 

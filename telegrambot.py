@@ -63,8 +63,15 @@ SOFT_KEYWORDS = [
     "кибербезопасность", "информационная безопасность",
     "конфиденциальность в интернете", "privacy",
     "суверенный интернет", "ограничение интернета",
-    "онлайн-игра", "игровой сервис", "игровая платформа",
-    "гейминг", "игровые сервера",
+]
+
+# Исключаем игровые новости
+EXCLUDE_KEYWORDS = [
+    "игра", "игры", "game", "games", "геймплей", "gameplay",
+    "dungeon", "quest", "босс", "boss", "рейд", "raid",
+    "онлайн-игра", "игровой", "гейминг", "gaming",
+    "playstation", "xbox", "nintendo", "steam",
+    "шутер", "rpg", "mmorpg", "moba", "battle royale",
 ]
 
 POSTED_FILE = "posted_articles.json"
@@ -109,7 +116,7 @@ def load_3dnews():
 
     articles = []
     parts = html.split('<a href="/')
-    for part in parts[1:6]:  # ИЗМЕНЕНО: берём только 5 новостей
+    for part in parts[1:6]:
         href_end = part.find('"')
         title_start = part.find(">")
         title_end = part.find("</a>")
@@ -147,7 +154,7 @@ def load_habr():
 
     articles = []
     chunks = html.split("<article")
-    for chunk in chunks[1:6]:  # ИЗМЕНЕНО: берём только 5 новостей
+    for chunk in chunks[1:6]:
         title_marker = 'data-test-id="article-title-link"'
         idx = chunk.find(title_marker)
         if idx == -1:
@@ -197,7 +204,7 @@ def load_tproger():
 
     articles = []
     parts = html.split('<a ')
-    for part in parts[1:6]:  # ИЗМЕНЕНО: берём только 5 новостей
+    for part in parts[1:6]:
         if "href=" not in part or "news" not in part:
             continue
 
@@ -243,11 +250,15 @@ def load_articles_from_sites():
     return articles
 
 
-# ===== Фильтрация и выбор статьи =====
+# ===== Фильтрация и выбор статьи (БЕЗ ИГР) =====
 def filter_article(entry):
     title = entry.get("title", "")
     summary = entry.get("summary", "")
     text = (title + " " + summary).lower()
+
+    # ИСКЛЮЧАЕМ ИГРОВЫЕ НОВОСТИ
+    if any(kw.lower() in text for kw in EXCLUDE_KEYWORDS):
+        return None
 
     if any(kw.lower() in text for kw in STRONG_KEYWORDS):
         return "strong"
@@ -278,7 +289,7 @@ def pick_article(articles):
     return None
 
 
-# ===== Генерация текста (OpenAI) - УЛУЧШЕННАЯ =====
+# ===== Генерация текста (OpenAI) =====
 def short_summary(title: str, summary: str) -> str:
     prompt = (
         "Перепиши эту КОНКРЕТНУЮ новость в формат Telegram-поста.\n\n"
@@ -289,7 +300,7 @@ def short_summary(title: str, summary: str) -> str:
         "2) НЕ пиши абстрактно и обобщённо!\n"
         "3) Упоминай конкретные названия (компании, продукты, технологии, версии)!\n"
         "4) Если в новости есть цифры, даты, имена — обязательно используй их!\n"
-        "5) Основной текст должен быть 650-700 символов (без PS-строки).\n\n"
+        "5) Основной текст должен быть СТРОГО 650-700 символов (без PS-строки). Пиши развёрнуто и подробно!\n\n"
         "ФОРМАТ ПОСТА:\n"
         "- 4 строки основного текста\n"
         "- В начале каждой строки одна эмодзи и пробел\n"
@@ -311,7 +322,7 @@ def short_summary(title: str, summary: str) -> str:
     return content[:850].rstrip()
 
 
-# ===== Автопостинг (только текст) - С ОТЛАДКОЙ =====
+# ===== Автопостинг =====
 async def autopost():
     articles = load_articles_from_sites()
 
@@ -372,6 +383,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

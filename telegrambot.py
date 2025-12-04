@@ -150,54 +150,46 @@ def load_3dnews() -> List[Dict]:
     return articles
 
 
-# ===== VC.ru: RSS по нужным разделам, по 3 статьи с каждого =====
-VC_RU_FEEDS = {
-    "social": "https://vc.ru/rss/social",
-    "tech": "https://vc.ru/rss/tech",
-    "telegram": "https://vc.ru/rss/telegram",
-    "services": "https://vc.ru/rss/services",
-    "ai": "https://vc.ru/rss/ai",
-}
+# ===== VC.ru: одна общая RSS-лента =====
+VC_RU_FEED = "https://vc.ru/rss"
 
 
 def load_vcru_from_rss() -> List[Dict]:
     articles: List[Dict] = []
 
-    for section, feed_url in VC_RU_FEEDS.items():
-        print(f"Загружаем RSS VC.ru раздел {section}: {feed_url}")
-        try:
-            feed = feedparser.parse(feed_url)
-        except Exception as e:
-            print(f"Ошибка RSS {feed_url}: {e}")
+    print(f"Загружаем RSS VC.ru: {VC_RU_FEED}")
+    try:
+        feed = feedparser.parse(VC_RU_FEED)
+    except Exception as e:
+        print(f"Ошибка RSS {VC_RU_FEED}: {e}")
+        return articles
+
+    # Берём последние 10 записей
+    for entry in feed.entries[:10]:
+        link = entry.get("link", "")
+        title = clean_text(entry.get("title", "") or "")
+        summary = clean_text(
+            entry.get("summary", "") or entry.get("description", "") or ""
+        )[:400]
+
+        if not link or not title:
             continue
 
-        # Берём 3 последние записи из ленты
-        for entry in feed.entries[:3]:
-            link = entry.get("link", "")
-            title = clean_text(entry.get("title", "") or "")
-            summary = clean_text(
-                entry.get("summary", "") or entry.get("description", "") or ""
-            )[:400]
+        published_parsed = datetime.now()
+        if hasattr(entry, "published_parsed") and entry.published_parsed:
+            try:
+                published_parsed = datetime(*entry.published_parsed[:6])
+            except Exception:
+                pass
 
-            if not link or not title:
-                continue
-
-            # pubDate → datetime, если есть
-            published_parsed = datetime.now()
-            if hasattr(entry, "published_parsed") and entry.published_parsed:
-                try:
-                    published_parsed = datetime(*entry.published_parsed[:6])
-                except Exception:
-                    pass
-
-            articles.append({
-                "id": link,
-                "title": title,
-                "summary": summary,
-                "link": link,
-                "source": f"VC.ru/{section}",
-                "published_parsed": published_parsed,
-            })
+        articles.append({
+            "id": link,
+            "title": title,
+            "summary": summary,
+            "link": link,
+            "source": "VC.ru/rss",
+            "published_parsed": published_parsed,
+        })
 
     print(f"DEBUG: VC.ru RSS - {len(articles)} статей")
     return articles
@@ -400,6 +392,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

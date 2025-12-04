@@ -96,7 +96,7 @@ def safe_get(url: str) -> str | None:
 def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
 
-# ===== Парсинг =====
+# ===== Парсинг (ТОЛЬКО 3 НОВОСТИ) =====
 def load_3dnews():
     url = "https://3dnews.ru/"
     html = safe_get(url)
@@ -105,7 +105,7 @@ def load_3dnews():
 
     articles = []
     parts = html.split('<a href="/')
-    for part in parts[1:6]:
+    for part in parts[1:4]:  # ИЗМЕНЕНО: 1:4 вместо 1:6
         href_end = part.find('"')
         title_start = part.find(">")
         title_end = part.find("</a>")
@@ -134,10 +134,11 @@ def load_3dnews():
             "title": title,
             "summary": summary,
             "link": link,
+            "source": "3DNews",
             "published_parsed": datetime.now(),
         })
 
-    print("DEBUG: статей из 3DNews:", len(articles))
+    print(f"DEBUG: 3DNews - {len(articles)} статей")
     return articles
 
 def load_habr():
@@ -148,7 +149,7 @@ def load_habr():
 
     articles = []
     chunks = html.split("<article")
-    for chunk in chunks[1:6]:
+    for chunk in chunks[1:4]:  # ИЗМЕНЕНО: 1:4 вместо 1:6
         title_marker = 'data-test-id="article-title-link"'
         idx = chunk.find(title_marker)
         if idx == -1:
@@ -180,10 +181,11 @@ def load_habr():
             "title": title,
             "summary": summary,
             "link": link,
+            "source": "Habr",
             "published_parsed": datetime.now(),
         })
 
-    print("DEBUG: статей из Хабра:", len(articles))
+    print(f"DEBUG: Habr - {len(articles)} статей")
     return articles
 
 def load_tproger():
@@ -194,7 +196,7 @@ def load_tproger():
 
     articles = []
     parts = html.split('<a ')
-    for part in parts[1:6]:
+    for part in parts[1:4]:  # ИЗМЕНЕНО: 1:4 вместо 1:6
         if "href=" not in part or "news" not in part:
             continue
 
@@ -221,10 +223,11 @@ def load_tproger():
             "title": title,
             "summary": summary,
             "link": link,
+            "source": "Tproger",
             "published_parsed": datetime.now(),
         })
 
-    print("DEBUG: статей из Tproger:", len(articles))
+    print(f"DEBUG: Tproger - {len(articles)} статей")
     return articles
 
 def load_articles_from_sites():
@@ -232,7 +235,15 @@ def load_articles_from_sites():
     articles.extend(load_3dnews())
     articles.extend(load_habr())
     articles.extend(load_tproger())
-    print("DEBUG: всего статей:", len(articles))
+    
+    # ПОКАЗЫВАЕМ ВСЕ СПАРСЕННЫЕ СТАТЬИ
+    print(f"\n{'='*60}")
+    print(f"ВСЕГО СПАРСЕНО: {len(articles)} статей")
+    print(f"{'='*60}")
+    for i, art in enumerate(articles, 1):
+        print(f"{i}. [{art['source']}] {art['title'][:80]}")
+    print(f"{'='*60}\n")
+    
     return articles
 
 def filter_article(entry):
@@ -257,6 +268,13 @@ def pick_article(articles):
             continue
         score = 2 if level == "strong" else 1
         scored.append((score, e))
+
+    # ПОКАЗЫВАЕМ ПОДХОДЯЩИЕ СТАТЬИ
+    print(f"ПОДХОДЯЩИХ СТАТЕЙ: {len(scored)}")
+    for i, (score, art) in enumerate(scored[:5], 1):
+        level = "STRONG" if score == 2 else "SOFT"
+        print(f"{i}. [{level}] [{art['source']}] {art['title'][:80]}")
+    print(f"{'='*60}\n")
 
     if scored:
         scored.sort(
@@ -307,12 +325,11 @@ def generate_image_prompt(title: str, summary: str) -> str:
     )
     return result.choices[0].message.content.strip()[:200]
 
-# ===== POLLINATIONS.AI - Бесплатная генерация картинок =====
+# ===== Pollinations.ai =====
 def generate_image_pollinations(prompt: str) -> str | None:
     try:
         print(f"Генерация Pollinations: {prompt}")
         
-        # URL автоматически генерирует картинку
         url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}"
         params = {
             "width": "1024",
@@ -336,7 +353,7 @@ def generate_image_pollinations(prompt: str) -> str | None:
         print(f"❌ Ошибка генерации: {e}")
         return None
 
-# ===== Автопостинг с картинками =====
+# ===== Автопостинг =====
 async def autopost():
     articles = load_articles_from_sites()
 
@@ -357,17 +374,20 @@ async def autopost():
 
     title = art.get("title", "")
     summary = art.get("summary", "")[:400]
+    source = art.get("source", "")
+    link = art.get("link", "")
 
     print(f"\n{'='*60}")
     print(f"ВЫБРАНА: {title}")
+    print(f"ИСТОЧНИК: {source}")
     print(f"ОПИСАНИЕ: {summary}")
-    print(f"ССЫЛКА: {art.get('link')}")
+    print(f"ССЫЛКА: {link}")
     print(f"{'='*60}\n")
 
     news = short_summary(title, summary)
     print(f"ТЕКСТ ({len(news)} симв.):\n{news}\n{'='*60}\n")
 
-    # Генерация картинки через Pollinations
+    # Генерация картинки
     image_prompt = generate_image_prompt(title, summary)
     image_file = generate_image_pollinations(image_prompt)
 
@@ -396,6 +416,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

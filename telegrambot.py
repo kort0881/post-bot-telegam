@@ -7,15 +7,19 @@ import requests
 from aiogram import Bot
 from aiogram.client.bot import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import FSInputFile
 
 from openai import OpenAI
+import replicate
 
 # ===== Настройки =====
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
+REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 
 print("DEBUG OPENAI KEY LEN:", len(OPENAI_API_KEY) if OPENAI_API_KEY else 0)
+print("DEBUG REPLICATE KEY LEN:", len(REPLICATE_API_TOKEN) if REPLICATE_API_TOKEN else 0)
 
 bot = Bot(
     token=TELEGRAM_BOT_TOKEN,
@@ -23,6 +27,7 @@ bot = Bot(
 )
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
+os.environ["REPLICATE_API_TOKEN"] = REPLICATE_API_TOKEN
 
 HEADERS = {
     "User-Agent": (
@@ -33,7 +38,6 @@ HEADERS = {
 
 # ===== Ключевые слова =====
 STRONG_KEYWORDS = [
-    # VPN / обход / цензура
     "vpn", "впн", "прокси", "proxy", "tor", "shadowsocks",
     "wireguard", "openvpn", "ikev2",
     "обход блокировок", "обход цензуры", "анонимность",
@@ -42,13 +46,9 @@ STRONG_KEYWORDS = [
     "блокировка сайтов", "блокировка ресурса",
     "реестр запрещенных сайтов", "ограничение доступа",
     "фильтрация трафика", "dpi", "deep packet inspection",
-
-    # мессенджеры / соцсети
     "телеграм", "telegram",
     "whatsapp", "signal", "viber",
     "messenger", "мессенджер",
-
-    # технологии и софт
     "обновление безопасности", "патч безопасности",
     "антивирус", "firewall", "фаервол",
     "браузер", "браузер tor",
@@ -65,7 +65,6 @@ SOFT_KEYWORDS = [
     "суверенный интернет", "ограничение интернета",
 ]
 
-# Исключаем игровые новости
 EXCLUDE_KEYWORDS = [
     "игра", "игры", "game", "games", "геймплей", "gameplay",
     "dungeon", "quest", "босс", "boss", "рейд", "raid",
@@ -76,21 +75,17 @@ EXCLUDE_KEYWORDS = [
 
 POSTED_FILE = "posted_articles.json"
 
-# ===== Работа с уже опубликованными постами =====
 if os.path.exists(POSTED_FILE):
     with open(POSTED_FILE, "r", encoding="utf-8") as f:
         posted_articles = set(json.load(f))
 else:
     posted_articles = set()
 
-
 def save_posted(article_id: str) -> None:
     posted_articles.add(article_id)
     with open(POSTED_FILE, "w", encoding="utf-8") as f:
         json.dump(list(posted_articles), f, ensure_ascii=False, indent=2)
 
-
-# ===== Утилиты парсинга =====
 def safe_get(url: str) -> str | None:
     try:
         resp = requests.get(url, headers=HEADERS, timeout=15)
@@ -102,12 +97,10 @@ def safe_get(url: str) -> str | None:
         print(f"Ошибка при запросе {url}:", e)
         return None
 
-
 def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
 
-
-# ===== Парсинг 3DNews =====
+# ===== УЛУЧШЕННЫЙ парсинг с описанием =====
 def load_3dnews():
     url = "https://3dnews.ru/"
     html = safe_get(url)
@@ -129,23 +122,29 @@ def load_3dnews():
             continue
 
         link = "https://3dnews.ru/" + href.lstrip("/")
+        
+        # УЛУЧШЕНИЕ: Парсим краткое описание
         summary = ""
+        desc_start = part.find('class="')
+        if desc_start != -1:
+            desc_chunk = part[desc_start:desc_start+500]
+            p_start = desc_chunk.find(">")
+            if p_start != -1:
+                p_end = desc_chunk.find("</", p_start)
+                if p_end != -1:
+                    summary = clean_text(desc_chunk[p_start+1:p_end])[:300]
 
-        articles.append(
-            {
-                "id": link,
-                "title": title,
-                "summary": summary,
-                "link": link,
-                "published_parsed": datetime.now(),
-            }
-        )
+        articles.append({
+            "id": link,
+            "title": title,
+            "summary": summary,
+            "link": link,
+            "published_parsed": datetime.now(),
+        })
 
     print("DEBUG: статей из 3DNews:", len(articles))
     return articles
 
-
-# ===== Парсинг Хабра =====
 def load_habr():
     url = "https://habr.com/ru/feed/"
     html = safe_get(url)
@@ -177,25 +176,21 @@ def load_habr():
         if p_start != -1:
             p_start = chunk.find(">", p_start) + 1
             p_end = chunk.find("</p>", p_start)
-            summary = clean_text(chunk[p_start:p_end])
+            summary = clean_text(chunk[p_start:p_end])[:300]
         else:
             summary = ""
 
-        articles.append(
-            {
-                "id": link,
-                "title": title,
-                "summary": summary,
-                "link": link,
-                "published_parsed": datetime.now(),
-            }
-        )
+        articles.append({
+            "id": link,
+            "title": title,
+            "summary": summary,
+            "link": link,
+            "published_parsed": datetime.now(),
+        })
 
     print("DEBUG: статей из Хабра:", len(articles))
     return articles
 
-
-# ===== Парсинг Tproger =====
 def load_tproger():
     url = "https://tproger.ru/news"
     html = safe_get(url)
@@ -226,21 +221,17 @@ def load_tproger():
 
         summary = ""
 
-        articles.append(
-            {
-                "id": link,
-                "title": title,
-                "summary": summary,
-                "link": link,
-                "published_parsed": datetime.now(),
-            }
-        )
+        articles.append({
+            "id": link,
+            "title": title,
+            "summary": summary,
+            "link": link,
+            "published_parsed": datetime.now(),
+        })
 
     print("DEBUG: статей из Tproger:", len(articles))
     return articles
 
-
-# ===== Сбор всех статей =====
 def load_articles_from_sites():
     articles = []
     articles.extend(load_3dnews())
@@ -249,14 +240,11 @@ def load_articles_from_sites():
     print("DEBUG: всего статей из сайтов:", len(articles))
     return articles
 
-
-# ===== Фильтрация и выбор статьи (БЕЗ ИГР) =====
 def filter_article(entry):
     title = entry.get("title", "")
     summary = entry.get("summary", "")
     text = (title + " " + summary).lower()
 
-    # ИСКЛЮЧАЕМ ИГРОВЫЕ НОВОСТИ
     if any(kw.lower() in text for kw in EXCLUDE_KEYWORDS):
         return None
 
@@ -265,7 +253,6 @@ def filter_article(entry):
     if any(kw.lower() in text for kw in SOFT_KEYWORDS):
         return "soft"
     return None
-
 
 def pick_article(articles):
     scored = []
@@ -278,111 +265,144 @@ def pick_article(articles):
 
     if scored:
         scored.sort(
-            key=lambda x: (
-                x[0],
-                x[1].get("published_parsed", datetime.now()),
-            ),
+            key=lambda x: (x[0], x[1].get("published_parsed", datetime.now())),
             reverse=True,
         )
         return scored[0][1]
-
     return None
 
-
-# ===== Генерация текста (OpenAI) =====
+# ===== УЛУЧШЕННЫЙ промпт для конкретики =====
 def short_summary(title: str, summary: str) -> str:
     prompt = (
-        "Перепиши эту КОНКРЕТНУЮ новость в формат Telegram-поста.\n\n"
-        f"ЗАГОЛОВОК НОВОСТИ: {title}\n"
-        f"ОПИСАНИЕ НОВОСТИ: {summary or 'отсутствует, используй только заголовок'}\n\n"
-        "СТРОГИЕ ТРЕБОВАНИЯ:\n"
-        "1) Используй ТОЛЬКО реальные факты из заголовка и описания выше!\n"
-        "2) НЕ пиши абстрактно и обобщённо!\n"
-        "3) Упоминай конкретные названия (компании, продукты, технологии, версии)!\n"
-        "4) Если в новости есть цифры, даты, имена — обязательно используй их!\n"
-        "5) Основной текст должен быть СТРОГО 650-700 символов (без PS-строки). Пиши развёрнуто и подробно!\n\n"
-        "ФОРМАТ ПОСТА:\n"
-        "- 4 строки основного текста\n"
-        "- В начале каждой строки одна эмодзи и пробел\n"
-        "- Структура строк:\n"
-        "  Строка 1: ЧТО именно произошло (конкретная компания/продукт/событие)\n"
-        "  Строка 2: Какая была проблема или что было раньше (конкретные детали)\n"
-        "  Строка 3: Что конкретно улучшилось/изменилось (факты, цифры, функции)\n"
-        "  Строка 4: Почему это важно для пользователей (практическая польза)\n"
-        "- После 4-й строки: одна пустая строка\n"
-        "- Затем строка: PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6\n\n"
-        "НИКАКИХ хештегов, никаких других ссылок, никаких дополнительных строк!\n"
-        "Верни только готовый текст поста."
+        f"Ты — редактор технического Telegram-канала. Перепиши новость в формат поста.\n\n"
+        f"ОРИГИНАЛЬНАЯ НОВОСТЬ:\n"
+        f"Заголовок: {title}\n"
+        f"Описание: {summary if summary else 'отсутствует — используй только заголовок'}\n\n"
+        f"КРИТИЧЕСКИ ВАЖНО:\n"
+        f"1) Используй ТОЛЬКО факты из оригинальной новости! Если в заголовке написано 'Компания X выпустила продукт Y' — пиши ИМЕННО 'Компания X', ИМЕННО 'продукт Y'!\n"
+        f"2) НЕ заменяй названия на общие слова ('компания', 'сервис', 'приложение'). Всегда указывай КОНКРЕТНОЕ название!\n"
+        f"3) Если есть версия (4.0, v2.5 и т.п.) — обязательно упоминай её!\n"
+        f"4) Если есть цифры (30%, 2 млн пользователей) — используй их!\n"
+        f"5) Если в новости нет конкретных деталей — НЕ выдумывай, просто перескажи факты!\n"
+        f"6) Текст должен быть 650-700 символов (без PS-строки).\n\n"
+        f"ФОРМАТ ПОСТА:\n"
+        f"- 4 строки, каждая начинается с эмодзи + пробел\n"
+        f"- Строка 1: ЧТО произошло (компания/продукт/событие)\n"
+        f"- Строка 2: Какая была проблема раньше\n"
+        f"- Строка 3: Что улучшилось (конкретные факты)\n"
+        f"- Строка 4: Почему это важно\n"
+        f"- После 4-й строки: пустая строка\n"
+        f"- Затем: PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6\n\n"
+        f"Верни ТОЛЬКО текст поста, без комментариев!"
     )
     result = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
     )
-    content = result.choices[0].message.content.strip()
-    return content[:850].rstrip()
+    return result.choices[0].message.content.strip()[:850]
 
+# ===== Генерация промпта для картинки =====
+def generate_image_prompt(title: str, summary: str) -> str:
+    prompt = (
+        f"Create a short image prompt for: {title}. "
+        f"Style: cinematic realistic, dramatic lighting, dark tech atmosphere, high detail. "
+        f"Focus on technology/cybersecurity/internet themes. No text, no logos. Max 250 chars."
+    )
+    result = openai_client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return result.choices[0].message.content.strip()[:250]
+
+# ===== Генерация картинки Flux =====
+def generate_image_flux(prompt: str) -> str | None:
+    try:
+        print(f"Генерация Flux: {prompt}")
+        output = replicate.run(
+            "black-forest-labs/flux-schnell",
+            input={
+                "prompt": prompt,
+                "aspect_ratio": "1:1",
+                "output_format": "png",
+                "output_quality": 90,
+            }
+        )
+        
+        image_url = str(output[0]) if isinstance(output, list) else str(output)
+        
+        img_response = requests.get(image_url, timeout=60)
+        if img_response.status_code == 200:
+            filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            with open(filename, "wb") as f:
+                f.write(img_response.content)
+            print(f"✅ Картинка: {filename}")
+            return filename
+        return None
+    except Exception as e:
+        print(f"❌ Ошибка Flux: {e}")
+        return None
 
 # ===== Автопостинг =====
 async def autopost():
     articles = load_articles_from_sites()
 
     if not articles:
-        print("Вообще нет статей, пост пропущен")
+        print("Нет статей")
         return
 
     art = pick_article(articles)
 
     if not art:
-        print("Нет подходящих статей по тематике (VPN/интернет/софт), пост пропущен")
+        print("Нет подходящих статей")
         return
 
-    article_id = art.get("id", art.get("link", art.get("title")))
+    article_id = art.get("id", art.get("link"))
     if article_id in posted_articles:
-        print("Эта статья уже была опубликована")
+        print("Уже была опубликована")
         return
 
     title = art.get("title", "")
     summary = art.get("summary", "")[:400]
 
-    # ОТЛАДОЧНЫЙ ВЫВОД
     print(f"\n{'='*60}")
-    print(f"ВЫБРАНА НОВОСТЬ:")
-    print(f"Заголовок: {title}")
-    print(f"Описание: {summary}")
-    print(f"Ссылка: {art.get('link')}")
+    print(f"ВЫБРАНА: {title}")
+    print(f"ОПИСАНИЕ: {summary}")
+    print(f"ССЫЛКА: {art.get('link')}")
     print(f"{'='*60}\n")
 
     news = short_summary(title, summary)
+    print(f"ТЕКСТ ({len(news)} симв.):\n{news}\n{'='*60}\n")
 
-    # ВЫВОД СГЕНЕРИРОВАННОГО ТЕКСТА
-    print(f"СГЕНЕРИРОВАННЫЙ ТЕКСТ ({len(news)} символов):")
-    print(news)
-    print(f"{'='*60}\n")
+    # Генерация картинки
+    image_prompt = generate_image_prompt(title, summary)
+    image_file = generate_image_flux(image_prompt)
 
     all_keywords = STRONG_KEYWORDS + SOFT_KEYWORDS
     text_for_tags = (title + " " + summary).lower()
-    hashtags = [
-        f"#{kw.replace(' ', '')}"
-        for kw in all_keywords
-        if kw.lower() in text_for_tags
-    ]
+    hashtags = [f"#{kw.replace(' ', '')}" for kw in all_keywords if kw.lower() in text_for_tags]
     hashtags += ["#Новости", "#Telegram", "#Канал"]
 
     caption = f"{news}\n\n{' '.join(hashtags)}"
 
-    await bot.send_message(CHANNEL_ID, caption)
+    # Отправка
+    if image_file and os.path.exists(image_file):
+        photo = FSInputFile(image_file)
+        await bot.send_photo(CHANNEL_ID, photo=photo, caption=caption)
+        os.remove(image_file)
+        print("✅ Пост с картинкой отправлен!")
+    else:
+        await bot.send_message(CHANNEL_ID, caption)
+        print("⚠️ Пост без картинки")
 
     save_posted(article_id)
-    print("[OK]", datetime.now(), "-", title)
+    print(f"[OK] {datetime.now()}")
 
-
-# ===== Основная функция =====
 async def main():
     await autopost()
 
-
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

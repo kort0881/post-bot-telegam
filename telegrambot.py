@@ -96,7 +96,7 @@ def safe_get(url: str) -> str | None:
 def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
 
-# ===== Парсинг (ТОЛЬКО 3 НОВОСТИ) =====
+# ===== Парсинг 3DNews =====
 def load_3dnews():
     url = "https://3dnews.ru/"
     html = safe_get(url)
@@ -105,7 +105,7 @@ def load_3dnews():
 
     articles = []
     parts = html.split('<a href="/')
-    for part in parts[1:4]:  # ИЗМЕНЕНО: 1:4 вместо 1:6
+    for part in parts[1:6]:  # Берём 5 новостей
         href_end = part.find('"')
         title_start = part.find(">")
         title_end = part.find("</a>")
@@ -141,100 +141,76 @@ def load_3dnews():
     print(f"DEBUG: 3DNews - {len(articles)} статей")
     return articles
 
-def load_habr():
-    url = "https://habr.com/ru/feed/"
+# ===== Парсинг VC.ru =====
+def load_vcru():
+    url = "https://vc.ru/tech"
     html = safe_get(url)
     if not html:
         return []
 
     articles = []
-    chunks = html.split("<article")
-    for chunk in chunks[1:4]:  # ИЗМЕНЕНО: 1:4 вместо 1:6
-        title_marker = 'data-test-id="article-title-link"'
-        idx = chunk.find(title_marker)
-        if idx == -1:
+    # VC.ru использует структуру с классом content-title
+    parts = html.split('content-title')
+    
+    for part in parts[1:6]:  # Берём 5 новостей
+        # Ищем ссылку
+        href_start = part.find('href="')
+        if href_start == -1:
             continue
-        sub = chunk[idx:]
-        href_pos = sub.find('href="')
-        if href_pos == -1:
-            continue
-        href_start = href_pos + len('href="')
-        href_end = sub.find('"', href_start)
-        href = sub[href_start:href_end]
-
-        title_start = sub.find(">", href_end) + 1
-        title_end = sub.find("</a>", title_start)
-        title = clean_text(sub[title_start:title_end])
-
-        link = "https://habr.com" + href
-
-        p_start = chunk.find("<p")
-        if p_start != -1:
-            p_start = chunk.find(">", p_start) + 1
-            p_end = chunk.find("</p>", p_start)
-            summary = clean_text(chunk[p_start:p_end])[:300]
-        else:
-            summary = ""
-
-        articles.append({
-            "id": link,
-            "title": title,
-            "summary": summary,
-            "link": link,
-            "source": "Habr",
-            "published_parsed": datetime.now(),
-        })
-
-    print(f"DEBUG: Habr - {len(articles)} статей")
-    return articles
-
-def load_tproger():
-    url = "https://tproger.ru/news"
-    html = safe_get(url)
-    if not html:
-        return []
-
-    articles = []
-    parts = html.split('<a ')
-    for part in parts[1:4]:  # ИЗМЕНЕНО: 1:4 вместо 1:6
-        if "href=" not in part or "news" not in part:
-            continue
-
-        href_pos = part.find('href="')
-        href_start = href_pos + len('href="')
+        href_start += len('href="')
         href_end = part.find('"', href_start)
-        href = part[href_start:href_end]
-
-        title_start = part.find(">", href_end) + 1
-        title_end = part.find("</a>", title_start)
-        title = clean_text(part[title_start:title_end])
-        if not title:
+        if href_end == -1:
             continue
-
-        if href.startswith("http"):
+        href = part[href_start:href_end]
+        
+        # Ищем заголовок
+        title_start = part.find('>', href_end)
+        if title_start == -1:
+            continue
+        title_start += 1
+        title_end = part.find('</a>', title_start)
+        if title_end == -1:
+            continue
+        title = clean_text(part[title_start:title_end])
+        if not title or len(title) < 10:
+            continue
+        
+        # Формируем полную ссылку
+        if href.startswith('http'):
             link = href
+        elif href.startswith('/'):
+            link = "https://vc.ru" + href
         else:
-            link = "https://tproger.ru" + href
-
+            link = "https://vc.ru/" + href
+        
+        # Описание (краткое)
         summary = ""
-
+        desc_marker = 'content-description'
+        desc_pos = part.find(desc_marker)
+        if desc_pos != -1:
+            desc_chunk = part[desc_pos:desc_pos+500]
+            p_start = desc_chunk.find('>')
+            if p_start != -1:
+                p_end = desc_chunk.find('</div>', p_start)
+                if p_end != -1:
+                    summary = clean_text(desc_chunk[p_start+1:p_end])[:300]
+        
         articles.append({
             "id": link,
             "title": title,
             "summary": summary,
             "link": link,
-            "source": "Tproger",
+            "source": "VC.ru",
             "published_parsed": datetime.now(),
         })
 
-    print(f"DEBUG: Tproger - {len(articles)} статей")
+    print(f"DEBUG: VC.ru - {len(articles)} статей")
     return articles
 
 def load_articles_from_sites():
     articles = []
     articles.extend(load_3dnews())
-    articles.extend(load_habr())
-    articles.extend(load_tproger())
+    articles.extend(load_vcru())
     
     # ПОКАЗЫВАЕМ ВСЕ СПАРСЕННЫЕ СТАТЬИ
     print(f"\n{'='*60}")
@@ -416,6 +392,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

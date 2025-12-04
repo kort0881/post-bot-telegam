@@ -200,7 +200,6 @@ def load_articles_from_sites() -> List[Dict]:
     articles.extend(load_3dnews())
     articles.extend(load_vcru_from_rss())
 
-    # ПОКАЗЫВАЕМ ВСЕ СПАРСЕННЫЕ СТАТЬИ
     print(f"\n{'=' * 60}")
     print(f"ВСЕГО СПАРСЕНО: {len(articles)} статей")
     print(f"{'=' * 60}")
@@ -229,13 +228,18 @@ def filter_article(entry: Dict) -> Optional[str]:
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
     scored = []
     for e in articles:
+        # пропускаем уже опубликованные статьи
+        article_id = e.get("id", e.get("link"))
+        if article_id in posted_articles:
+            continue
+
         level = filter_article(e)
         if not level:
             continue
+
         score = 2 if level == "strong" else 1
         scored.append((score, e))
 
-    # ПОКАЗЫВАЕМ ПОДХОДЯЩИЕ СТАТЬИ
     print(f"ПОДХОДЯЩИХ СТАТЕЙ: {len(scored)}")
     for i, (score, art) in enumerate(scored[:5], 1):
         level = "STRONG" if score == 2 else "SOFT"
@@ -251,6 +255,7 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
             reverse=True,
         )
         return scored[0][1]
+
     return None
 
 
@@ -341,9 +346,6 @@ async def autopost():
         return
 
     article_id = art.get("id", art.get("link"))
-    if article_id in posted_articles:
-        print("Уже была опубликована")
-        return
 
     title = art.get("title", "")
     summary = art.get("summary", "")[:400]
@@ -392,6 +394,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

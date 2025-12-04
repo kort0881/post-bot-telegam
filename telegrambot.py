@@ -7,19 +7,15 @@ import requests
 from aiogram import Bot
 from aiogram.client.bot import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import FSInputFile
 
 from openai import OpenAI
-import replicate
 
 # ===== Настройки =====
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
-REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 
 print("DEBUG OPENAI KEY LEN:", len(OPENAI_API_KEY) if OPENAI_API_KEY else 0)
-print("DEBUG REPLICATE KEY LEN:", len(REPLICATE_API_TOKEN) if REPLICATE_API_TOKEN else 0)
 
 bot = Bot(
     token=TELEGRAM_BOT_TOKEN,
@@ -27,7 +23,6 @@ bot = Bot(
 )
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
-os.environ["REPLICATE_API_TOKEN"] = REPLICATE_API_TOKEN
 
 HEADERS = {
     "User-Agent": (
@@ -100,7 +95,7 @@ def safe_get(url: str) -> str | None:
 def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
 
-# ===== УЛУЧШЕННЫЙ парсинг с описанием =====
+# ===== Парсинг с описанием =====
 def load_3dnews():
     url = "https://3dnews.ru/"
     html = safe_get(url)
@@ -123,7 +118,6 @@ def load_3dnews():
 
         link = "https://3dnews.ru/" + href.lstrip("/")
         
-        # УЛУЧШЕНИЕ: Парсим краткое описание
         summary = ""
         desc_start = part.find('class="')
         if desc_start != -1:
@@ -271,78 +265,35 @@ def pick_article(articles):
         return scored[0][1]
     return None
 
-# ===== УЛУЧШЕННЫЙ промпт для конкретики =====
+# ===== ИСПРАВЛЕННЫЙ промпт =====
 def short_summary(title: str, summary: str) -> str:
+    news_text = f"{title}. {summary}" if summary else title
+    
     prompt = (
-        f"Ты — редактор технического Telegram-канала. Перепиши новость в формат поста.\n\n"
-        f"ОРИГИНАЛЬНАЯ НОВОСТЬ:\n"
-        f"Заголовок: {title}\n"
-        f"Описание: {summary if summary else 'отсутствует — используй только заголовок'}\n\n"
-        f"КРИТИЧЕСКИ ВАЖНО:\n"
-        f"1) Используй ТОЛЬКО факты из оригинальной новости! Если в заголовке написано 'Компания X выпустила продукт Y' — пиши ИМЕННО 'Компания X', ИМЕННО 'продукт Y'!\n"
-        f"2) НЕ заменяй названия на общие слова ('компания', 'сервис', 'приложение'). Всегда указывай КОНКРЕТНОЕ название!\n"
-        f"3) Если есть версия (4.0, v2.5 и т.п.) — обязательно упоминай её!\n"
-        f"4) Если есть цифры (30%, 2 млн пользователей) — используй их!\n"
-        f"5) Если в новости нет конкретных деталей — НЕ выдумывай, просто перескажи факты!\n"
-        f"6) Текст должен быть 650-700 символов (без PS-строки).\n\n"
-        f"ФОРМАТ ПОСТА:\n"
-        f"- 4 строки, каждая начинается с эмодзи + пробел\n"
-        f"- Строка 1: ЧТО произошло (компания/продукт/событие)\n"
-        f"- Строка 2: Какая была проблема раньше\n"
-        f"- Строка 3: Что улучшилось (конкретные факты)\n"
-        f"- Строка 4: Почему это важно\n"
-        f"- После 4-й строки: пустая строка\n"
-        f"- Затем: PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6\n\n"
-        f"Верни ТОЛЬКО текст поста, без комментариев!"
+        f"Перепиши эту техническую новость в стиле Telegram-канала:\n\n"
+        f"{news_text}\n\n"
+        f"ПРАВИЛА:\n"
+        f"1. Пиши КОНКРЕТНО — если упомянуто название компании/продукта, используй его! НЕ пиши 'Компания X' или 'Продукт Y'.\n"
+        f"2. Если есть версии, цифры, проценты — обязательно указывай.\n"
+        f"3. Пиши простым языком, без канцелярита.\n"
+        f"4. Объём: 650-700 символов (без PS).\n"
+        f"5. Формат:\n"
+        f"   [эмодзи] Строка 1: что произошло\n"
+        f"   [эмодзи] Строка 2: какая была проблема\n"
+        f"   [эмодзи] Строка 3: что улучшилось\n"
+        f"   [эмодзи] Строка 4: зачем это нужно\n"
+        f"   \n"
+        f"   PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6\n\n"
+        f"Верни только текст поста!"
     )
+    
     result = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
     )
     return result.choices[0].message.content.strip()[:850]
 
-# ===== Генерация промпта для картинки =====
-def generate_image_prompt(title: str, summary: str) -> str:
-    prompt = (
-        f"Create a short image prompt for: {title}. "
-        f"Style: cinematic realistic, dramatic lighting, dark tech atmosphere, high detail. "
-        f"Focus on technology/cybersecurity/internet themes. No text, no logos. Max 250 chars."
-    )
-    result = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return result.choices[0].message.content.strip()[:250]
-
-# ===== Генерация картинки Flux =====
-def generate_image_flux(prompt: str) -> str | None:
-    try:
-        print(f"Генерация Flux: {prompt}")
-        output = replicate.run(
-            "black-forest-labs/flux-schnell",
-            input={
-                "prompt": prompt,
-                "aspect_ratio": "1:1",
-                "output_format": "png",
-                "output_quality": 90,
-            }
-        )
-        
-        image_url = str(output[0]) if isinstance(output, list) else str(output)
-        
-        img_response = requests.get(image_url, timeout=60)
-        if img_response.status_code == 200:
-            filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            with open(filename, "wb") as f:
-                f.write(img_response.content)
-            print(f"✅ Картинка: {filename}")
-            return filename
-        return None
-    except Exception as e:
-        print(f"❌ Ошибка Flux: {e}")
-        return None
-
-# ===== Автопостинг =====
+# ===== Автопостинг БЕЗ картинок =====
 async def autopost():
     articles = load_articles_from_sites()
 
@@ -373,10 +324,6 @@ async def autopost():
     news = short_summary(title, summary)
     print(f"ТЕКСТ ({len(news)} симв.):\n{news}\n{'='*60}\n")
 
-    # Генерация картинки
-    image_prompt = generate_image_prompt(title, summary)
-    image_file = generate_image_flux(image_prompt)
-
     all_keywords = STRONG_KEYWORDS + SOFT_KEYWORDS
     text_for_tags = (title + " " + summary).lower()
     hashtags = [f"#{kw.replace(' ', '')}" for kw in all_keywords if kw.lower() in text_for_tags]
@@ -384,15 +331,8 @@ async def autopost():
 
     caption = f"{news}\n\n{' '.join(hashtags)}"
 
-    # Отправка
-    if image_file and os.path.exists(image_file):
-        photo = FSInputFile(image_file)
-        await bot.send_photo(CHANNEL_ID, photo=photo, caption=caption)
-        os.remove(image_file)
-        print("✅ Пост с картинкой отправлен!")
-    else:
-        await bot.send_message(CHANNEL_ID, caption)
-        print("⚠️ Пост без картинки")
+    await bot.send_message(CHANNEL_ID, caption)
+    print("✅ Пост отправлен")
 
     save_posted(article_id)
     print(f"[OK] {datetime.now()}")
@@ -402,6 +342,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

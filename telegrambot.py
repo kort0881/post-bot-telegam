@@ -2,8 +2,10 @@ import os
 import json
 import asyncio
 from datetime import datetime
+from typing import List, Dict, Optional
 
 import requests
+import feedparser  # pip install feedparser
 from aiogram import Bot
 from aiogram.client.bot import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -77,12 +79,14 @@ if os.path.exists(POSTED_FILE):
 else:
     posted_articles = set()
 
+
 def save_posted(article_id: str) -> None:
     posted_articles.add(article_id)
     with open(POSTED_FILE, "w", encoding="utf-8") as f:
         json.dump(list(posted_articles), f, ensure_ascii=False, indent=2)
 
-def safe_get(url: str) -> str | None:
+
+def safe_get(url: str) -> Optional[str]:
     try:
         resp = requests.get(url, headers=HEADERS, timeout=15)
         if resp.status_code != 200:
@@ -93,19 +97,23 @@ def safe_get(url: str) -> str | None:
         print(f"Ошибка при запросе {url}:", e)
         return None
 
+
 def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
 
-# ===== Парсинг 3DNews =====
-def load_3dnews():
+
+# ===== Парсинг 3DNews (HTML, последние 3) =====
+def load_3dnews() -> List[Dict]:
     url = "https://3dnews.ru/"
     html = safe_get(url)
     if not html:
         return []
 
-    articles = []
+    articles: List[Dict] = []
     parts = html.split('<a href="/')
-    for part in parts[1:6]:  # Берём 5 новостей
+
+    # Берём 3 статьи
+    for part in parts[1:4]:
         href_end = part.find('"')
         title_start = part.find(">")
         title_end = part.find("</a>")
@@ -118,16 +126,16 @@ def load_3dnews():
             continue
 
         link = "https://3dnews.ru/" + href.lstrip("/")
-        
+
         summary = ""
         desc_start = part.find('class="')
         if desc_start != -1:
-            desc_chunk = part[desc_start:desc_start+500]
+            desc_chunk = part[desc_start:desc_start + 500]
             p_start = desc_chunk.find(">")
             if p_start != -1:
                 p_end = desc_chunk.find("</", p_start)
                 if p_end != -1:
-                    summary = clean_text(desc_chunk[p_start+1:p_end])[:300]
+                    summary = clean_text(desc_chunk[p_start + 1:p_end])[:300]
 
         articles.append({
             "id": link,
@@ -141,88 +149,77 @@ def load_3dnews():
     print(f"DEBUG: 3DNews - {len(articles)} статей")
     return articles
 
-# ===== Парсинг VC.ru =====
-def load_vcru():
-    url = "https://vc.ru/tech"
-    html = safe_get(url)
-    if not html:
-        return []
 
-    articles = []
-    # VC.ru использует структуру с классом content-title
-    parts = html.split('content-title')
-    
-    for part in parts[1:6]:  # Берём 5 новостей
-        # Ищем ссылку
-        href_start = part.find('href="')
-        if href_start == -1:
-            continue
-        href_start += len('href="')
-        href_end = part.find('"', href_start)
-        if href_end == -1:
-            continue
-        href = part[href_start:href_end]
-        
-        # Ищем заголовок
-        title_start = part.find('>', href_end)
-        if title_start == -1:
-            continue
-        title_start += 1
-        title_end = part.find('</a>', title_start)
-        if title_end == -1:
-            continue
-        title = clean_text(part[title_start:title_end])
-        if not title or len(title) < 10:
-            continue
-        
-        # Формируем полную ссылку
-        if href.startswith('http'):
-            link = href
-        elif href.startswith('/'):
-            link = "https://vc.ru" + href
-        else:
-            link = "https://vc.ru/" + href
-        
-        # Описание (краткое)
-        summary = ""
-        desc_marker = 'content-description'
-        desc_pos = part.find(desc_marker)
-        if desc_pos != -1:
-            desc_chunk = part[desc_pos:desc_pos+500]
-            p_start = desc_chunk.find('>')
-            if p_start != -1:
-                p_end = desc_chunk.find('</div>', p_start)
-                if p_end != -1:
-                    summary = clean_text(desc_chunk[p_start+1:p_end])[:300]
-        
-        articles.append({
-            "id": link,
-            "title": title,
-            "summary": summary,
-            "link": link,
-            "source": "VC.ru",
-            "published_parsed": datetime.now(),
-        })
+# ===== VC.ru: RSS по нужным разделам, по 3 статьи с каждого =====
+VC_RU_FEEDS = {
+    "social": "https://vc.ru/rss/social",
+    "tech": "https://vc.ru/rss/tech",
+    "telegram": "https://vc.ru/rss/telegram",
+    "services": "https://vc.ru/rss/services",
+    "ai": "https://vc.ru/rss/ai",
+}
 
-    print(f"DEBUG: VC.ru - {len(articles)} статей")
+
+def load_vcru_from_rss() -> List[Dict]:
+    articles: List[Dict] = []
+
+    for section, feed_url in VC_RU_FEEDS.items():
+        print(f"Загружаем RSS VC.ru раздел {section}: {feed_url}")
+        try:
+            feed = feedparser.parse(feed_url)
+        except Exception as e:
+            print(f"Ошибка RSS {feed_url}: {e}")
+            continue
+
+        # Берём 3 последние записи из ленты
+        for entry in feed.entries[:3]:
+            link = entry.get("link", "")
+            title = clean_text(entry.get("title", "") or "")
+            summary = clean_text(
+                entry.get("summary", "") or entry.get("description", "") or ""
+            )[:400]
+
+            if not link or not title:
+                continue
+
+            # pubDate → datetime, если есть
+            published_parsed = datetime.now()
+            if hasattr(entry, "published_parsed") and entry.published_parsed:
+                try:
+                    published_parsed = datetime(*entry.published_parsed[:6])
+                except Exception:
+                    pass
+
+            articles.append({
+                "id": link,
+                "title": title,
+                "summary": summary,
+                "link": link,
+                "source": f"VC.ru/{section}",
+                "published_parsed": published_parsed,
+            })
+
+    print(f"DEBUG: VC.ru RSS - {len(articles)} статей")
     return articles
 
-def load_articles_from_sites():
-    articles = []
+
+def load_articles_from_sites() -> List[Dict]:
+    articles: List[Dict] = []
     articles.extend(load_3dnews())
-    articles.extend(load_vcru())
-    
+    articles.extend(load_vcru_from_rss())
+
     # ПОКАЗЫВАЕМ ВСЕ СПАРСЕННЫЕ СТАТЬИ
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"ВСЕГО СПАРСЕНО: {len(articles)} статей")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     for i, art in enumerate(articles, 1):
         print(f"{i}. [{art['source']}] {art['title'][:80]}")
-    print(f"{'='*60}\n")
-    
+    print(f"{'=' * 60}\n")
+
     return articles
 
-def filter_article(entry):
+
+def filter_article(entry: Dict) -> Optional[str]:
     title = entry.get("title", "")
     summary = entry.get("summary", "")
     text = (title + " " + summary).lower()
@@ -236,7 +233,8 @@ def filter_article(entry):
         return "soft"
     return None
 
-def pick_article(articles):
+
+def pick_article(articles: List[Dict]) -> Optional[Dict]:
     scored = []
     for e in articles:
         level = filter_article(e)
@@ -250,20 +248,24 @@ def pick_article(articles):
     for i, (score, art) in enumerate(scored[:5], 1):
         level = "STRONG" if score == 2 else "SOFT"
         print(f"{i}. [{level}] [{art['source']}] {art['title'][:80]}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     if scored:
         scored.sort(
-            key=lambda x: (x[0], x[1].get("published_parsed", datetime.now())),
+            key=lambda x: (
+                x[0],
+                x[1].get("published_parsed", datetime.now())
+            ),
             reverse=True,
         )
         return scored[0][1]
     return None
 
+
 # ===== Генерация текста =====
 def short_summary(title: str, summary: str) -> str:
     news_text = f"{title}. {summary}" if summary else title
-    
+
     prompt = (
         f"Перепиши эту техническую новость в стиле Telegram-канала:\n\n"
         f"{news_text}\n\n"
@@ -273,49 +275,51 @@ def short_summary(title: str, summary: str) -> str:
         f"3. Пиши простым языком, без канцелярита.\n"
         f"4. Объём: 650-700 символов (без PS).\n"
         f"5. Формат:\n"
-        f"   [эмодзи] Строка 1: что произошло\n"
-        f"   [эмодзи] Строка 2: какая была проблема\n"
-        f"   [эмодзи] Строка 3: что улучшилось\n"
-        f"   [эмодзи] Строка 4: зачем это нужно\n"
+        f"   [эмоджи] Строка 1: что произошло\n"
+        f"   [эмоджи] Строка 2: какая была проблема\n"
+        f"   [эмоджи] Строка 3: что улучшилось\n"
+        f"   [эмоджи] Строка 4: зачем это нужно\n"
         f"   \n"
         f"   PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6\n\n"
         f"Верни только текст поста!"
     )
-    
+
     result = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
     )
     return result.choices[0].message.content.strip()[:850]
 
+
 # ===== Генерация промпта для картинки =====
 def generate_image_prompt(title: str, summary: str) -> str:
-    prompt = (
+    base_prompt = (
         f"Create a short image prompt for: {title}. "
         f"Style: cinematic realistic, dramatic lighting, dark tech atmosphere, high detail. "
         f"Focus on technology/cybersecurity/internet themes. No text, no logos. Max 200 chars."
     )
     result = openai_client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
+        messages=[{"role": "user", "content": base_prompt}],
     )
     return result.choices[0].message.content.strip()[:200]
 
+
 # ===== Pollinations.ai =====
-def generate_image_pollinations(prompt: str) -> str | None:
+def generate_image_pollinations(prompt: str) -> Optional[str]:
     try:
         print(f"Генерация Pollinations: {prompt}")
-        
+
         url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}"
         params = {
             "width": "1024",
             "height": "1024",
             "nologo": "true",
-            "model": "flux"
+            "model": "flux",
         }
-        
+
         response = requests.get(url, params=params, timeout=60)
-        
+
         if response.status_code == 200:
             filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
             with open(filename, "wb") as f:
@@ -328,6 +332,7 @@ def generate_image_pollinations(prompt: str) -> str | None:
     except Exception as e:
         print(f"❌ Ошибка генерации: {e}")
         return None
+
 
 # ===== Автопостинг =====
 async def autopost():
@@ -353,20 +358,21 @@ async def autopost():
     source = art.get("source", "")
     link = art.get("link", "")
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"ВЫБРАНА: {title}")
     print(f"ИСТОЧНИК: {source}")
     print(f"ОПИСАНИЕ: {summary}")
     print(f"ССЫЛКА: {link}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     news = short_summary(title, summary)
-    print(f"ТЕКСТ ({len(news)} симв.):\n{news}\n{'='*60}\n")
+    print(f"ТЕКСТ ({len(news)} симв.):\n{news}\n{'=' * 60}\n")
 
     # Генерация картинки
     image_prompt = generate_image_prompt(title, summary)
     image_file = generate_image_pollinations(image_prompt)
 
+    # Хэштеги по ключевым словам
     all_keywords = STRONG_KEYWORDS + SOFT_KEYWORDS
     text_for_tags = (title + " " + summary).lower()
     hashtags = [f"#{kw.replace(' ', '')}" for kw in all_keywords if kw.lower() in text_for_tags]
@@ -387,11 +393,15 @@ async def autopost():
     save_posted(article_id)
     print(f"[OK] {datetime.now()}")
 
+
 async def main():
     await autopost()
 
+
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

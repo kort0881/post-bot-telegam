@@ -7,6 +7,7 @@ import requests
 from aiogram import Bot
 from aiogram.client.bot import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import FSInputFile
 
 from openai import OpenAI
 
@@ -95,7 +96,7 @@ def safe_get(url: str) -> str | None:
 def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
 
-# ===== Парсинг с описанием =====
+# ===== Парсинг =====
 def load_3dnews():
     url = "https://3dnews.ru/"
     html = safe_get(url)
@@ -231,7 +232,7 @@ def load_articles_from_sites():
     articles.extend(load_3dnews())
     articles.extend(load_habr())
     articles.extend(load_tproger())
-    print("DEBUG: всего статей из сайтов:", len(articles))
+    print("DEBUG: всего статей:", len(articles))
     return articles
 
 def filter_article(entry):
@@ -265,7 +266,7 @@ def pick_article(articles):
         return scored[0][1]
     return None
 
-# ===== ИСПРАВЛЕННЫЙ промпт =====
+# ===== Генерация текста =====
 def short_summary(title: str, summary: str) -> str:
     news_text = f"{title}. {summary}" if summary else title
     
@@ -293,7 +294,49 @@ def short_summary(title: str, summary: str) -> str:
     )
     return result.choices[0].message.content.strip()[:850]
 
-# ===== Автопостинг БЕЗ картинок =====
+# ===== Генерация промпта для картинки =====
+def generate_image_prompt(title: str, summary: str) -> str:
+    prompt = (
+        f"Create a short image prompt for: {title}. "
+        f"Style: cinematic realistic, dramatic lighting, dark tech atmosphere, high detail. "
+        f"Focus on technology/cybersecurity/internet themes. No text, no logos. Max 200 chars."
+    )
+    result = openai_client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return result.choices[0].message.content.strip()[:200]
+
+# ===== POLLINATIONS.AI - Бесплатная генерация картинок =====
+def generate_image_pollinations(prompt: str) -> str | None:
+    try:
+        print(f"Генерация Pollinations: {prompt}")
+        
+        # URL автоматически генерирует картинку
+        url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}"
+        params = {
+            "width": "1024",
+            "height": "1024",
+            "nologo": "true",
+            "model": "flux"
+        }
+        
+        response = requests.get(url, params=params, timeout=60)
+        
+        if response.status_code == 200:
+            filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            with open(filename, "wb") as f:
+                f.write(response.content)
+            print(f"✅ Картинка: {filename}")
+            return filename
+        else:
+            print(f"❌ Ошибка Pollinations: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"❌ Ошибка генерации: {e}")
+        return None
+
+# ===== Автопостинг с картинками =====
 async def autopost():
     articles = load_articles_from_sites()
 
@@ -324,6 +367,10 @@ async def autopost():
     news = short_summary(title, summary)
     print(f"ТЕКСТ ({len(news)} симв.):\n{news}\n{'='*60}\n")
 
+    # Генерация картинки через Pollinations
+    image_prompt = generate_image_prompt(title, summary)
+    image_file = generate_image_pollinations(image_prompt)
+
     all_keywords = STRONG_KEYWORDS + SOFT_KEYWORDS
     text_for_tags = (title + " " + summary).lower()
     hashtags = [f"#{kw.replace(' ', '')}" for kw in all_keywords if kw.lower() in text_for_tags]
@@ -331,8 +378,15 @@ async def autopost():
 
     caption = f"{news}\n\n{' '.join(hashtags)}"
 
-    await bot.send_message(CHANNEL_ID, caption)
-    print("✅ Пост отправлен")
+    # Отправка
+    if image_file and os.path.exists(image_file):
+        photo = FSInputFile(image_file)
+        await bot.send_photo(CHANNEL_ID, photo=photo, caption=caption)
+        os.remove(image_file)
+        print("✅ Пост с картинкой отправлен!")
+    else:
+        await bot.send_message(CHANNEL_ID, caption)
+        print("⚠️ Пост без картинки")
 
     save_posted(article_id)
     print(f"[OK] {datetime.now()}")
@@ -342,6 +396,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

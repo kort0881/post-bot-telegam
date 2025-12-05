@@ -13,7 +13,6 @@ from aiogram.types import FSInputFile
 
 from openai import OpenAI
 
-# ===== Настройки =====
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
@@ -361,7 +360,8 @@ def generate_image_pollinations(prompt: str) -> Optional[str]:
             print(f"✅ Картинка: {filename}")
             return filename
         else:
-            print(f"❌ Ошибка Pollinations: {response.status_code}")
+            print(f"❌ Ошибка Pollinations: {response.status_code
+
 
 
 

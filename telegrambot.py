@@ -1,7 +1,7 @@
 import os
 import json
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 
 import requests
@@ -51,6 +51,8 @@ STRONG_KEYWORDS = [
     "антивирус", "firewall", "фаервол",
     "браузер", "браузер tor",
     "клиент vpn", "vpn-клиент",
+    "минцифры", "минцифры рф",
+    "белые списки", "белый список",
 ]
 
 SOFT_KEYWORDS = [
@@ -72,18 +74,55 @@ EXCLUDE_KEYWORDS = [
 ]
 
 POSTED_FILE = "posted_articles.json"
+RETENTION_DAYS = 7  # Хранить посты за последние 7 дней
 
 if os.path.exists(POSTED_FILE):
     with open(POSTED_FILE, "r", encoding="utf-8") as f:
-        posted_articles = set(json.load(f))
+        try:
+            posted_data = json.load(f)
+            # posted_data — список {"id": ..., "timestamp": ...}
+            if isinstance(posted_data, list) and posted_data and isinstance(posted_data[0], dict):
+                posted_articles = {item["id"]: item.get("timestamp") for item in posted_data}
+            else:
+                # старый формат — просто список id
+                posted_articles = {id_str: None for id_str in posted_data}
+        except Exception:
+            posted_articles = {}
 else:
-    posted_articles = set()
+    posted_articles = {}
+
+
+def clean_old_posts() -> None:
+    """Удаляет посты старше RETENTION_DAYS"""
+    global posted_articles
+    now = datetime.now().timestamp()
+    cutoff = now - (RETENTION_DAYS * 86400)
+    
+    old_count = len(posted_articles)
+    posted_articles = {
+        id_str: ts for id_str, ts in posted_articles.items()
+        if ts is None or ts > cutoff
+    }
+    removed = old_count - len(posted_articles)
+    if removed > 0:
+        print(f"🗑️ Удалено старых постов: {removed}")
+    
+    save_posted_articles()
+
+
+def save_posted_articles() -> None:
+    """Сохраняет посты с временными метками"""
+    data = [
+        {"id": id_str, "timestamp": ts}
+        for id_str, ts in posted_articles.items()
+    ]
+    with open(POSTED_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def save_posted(article_id: str) -> None:
-    posted_articles.add(article_id)
-    with open(POSTED_FILE, "w", encoding="utf-8") as f:
-        json.dump(list(posted_articles), f, ensure_ascii=False, indent=2)
+    posted_articles[article_id] = datetime.now().timestamp()
+    save_posted_articles()
 
 
 def safe_get(url: str) -> Optional[str]:
@@ -164,8 +203,8 @@ def load_vcru_from_rss() -> List[Dict]:
         print(f"Ошибка RSS {VC_RU_FEED}: {e}")
         return articles
 
-    # Берём последние 10 записей
-    for entry in feed.entries[:10]:
+    # Берём последние 30 записей (вместо 10)
+    for entry in feed.entries[:30]:
         link = entry.get("link", "")
         title = clean_text(entry.get("title", "") or "")
         summary = clean_text(
@@ -202,6 +241,7 @@ def load_articles_from_sites() -> List[Dict]:
 
     print(f"\n{'=' * 60}")
     print(f"ВСЕГО СПАРСЕНО: {len(articles)} статей")
+    print(f"В памяти опубликовано: {len(posted_articles)} статей")
     print(f"{'=' * 60}")
     for i, art in enumerate(articles, 1):
         print(f"{i}. [{art['source']}] {art['title'][:80]}")
@@ -227,10 +267,13 @@ def filter_article(entry: Dict) -> Optional[str]:
 
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
     scored = []
+    skipped_count = 0
+    
     for e in articles:
         # пропускаем уже опубликованные статьи
         article_id = e.get("id", e.get("link"))
         if article_id in posted_articles:
+            skipped_count += 1
             continue
 
         level = filter_article(e)
@@ -240,7 +283,8 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
         score = 2 if level == "strong" else 1
         scored.append((score, e))
 
-    print(f"ПОДХОДЯЩИХ СТАТЕЙ: {len(scored)}")
+    print(f"ПРОПУЩЕНО ОПУБЛИКОВАННЫХ: {skipped_count}")
+    print(f"ПОДХОДЯЩИХ НОВЫХ СТАТЕЙ: {len(scored)}")
     for i, (score, art) in enumerate(scored[:5], 1):
         level = "STRONG" if score == 2 else "SOFT"
         print(f"{i}. [{level}] [{art['source']}] {art['title'][:80]}")
@@ -301,105 +345,8 @@ def generate_image_prompt(title: str, summary: str) -> str:
         f"Style: cinematic realistic, dramatic lighting, dark tech atmosphere, high detail. "
         f"Focus on technology/cybersecurity/internet themes. No text, no logos. Max 200 chars."
     )
-    result = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": base_prompt}],
-    )
-    return result.choices[0].message.content.strip()[:200]
+    result = openai_client.chat.completions.
 
-
-# ===== Pollinations.ai =====
-def generate_image_pollinations(prompt: str) -> Optional[str]:
-    try:
-        print(f"Генерация Pollinations: {prompt}")
-
-        url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}"
-        params = {
-            "width": "1024",
-            "height": "1024",
-            "nologo": "true",
-            "model": "flux",
-        }
-
-        response = requests.get(url, params=params, timeout=60)
-
-        if response.status_code == 200:
-            filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            with open(filename, "wb") as f:
-                f.write(response.content)
-            print(f"✅ Картинка: {filename}")
-            return filename
-        else:
-            print(f"❌ Ошибка Pollinations: {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"❌ Ошибка генерации: {e}")
-        return None
-
-
-# ===== Автопостинг =====
-async def autopost():
-    articles = load_articles_from_sites()
-
-    if not articles:
-        print("Нет статей")
-        return
-
-    art = pick_article(articles)
-
-    if not art:
-        print("Нет подходящих статей")
-        return
-
-    article_id = art.get("id", art.get("link"))
-
-    title = art.get("title", "")
-    summary = art.get("summary", "")[:400]
-    source = art.get("source", "")
-    link = art.get("link", "")
-
-    print(f"\n{'=' * 60}")
-    print(f"ВЫБРАНА: {title}")
-    print(f"ИСТОЧНИК: {source}")
-    print(f"ОПИСАНИЕ: {summary}")
-    print(f"ССЫЛКА: {link}")
-    print(f"{'=' * 60}\n")
-
-    news = short_summary(title, summary)
-    print(f"ТЕКСТ ({len(news)} симв.):\n{news}\n{'=' * 60}\n")
-
-    # Генерация картинки
-    image_prompt = generate_image_prompt(title, summary)
-    image_file = generate_image_pollinations(image_prompt)
-
-    # Хэштеги по ключевым словам
-    all_keywords = STRONG_KEYWORDS + SOFT_KEYWORDS
-    text_for_tags = (title + " " + summary).lower()
-    hashtags = [f"#{kw.replace(' ', '')}" for kw in all_keywords if kw.lower() in text_for_tags]
-    hashtags += ["#Новости", "#Telegram", "#Канал"]
-
-    caption = f"{news}\n\n{' '.join(hashtags)}"
-
-    # Отправка
-    if image_file and os.path.exists(image_file):
-        photo = FSInputFile(image_file)
-        await bot.send_photo(CHANNEL_ID, photo=photo, caption=caption)
-        os.remove(image_file)
-        print("✅ Пост с картинкой отправлен!")
-    else:
-        await bot.send_message(CHANNEL_ID, caption)
-        print("⚠️ Пост без картинки")
-
-    save_posted(article_id)
-    print(f"[OK] {datetime.now()}")
-
-
-async def main():
-    await autopost()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
 
 
 

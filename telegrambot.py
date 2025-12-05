@@ -368,6 +368,67 @@ def generate_image_pollinations(prompt: str) -> Optional[str]:
 
 
 async def autopost():
+    clean_old_posts()
+    
+    articles = load_articles_from_sites()
+
+    if not articles:
+        print("❌ Нет статей для обработки")
+        return
+
+    art = pick_article(articles)
+
+    if not art:
+        print("❌ Нет подходящих статей (все либо опубликованы, либо не подходят)")
+        return
+
+    # Генерация текста поста
+    print(f"\n{'=' * 60}")
+    print(f"📰 Выбрана статья: {art['title']}")
+    print(f"🔗 Источник: {art['source']}")
+    print(f"{'=' * 60}\n")
+
+    text = short_summary(art["title"], art.get("summary", ""))
+    print(f"📝 Текст сгенерирован ({len(text)} символов)")
+
+    # Генерация изображения
+    img_prompt = generate_image_prompt(art["title"], art.get("summary", ""))
+    print(f"🎨 Промпт для картинки: {img_prompt}")
+    
+    image_path = generate_image_pollinations(img_prompt)
+
+    # Отправка в Telegram
+    try:
+        if image_path and os.path.exists(image_path):
+            photo = FSInputFile(image_path)
+            await bot.send_photo(
+                chat_id=CHANNEL_ID,
+                photo=photo,
+                caption=text,
+                parse_mode=ParseMode.HTML,
+            )
+            print(f"✅ Пост с картинкой отправлен")
+            os.remove(image_path)
+        else:
+            await bot.send_message(
+                chat_id=CHANNEL_ID,
+                text=text,
+                parse_mode=ParseMode.HTML,
+            )
+            print(f"✅ Пост без картинки отправлен")
+
+        # Сохраняем как опубликованную
+        save_posted(art.get("id", art.get("link")))
+        print(f"💾 Статья сохранена в posted_articles.json")
+
+    except Exception as e:
+        print(f"❌ Ошибка отправки в Telegram: {e}")
+
+
+if __name__ == "__main__":
+    asyncio.run(autopost())
+
+
 
 
 

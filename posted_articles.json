@@ -1,7 +1,26 @@
 [
-  "https://vc.ru/services/2632748-roskomnadzor-zablokiroval-snapchat-iz-za-terrorizma?from=rss",
-  "https://vc.ru/social/2631439-molniya?from=rss",
-  "https://vc.ru/services/2631333-rkn-usilivaet-borbu-s-vpn-blokiruya-protokoly-socks5-vless-i-l2tp?from=rss",
-  "https://3dnews.ru/subscribe",
-  "https://vc.ru/services/2631629-facetime-block?from=rss"
+  {
+    "id": "https://vc.ru/services/2632748-roskomnadzor-zablokiroval-snapchat-iz-za-terrorizma?from=rss",
+    "timestamp": null
+  },
+  {
+    "id": "https://vc.ru/social/2631439-molniya?from=rss",
+    "timestamp": null
+  },
+  {
+    "id": "https://vc.ru/services/2631333-rkn-usilivaet-borbu-s-vpn-blokiruya-protokoly-socks5-vless-i-l2tp?from=rss",
+    "timestamp": null
+  },
+  {
+    "id": "https://3dnews.ru/subscribe",
+    "timestamp": null
+  },
+  {
+    "id": "https://vc.ru/services/2631629-facetime-block?from=rss",
+    "timestamp": null
+  },
+  {
+    "id": "https://vc.ru/services/2633909-mintsifry-obnovilo-belyy-spisok-saytov?from=rss",
+    "timestamp": 1764942330.502032
+  }
 ]

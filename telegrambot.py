@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 
 import requests
-import feedparser  # pip install feedparser
+import feedparser
 from aiogram import Bot
 from aiogram.client.bot import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -34,7 +34,6 @@ HEADERS = {
     )
 }
 
-# ===== Ключевые слова =====
 STRONG_KEYWORDS = [
     "vpn", "впн", "прокси", "proxy", "tor", "shadowsocks",
     "wireguard", "openvpn", "ikev2",
@@ -74,17 +73,15 @@ EXCLUDE_KEYWORDS = [
 ]
 
 POSTED_FILE = "posted_articles.json"
-RETENTION_DAYS = 7  # Хранить посты за последние 7 дней
+RETENTION_DAYS = 7
 
 if os.path.exists(POSTED_FILE):
     with open(POSTED_FILE, "r", encoding="utf-8") as f:
         try:
             posted_data = json.load(f)
-            # posted_data — список {"id": ..., "timestamp": ...}
             if isinstance(posted_data, list) and posted_data and isinstance(posted_data[0], dict):
                 posted_articles = {item["id"]: item.get("timestamp") for item in posted_data}
             else:
-                # старый формат — просто список id
                 posted_articles = {id_str: None for id_str in posted_data}
         except Exception:
             posted_articles = {}
@@ -93,7 +90,6 @@ else:
 
 
 def clean_old_posts() -> None:
-    """Удаляет посты старше RETENTION_DAYS"""
     global posted_articles
     now = datetime.now().timestamp()
     cutoff = now - (RETENTION_DAYS * 86400)
@@ -111,7 +107,6 @@ def clean_old_posts() -> None:
 
 
 def save_posted_articles() -> None:
-    """Сохраняет посты с временными метками"""
     data = [
         {"id": id_str, "timestamp": ts}
         for id_str, ts in posted_articles.items()
@@ -141,7 +136,6 @@ def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
 
 
-# ===== Парсинг 3DNews (HTML, последние 3) =====
 def load_3dnews() -> List[Dict]:
     url = "https://3dnews.ru/"
     html = safe_get(url)
@@ -151,7 +145,6 @@ def load_3dnews() -> List[Dict]:
     articles: List[Dict] = []
     parts = html.split('<a href="/')
 
-    # Берём 3 статьи
     for part in parts[1:4]:
         href_end = part.find('"')
         title_start = part.find(">")
@@ -189,7 +182,6 @@ def load_3dnews() -> List[Dict]:
     return articles
 
 
-# ===== VC.ru: одна общая RSS-лента =====
 VC_RU_FEED = "https://vc.ru/rss"
 
 
@@ -203,7 +195,6 @@ def load_vcru_from_rss() -> List[Dict]:
         print(f"Ошибка RSS {VC_RU_FEED}: {e}")
         return articles
 
-    # Берём последние 30 записей (вместо 10)
     for entry in feed.entries[:30]:
         link = entry.get("link", "")
         title = clean_text(entry.get("title", "") or "")
@@ -270,7 +261,6 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
     skipped_count = 0
     
     for e in articles:
-        # пропускаем уже опубликованные статьи
         article_id = e.get("id", e.get("link"))
         if article_id in posted_articles:
             skipped_count += 1
@@ -303,7 +293,6 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
     return None
 
 
-# ===== Генерация текста =====
 def short_summary(title: str, summary: str) -> str:
     news_text = f"{title}. {summary}" if summary else title
 
@@ -338,14 +327,43 @@ def short_summary(title: str, summary: str) -> str:
     return text
 
 
-# ===== Генерация промпта для картинки =====
 def generate_image_prompt(title: str, summary: str) -> str:
     base_prompt = (
         f"Create a short image prompt for: {title}. "
         f"Style: cinematic realistic, dramatic lighting, dark tech atmosphere, high detail. "
         f"Focus on technology/cybersecurity/internet themes. No text, no logos. Max 200 chars."
     )
-    result = openai_client.chat.completions.
+    result = openai_client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": base_prompt}],
+    )
+    return result.choices[0].message.content.strip()[:200]
+
+
+def generate_image_pollinations(prompt: str) -> Optional[str]:
+    try:
+        print(f"Генерация Pollinations: {prompt}")
+
+        url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}"
+        params = {
+            "width": "1024",
+            "height": "1024",
+            "nologo": "true",
+            "model": "flux",
+        }
+
+        response = requests.get(url, params=params, timeout=60)
+
+        if response.status_code == 200:
+            filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            with open(filename, "wb") as f:
+                f.write(response.content)
+            print(f"✅ Картинка: {filename}")
+            return filename
+        else:
+            print(f"❌ Ошибка Pollinations: {response.status_code}")
+
+
 
 
 

@@ -300,7 +300,6 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
     print(f"Пропущено опубликованных: {skipped}")
     print(f"Подходящих: {len(scored)}")
 
-    # вывод топ-5 кандидатов
     for i, (score, art) in enumerate(
         sorted(
             scored,
@@ -323,6 +322,8 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
 def short_summary(title: str, summary: str) -> str:
     news_text = f"{title}. {summary}" if summary else title
 
+    ps = "PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ЗTE6"
+
     prompt = (
         f"Перепиши новость в стиле Telegram-канала:\n\n"
         f"{news_text}\n\n"
@@ -335,8 +336,8 @@ def short_summary(title: str, summary: str) -> str:
         f"   [эмоджи] Какая была проблема\n"
         f"   [эмоджи] Что улучшилось\n"
         f"   [эмоджи] Зачем это нужно\n\n"
-        f"В конце обязательно добавь:\n"
-        f"PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
+        f"В конце НИЧЕГО не добавляй после основного текста, "
+        f"строку '{ps}' НЕ пиши — я добавлю её сам."
     )
 
     res = openai_client.chat.completions.create(
@@ -345,7 +346,7 @@ def short_summary(title: str, summary: str) -> str:
     )
     text = res.choices[0].message.content.strip()
 
-    ps = "PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ЗTE6"
+    # защита от дублей
     if ps not in text:
         text += "\n\n" + ps
 
@@ -436,6 +437,8 @@ async def autopost():
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
+
 
 
 

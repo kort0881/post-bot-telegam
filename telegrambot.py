@@ -57,6 +57,7 @@ STRONG_KEYWORDS = [
     "клиент vpn", "vpn-клиент",
     "минцифры", "минцифры рф",
     "белые списки", "белый список",
+    "роскомсвобода", "блокировка", "отключение",
 ]
 
 SOFT_KEYWORDS = [
@@ -103,7 +104,10 @@ def clean_old_posts() -> None:
     cutoff = now - (RETENTION_DAYS * 86400)
 
     old_count = len(posted_articles)
-    posted_articles = {id_str: ts for id_str, ts in posted_articles.items() if ts is None or ts > cutoff}
+    posted_articles = {
+        id_str: ts for id_str, ts in posted_articles.items()
+        if ts is None or ts > cutoff
+    }
     removed = old_count - len(posted_articles)
     if removed > 0:
         print(f"🗑️ Удалено старых постов: {removed}")
@@ -124,7 +128,7 @@ def safe_get(url: str) -> Optional[str]:
             return None
         return resp.text
     except Exception as e:
-        print(f"Ошибка при запросе {url}:", e)
+        print(f"Ошибка запроса {url}: {e}")
         return None
 
 def clean_text(text: str) -> str:
@@ -155,6 +159,7 @@ def load_3dnews() -> List[Dict]:
 
         link = "https://3dnews.ru/" + href.lstrip("/")
         summary = ""
+
         desc_start = part.find('class="')
         if desc_start != -1:
             desc_chunk = part[desc_start:desc_start + 500]
@@ -173,8 +178,9 @@ def load_3dnews() -> List[Dict]:
             "published_parsed": datetime.now(),
         })
 
-    print(f"DEBUG: 3DNews - {len(articles)} статей")
+    print(f"DEBUG: 3DNews – {len(articles)} статей")
     return articles
+# ---------------- RSS PARSERS ----------------
 
 def load_rss(url: str, source: str) -> List[Dict]:
     print(f"Загружаем RSS: {url}")
@@ -192,12 +198,14 @@ def load_rss(url: str, source: str) -> List[Dict]:
         summary = clean_text(entry.get("summary") or entry.get("description") or "")[:400]
         if not link or not title:
             continue
+
         published_parsed = datetime.now()
         if hasattr(entry, "published_parsed") and entry.published_parsed:
             try:
                 published_parsed = datetime(*entry.published_parsed[:6])
             except:
                 pass
+
         articles.append({
             "id": link,
             "title": title,
@@ -207,7 +215,7 @@ def load_rss(url: str, source: str) -> List[Dict]:
             "published_parsed": published_parsed,
         })
 
-    print(f"DEBUG: {source} - {len(articles)} статей")
+    print(f"DEBUG: {source} – {len(articles)} статей")
     return articles
 
 def load_articles_from_sites() -> List[Dict]:
@@ -216,11 +224,7 @@ def load_articles_from_sites() -> List[Dict]:
     articles.extend(load_rss("https://vc.ru/rss", "VC.ru/rss"))
     articles.extend(load_rss("https://habr.com/ru/rss/all/all/?fl=ru", "Habr/rss"))
     articles.extend(load_rss("https://xakep.ru/feed/", "Xakep.ru/rss"))
-
-    print("\n" + "=" * 60)
     print(f"ВСЕГО СПАРСЕНО: {len(articles)} статей")
-    print(f"В памяти опубликовано: {len(posted_articles)}")
-    print("=" * 60)
     return articles
 
 # ---------------- FILTER ----------------
@@ -233,32 +237,26 @@ def filter_article(entry: Dict) -> Optional[str]:
     if any(kw in text for kw in EXCLUDE_KEYWORDS):
         return None
 
-    source = entry.get("source", "")
-
-    tech_keywords = [
-        "уязвимость", "эксплойт", "ddos", "malware", "ботнет",
-        "шифровальщик", "ransomware", "фишинг", "инфостилер",
-        "vpn", "впн", "proxy", "прокси", "трафик", "шифрование",
-        "хакер", "кибер", "кибератака", "утечка данных",
-    ]
-
-    if source in ("Habr/rss", "Xakep.ru/rss"):
-        if any(kw in text for kw in STRONG_KEYWORDS):
-            return "strong"
-        if any(kw in text for kw in SOFT_KEYWORDS + tech_keywords):
-            return "soft"
-
     if any(kw in text for kw in STRONG_KEYWORDS):
         return "strong"
     if any(kw in text for kw in SOFT_KEYWORDS):
         return "soft"
+
     return None
 
-# ---------------- PICK ARTICLE (NEW) ----------------
+# ---------------- PICK ARTICLE ----------------
+
+PRIORITY_CHANNEL_KEYWORDS = [
+    "vpn", "впн", "proxy", "прокси", "роскомнадзор", "ркн",
+    "блокировка сайтов", "блокировка", "отключение",
+    "обход блокировок", "обход цензуры", "цензура", "суверенный интернет",
+    "белые списки", "минцифры", "роскомсвобода"
+]
 
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
     strong_soft = []
     fallback = []
+    third_stage = []
     skipped = 0
 
     for e in articles:
@@ -275,38 +273,26 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
             continue
 
         level = filter_article(e)
-
         if level:
             score = 2 if level == "strong" else 1
             strong_soft.append((score, e))
+        elif any(kw in text for kw in PRIORITY_CHANNEL_KEYWORDS):
+            third_stage.append(e)
         else:
             fallback.append(e)
 
     print(f"Пропущено опубликованных: {skipped}")
-    print(f"По ключам найдено: {len(strong_soft)}, запасных: {len(fallback)}")
+    print(f"По ключам найдено: {len(strong_soft)}, запасных: {len(fallback)}, третий этап: {len(third_stage)}")
 
-    # топ-5 по ключам
     if strong_soft:
-        strong_soft.sort(
-            key=lambda x: (x[0], x[1].get("published_parsed", datetime.now())),
-            reverse=True,
-        )
-        print("Топ-5 кандидатов по ключам:")
-        for i, (score, art) in enumerate(strong_soft[:5], 1):
-            lvl = "STRONG" if score == 2 else "SOFT"
-            print(f"{i}. [{lvl}] [{art['source']}] {art['title'][:80]}")
+        strong_soft.sort(key=lambda x: (x[0], x[1].get("published_parsed", datetime.now())), reverse=True)
         return strong_soft[0][1]
-
-    # топ-5 запасных
     if fallback:
-        fallback.sort(
-            key=lambda x: x.get("published_parsed", datetime.now()),
-            reverse=True,
-        )
-        print("Топ-5 запасных кандидатов:")
-        for i, art in enumerate(fallback[:5], 1):
-            print(f"{i}. [FALLBACK] [{art['source']}] {art['title'][:80]}")
+        fallback.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
         return fallback[0]
+    if third_stage:
+        third_stage.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
+        return third_stage[0]
 
     return None
 
@@ -326,19 +312,15 @@ def short_summary(title: str, summary: str) -> str:
         f"   [эмоджи] Какая была проблема\n"
         f"   [эмоджи] Что улучшилось\n"
         f"   [эмоджи] Зачем это нужно\n\n"
-        f"В конце НИЧЕГО не добавляй после основного текста, "
-        f"строку 'PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6' НЕ пиши — я добавлю её сам."
+        f"В конце НИЧЕГО не добавляй после основного текста."
     )
-
     res = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
     )
     text = res.choices[0].message.content.strip()
-
     ps = "PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
-    text += "\n\n" + ps
-    return text
+    return text + "\n\n" + ps
 
 def generate_image_prompt(title: str, summary: str) -> str:
     base_prompt = f"Create cinematic, realistic image about: {title}. Dark tech atmosphere. No text. Max 200 chars."
@@ -350,7 +332,7 @@ def generate_image_prompt(title: str, summary: str) -> str:
 
 def generate_image_pollinations(prompt: str) -> Optional[str]:
     try:
-        print("Пытаюсь сгенерировать картинку Pollinations...")
+        print("Генерирую картинку Pollinations...")
         url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}"
         params = {"width": "1024", "height": "1024", "nologo": "true", "model": "flux"}
         r = requests.get(url, params=params, timeout=60)
@@ -365,7 +347,7 @@ def generate_image_pollinations(prompt: str) -> Optional[str]:
         print("Ошибка картинки:", e)
         return None
 
-# ---------------- MAIN ----------------
+# ---------------- AUTPOST ----------------
 
 async def autopost():
     clean_old_posts()
@@ -414,6 +396,8 @@ async def autopost():
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
+
 
 
 

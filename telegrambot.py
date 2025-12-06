@@ -19,6 +19,10 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
+# Проверка наличия всех ENV переменных
+if not all([OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, CHANNEL_ID]):
+    raise ValueError("❌ Не все ENV переменные установлены! Проверьте OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, CHANNEL_ID")
+
 print("DEBUG OPENAI KEY LEN:", len(OPENAI_API_KEY) if OPENAI_API_KEY else 0)
 
 bot = Bot(
@@ -88,17 +92,23 @@ if os.path.exists(POSTED_FILE):
                 posted_articles = {item["id"]: item.get("timestamp") for item in posted_data}
             else:
                 posted_articles = {id_str: None for id_str in posted_data}
-        except Exception:
+        except Exception as e:
+            print(f"⚠️ Ошибка загрузки posted_articles: {e}")
             posted_articles = {}
 else:
     posted_articles = {}
 
 def save_posted_articles() -> None:
-    data = [{"id": id_str, "timestamp": ts} for id_str, ts in posted_articles.items()]
-    with open(POSTED_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """Сохранить список опубликованных статей"""
+    try:
+        data = [{"id": id_str, "timestamp": ts} for id_str, ts in posted_articles.items()]
+        with open(POSTED_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ Ошибка сохранения posted_articles: {e}")
 
 def clean_old_posts() -> None:
+    """Удалить записи старше RETENTION_DAYS дней"""
     global posted_articles
     now = datetime.now().timestamp()
     cutoff = now - (RETENTION_DAYS * 86400)
@@ -115,12 +125,14 @@ def clean_old_posts() -> None:
     save_posted_articles()
 
 def save_posted(article_id: str) -> None:
+    """Отметить статью как опубликованную"""
     posted_articles[article_id] = datetime.now().timestamp()
     save_posted_articles()
 
 # ---------------- HELPERS ----------------
 
 def safe_get(url: str) -> Optional[str]:
+    """Безопасный HTTP GET запрос"""
     try:
         resp = requests.get(url, headers=HEADERS, timeout=15)
         if resp.status_code != 200:
@@ -132,93 +144,107 @@ def safe_get(url: str) -> Optional[str]:
         return None
 
 def clean_text(text: str) -> str:
+    """Очистить текст от лишних пробелов и переносов"""
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
-
 # ---------------- PARSERS ----------------
 
 def load_3dnews() -> List[Dict]:
-    url = "https://3dnews.ru/"
-    html = safe_get(url)
-    if not html:
+    """Парсинг главной страницы 3DNews"""
+    try:
+        url = "https://3dnews.ru/"
+        html = safe_get(url)
+        if not html:
+            return []
+
+        articles = []
+        parts = html.split('<a href="/')
+
+        for part in parts[1:4]:
+            try:
+                href_end = part.find('"')
+                title_start = part.find(">")
+                title_end = part.find("</a>")
+                if href_end == -1 or title_start == -1 or title_end == -1:
+                    continue
+
+                href = part[:href_end]
+                title = clean_text(part[title_start + 1:title_end])
+                if not title:
+                    continue
+
+                link = "https://3dnews.ru/" + href.lstrip("/")
+                summary = ""
+
+                desc_start = part.find('class="')
+                if desc_start != -1:
+                    desc_chunk = part[desc_start:desc_start + 500]
+                    p_start = desc_chunk.find(">")
+                    if p_start != -1:
+                        p_end = desc_chunk.find("</", p_start)
+                        if p_end != -1:
+                            summary = clean_text(desc_chunk[p_start + 1:p_end])[:300]
+
+                articles.append({
+                    "id": link,
+                    "title": title,
+                    "summary": summary,
+                    "link": link,
+                    "source": "3DNews",
+                    "published_parsed": datetime.now(),
+                })
+            except Exception as e:
+                print(f"Ошибка парсинга элемента 3DNews: {e}")
+                continue
+
+        print(f"DEBUG: 3DNews – {len(articles)} статей")
+        return articles
+    except Exception as e:
+        print(f"Ошибка парсинга 3DNews: {e}")
         return []
 
-    articles = []
-    parts = html.split('<a href="/')
-
-    for part in parts[1:4]:
-        href_end = part.find('"')
-        title_start = part.find(">")
-        title_end = part.find("</a>")
-        if href_end == -1 or title_start == -1 or title_end == -1:
-            continue
-
-        href = part[:href_end]
-        title = clean_text(part[title_start + 1:title_end])
-        if not title:
-            continue
-
-        link = "https://3dnews.ru/" + href.lstrip("/")
-        summary = ""
-
-        desc_start = part.find('class="')
-        if desc_start != -1:
-            desc_chunk = part[desc_start:desc_start + 500]
-            p_start = desc_chunk.find(">")
-            if p_start != -1:
-                p_end = desc_chunk.find("</", p_start)
-                if p_end != -1:
-                    summary = clean_text(desc_chunk[p_start + 1:p_end])[:300]
-
-        articles.append({
-            "id": link,
-            "title": title,
-            "summary": summary,
-            "link": link,
-            "source": "3DNews",
-            "published_parsed": datetime.now(),
-        })
-
-    print(f"DEBUG: 3DNews – {len(articles)} статей")
-    return articles
-# ---------------- RSS PARSERS ----------------
-
 def load_rss(url: str, source: str) -> List[Dict]:
+    """Загрузка и парсинг RSS ленты"""
     print(f"Загружаем RSS: {url}")
     articles = []
 
     try:
         feed = feedparser.parse(url)
+        
+        for entry in feed.entries[:30]:
+            try:
+                link = entry.get("link", "")
+                title = clean_text(entry.get("title") or "")
+                summary = clean_text(entry.get("summary") or entry.get("description") or "")[:400]
+                if not link or not title:
+                    continue
+
+                published_parsed = datetime.now()
+                if hasattr(entry, "published_parsed") and entry.published_parsed:
+                    try:
+                        published_parsed = datetime(*entry.published_parsed[:6])
+                    except:
+                        pass
+
+                articles.append({
+                    "id": link,
+                    "title": title,
+                    "summary": summary,
+                    "link": link,
+                    "source": source,
+                    "published_parsed": published_parsed,
+                })
+            except Exception as e:
+                print(f"Ошибка парсинга элемента RSS {source}: {e}")
+                continue
+
+        print(f"DEBUG: {source} – {len(articles)} статей")
     except Exception as e:
         print(f"Ошибка RSS {url}: {e}")
-        return articles
 
-    for entry in feed.entries[:30]:
-        link = entry.get("link", "")
-        title = clean_text(entry.get("title") or "")
-        summary = clean_text(entry.get("summary") or entry.get("description") or "")[:400]
-        if not link or not title:
-            continue
-
-        published_parsed = datetime.now()
-        if hasattr(entry, "published_parsed") and entry.published_parsed:
-            try:
-                published_parsed = datetime(*entry.published_parsed[:6])
-            except:
-                pass
-
-        articles.append({
-            "id": link,
-            "title": title,
-            "summary": summary,
-            "link": link,
-            "source": source,
-            "published_parsed": published_parsed,
-        })
-
-    print(f"DEBUG: {source} – {len(articles)} статей")
     return articles
 
 def load_articles_from_sites() -> List[Dict]:
+    """Загрузить статьи со всех источников"""
     articles = []
     articles.extend(load_3dnews())
     articles.extend(load_rss("https://vc.ru/rss", "VC.ru/rss"))
@@ -230,6 +256,7 @@ def load_articles_from_sites() -> List[Dict]:
 # ---------------- FILTER ----------------
 
 def filter_article(entry: Dict) -> Optional[str]:
+    """Проверить статью по ключевым словам"""
     title = entry.get("title", "")
     summary = entry.get("summary", "")
     text = (title + " " + summary).lower()
@@ -254,6 +281,7 @@ PRIORITY_CHANNEL_KEYWORDS = [
 ]
 
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
+    """Выбрать лучшую статью для публикации"""
     strong_soft = []
     fallback = []
     third_stage = []
@@ -299,6 +327,7 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
 # ---------------- OPENAI ----------------
 
 def short_summary(title: str, summary: str) -> str:
+    """Сгенерировать краткий пост для Telegram через OpenAI"""
     news_text = f"{title}. {summary}" if summary else title
     prompt = (
         f"Перепиши новость в стиле Telegram-канала:\n\n"
@@ -314,23 +343,36 @@ def short_summary(title: str, summary: str) -> str:
         f"   [эмоджи] Зачем это нужно\n\n"
         f"В конце НИЧЕГО не добавляй после основного текста."
     )
-    res = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-    )
-    text = res.choices[0].message.content.strip()
-    ps = "PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
-    return text + "\n\n" + ps
+    
+    try:
+        res = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = res.choices[0].message.content.strip()
+        ps = "PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
+        return text + "\n\n" + ps
+    except Exception as e:
+        print(f"Ошибка OpenAI short_summary: {e}")
+        ps = "PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
+        return f"{title}\n\n{summary[:200]}\n\n{ps}"
 
 def generate_image_prompt(title: str, summary: str) -> str:
+    """Сгенерировать промпт для картинки через OpenAI"""
     base_prompt = f"Create cinematic, realistic image about: {title}. Dark tech atmosphere. No text. Max 200 chars."
-    res = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": base_prompt}],
-    )
-    return res.choices[0].message.content.strip()[:200]
+    
+    try:
+        res = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": base_prompt}],
+        )
+        return res.choices[0].message.content.strip()[:200]
+    except Exception as e:
+        print(f"Ошибка OpenAI generate_image_prompt: {e}")
+        return f"Cinematic tech news illustration: {title[:100]}"
 
 def generate_image_pollinations(prompt: str) -> Optional[str]:
+    """Сгенерировать изображение через Pollinations AI"""
     try:
         print("Генерирую картинку Pollinations...")
         url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}"
@@ -339,17 +381,19 @@ def generate_image_pollinations(prompt: str) -> Optional[str]:
         if r.status_code != 200:
             print("Ошибка Pollinations:", r.status_code)
             return None
+        
         filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         with open(filename, "wb") as f:
             f.write(r.content)
         return filename
     except Exception as e:
-        print("Ошибка картинки:", e)
+        print("Ошибка генерации картинки:", e)
         return None
 
-# ---------------- AUTPOST ----------------
+# ---------------- AUTOPOST ----------------
 
 async def autopost():
+    """Основная функция автопостинга"""
     clean_old_posts()
     articles = load_articles_from_sites()
     if not articles:
@@ -365,16 +409,16 @@ async def autopost():
     if aid in posted_articles:
         print("Статья уже в posted_articles, выходим")
         return
-    posted_articles[aid] = datetime.now().timestamp()
-    save_posted_articles()
 
     print("\nВыбрана статья:", art["title"], "\n")
 
     try:
+        # Генерация контента
         text = short_summary(art["title"], art.get("summary", ""))
         img_prompt = generate_image_prompt(art["title"], art.get("summary", ""))
         img_file = generate_image_pollinations(img_prompt)
 
+        # Отправка в Telegram
         if img_file and os.path.exists(img_file):
             await bot.send_photo(
                 chat_id=CHANNEL_ID,
@@ -390,12 +434,17 @@ async def autopost():
                 parse_mode=ParseMode.HTML,
             )
 
-        print("Статья успешно отправлена.")
+        # ✅ ИСПРАВЛЕНИЕ: Сохраняем только после успешной отправки
+        save_posted(aid)
+        print("✅ Статья успешно отправлена и сохранена.")
+        
     except Exception as e:
-        print("Ошибка Telegram:", e)
+        print(f"❌ Ошибка при отправке в Telegram: {e}")
+        print("Статья НЕ будет помечена как опубликованная и попытается отправиться снова.")
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
 
 
 

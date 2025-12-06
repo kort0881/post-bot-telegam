@@ -92,15 +92,10 @@ if os.path.exists(POSTED_FILE):
 else:
     posted_articles = {}
 
-
 def save_posted_articles() -> None:
-    data = [
-        {"id": id_str, "timestamp": ts}
-        for id_str, ts in posted_articles.items()
-    ]
+    data = [{"id": id_str, "timestamp": ts} for id_str, ts in posted_articles.items()]
     with open(POSTED_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-
 
 def clean_old_posts() -> None:
     global posted_articles
@@ -108,16 +103,16 @@ def clean_old_posts() -> None:
     cutoff = now - (RETENTION_DAYS * 86400)
 
     old_count = len(posted_articles)
-    posted_articles = {
-        id_str: ts for id_str, ts in posted_articles.items()
-        if ts is None or ts > cutoff
-    }
+    posted_articles = {id_str: ts for id_str, ts in posted_articles.items() if ts is None or ts > cutoff}
     removed = old_count - len(posted_articles)
     if removed > 0:
         print(f"🗑️ Удалено старых постов: {removed}")
 
     save_posted_articles()
 
+def save_posted(article_id: str) -> None:
+    posted_articles[article_id] = datetime.now().timestamp()
+    save_posted_articles()
 
 # ---------------- HELPERS ----------------
 
@@ -132,10 +127,8 @@ def safe_get(url: str) -> Optional[str]:
         print(f"Ошибка при запросе {url}:", e)
         return None
 
-
 def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
-
 
 # ---------------- PARSERS ----------------
 
@@ -161,7 +154,6 @@ def load_3dnews() -> List[Dict]:
             continue
 
         link = "https://3dnews.ru/" + href.lstrip("/")
-
         summary = ""
         desc_start = part.find('class="')
         if desc_start != -1:
@@ -184,7 +176,6 @@ def load_3dnews() -> List[Dict]:
     print(f"DEBUG: 3DNews - {len(articles)} статей")
     return articles
 
-
 def load_rss(url: str, source: str) -> List[Dict]:
     print(f"Загружаем RSS: {url}")
     articles = []
@@ -199,17 +190,14 @@ def load_rss(url: str, source: str) -> List[Dict]:
         link = entry.get("link", "")
         title = clean_text(entry.get("title") or "")
         summary = clean_text(entry.get("summary") or entry.get("description") or "")[:400]
-
         if not link or not title:
             continue
-
         published_parsed = datetime.now()
         if hasattr(entry, "published_parsed") and entry.published_parsed:
             try:
                 published_parsed = datetime(*entry.published_parsed[:6])
             except:
                 pass
-
         articles.append({
             "id": link,
             "title": title,
@@ -222,7 +210,6 @@ def load_rss(url: str, source: str) -> List[Dict]:
     print(f"DEBUG: {source} - {len(articles)} статей")
     return articles
 
-
 def load_articles_from_sites() -> List[Dict]:
     articles = []
     articles.extend(load_3dnews())
@@ -234,9 +221,7 @@ def load_articles_from_sites() -> List[Dict]:
     print(f"ВСЕГО СПАРСЕНО: {len(articles)} статей")
     print(f"В памяти опубликовано: {len(posted_articles)}")
     print("=" * 60)
-
     return articles
-
 
 # ---------------- FILTER ----------------
 
@@ -265,18 +250,15 @@ def filter_article(entry: Dict) -> Optional[str]:
 
     if any(kw in text for kw in STRONG_KEYWORDS):
         return "strong"
-
     if any(kw in text for kw in SOFT_KEYWORDS):
         return "soft"
-
     return None
 
-
-# ---------------- PICK ARTICLE (NEW LOGIC) ----------------
+# ---------------- PICK ARTICLE (NEW) ----------------
 
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
-    strong_soft = []   # новости по ключам
-    fallback = []      # любые техно-новости без ключей, но и без EXCLUDE
+    strong_soft = []
+    fallback = []
     skipped = 0
 
     for e in articles:
@@ -289,48 +271,49 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
         summary = e.get("summary", "")
         text = (title + " " + summary).lower()
 
-        # сразу отбрасываем игры и мусор
         if any(kw in text for kw in EXCLUDE_KEYWORDS):
             continue
 
-        level = filter_article(e)  # вернёт 'strong'/'soft'/None
+        level = filter_article(e)
 
         if level:
             score = 2 if level == "strong" else 1
             strong_soft.append((score, e))
         else:
-            # сюда попадают «просто техно»-новости без наших ключей
             fallback.append(e)
 
     print(f"Пропущено опубликованных: {skipped}")
     print(f"По ключам найдено: {len(strong_soft)}, запасных: {len(fallback)}")
 
-    # 1) если есть приоритетные — берём лучшую из них
+    # топ-5 по ключам
     if strong_soft:
         strong_soft.sort(
-            key=lambda x: x[1].get("published_parsed", datetime.now()),
+            key=lambda x: (x[0], x[1].get("published_parsed", datetime.now())),
             reverse=True,
         )
+        print("Топ-5 кандидатов по ключам:")
+        for i, (score, art) in enumerate(strong_soft[:5], 1):
+            lvl = "STRONG" if score == 2 else "SOFT"
+            print(f"{i}. [{lvl}] [{art['source']}] {art['title'][:80]}")
         return strong_soft[0][1]
 
-    # 2) иначе берём первую доступную запасную
+    # топ-5 запасных
     if fallback:
         fallback.sort(
             key=lambda x: x.get("published_parsed", datetime.now()),
             reverse=True,
         )
+        print("Топ-5 запасных кандидатов:")
+        for i, art in enumerate(fallback[:5], 1):
+            print(f"{i}. [FALLBACK] [{art['source']}] {art['title'][:80]}")
         return fallback[0]
 
     return None
-
 
 # ---------------- OPENAI ----------------
 
 def short_summary(title: str, summary: str) -> str:
     news_text = f"{title}. {summary}" if summary else title
-
-    ps = "PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
-
     prompt = (
         f"Перепиши новость в стиле Telegram-канала:\n\n"
         f"{news_text}\n\n"
@@ -344,7 +327,7 @@ def short_summary(title: str, summary: str) -> str:
         f"   [эмоджи] Что улучшилось\n"
         f"   [эмоджи] Зачем это нужно\n\n"
         f"В конце НИЧЕГО не добавляй после основного текста, "
-        f"строку '{ps}' НЕ пиши — я добавлю её сам."
+        f"строку 'PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6' НЕ пиши — я добавлю её сам."
     )
 
     res = openai_client.chat.completions.create(
@@ -353,55 +336,39 @@ def short_summary(title: str, summary: str) -> str:
     )
     text = res.choices[0].message.content.strip()
 
-    # добавляем PS только один раз вручную
+    ps = "PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
     text += "\n\n" + ps
     return text
 
-
 def generate_image_prompt(title: str, summary: str) -> str:
-    base_prompt = (
-        f"Create cinematic, realistic image about: {title}. "
-        f"Dark tech atmosphere. No text. Max 200 chars."
-    )
+    base_prompt = f"Create cinematic, realistic image about: {title}. Dark tech atmosphere. No text. Max 200 chars."
     res = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": base_prompt}],
     )
     return res.choices[0].message.content.strip()[:200]
 
-
 def generate_image_pollinations(prompt: str) -> Optional[str]:
     try:
         print("Пытаюсь сгенерировать картинку Pollinations...")
-
-        url = (
-            f"https://image.pollinations.ai/prompt/"
-            f"{requests.utils.quote(prompt)}"
-        )
-
+        url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}"
         params = {"width": "1024", "height": "1024", "nologo": "true", "model": "flux"}
-
         r = requests.get(url, params=params, timeout=60)
         if r.status_code != 200:
             print("Ошибка Pollinations:", r.status_code)
             return None
-
         filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         with open(filename, "wb") as f:
             f.write(r.content)
-
         return filename
-
     except Exception as e:
         print("Ошибка картинки:", e)
         return None
-
 
 # ---------------- MAIN ----------------
 
 async def autopost():
     clean_old_posts()
-
     articles = load_articles_from_sites()
     if not articles:
         print("Нет статей")
@@ -413,8 +380,6 @@ async def autopost():
         return
 
     aid = art["id"]
-
-    # защита от дублей: сразу помечаем, что эту статью «заняли»
     if aid in posted_articles:
         print("Статья уже в posted_articles, выходим")
         return
@@ -446,13 +411,10 @@ async def autopost():
         print("Статья успешно отправлена.")
     except Exception as e:
         print("Ошибка Telegram:", e)
-        # если отправка не удалась, можно вернуть статью «в пул»:
-        # posted_articles.pop(aid, None)
-        # save_posted_articles()
-
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
 
 
 

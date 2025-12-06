@@ -92,6 +92,7 @@ if os.path.exists(POSTED_FILE):
 else:
     posted_articles = {}
 
+
 def save_posted_articles() -> None:
     data = [
         {"id": id_str, "timestamp": ts}
@@ -99,6 +100,7 @@ def save_posted_articles() -> None:
     ]
     with open(POSTED_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
 
 def clean_old_posts() -> None:
     global posted_articles
@@ -116,9 +118,6 @@ def clean_old_posts() -> None:
 
     save_posted_articles()
 
-def save_posted(article_id: str) -> None:
-    posted_articles[article_id] = datetime.now().timestamp()
-    save_posted_articles()
 
 # ---------------- HELPERS ----------------
 
@@ -133,8 +132,10 @@ def safe_get(url: str) -> Optional[str]:
         print(f"Ошибка при запросе {url}:", e)
         return None
 
+
 def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
+
 
 # ---------------- PARSERS ----------------
 
@@ -183,6 +184,7 @@ def load_3dnews() -> List[Dict]:
     print(f"DEBUG: 3DNews - {len(articles)} статей")
     return articles
 
+
 def load_rss(url: str, source: str) -> List[Dict]:
     print(f"Загружаем RSS: {url}")
     articles = []
@@ -220,6 +222,7 @@ def load_rss(url: str, source: str) -> List[Dict]:
     print(f"DEBUG: {source} - {len(articles)} статей")
     return articles
 
+
 def load_articles_from_sites() -> List[Dict]:
     articles = []
     articles.extend(load_3dnews())
@@ -233,6 +236,7 @@ def load_articles_from_sites() -> List[Dict]:
     print("=" * 60)
 
     return articles
+
 
 # ---------------- FILTER ----------------
 
@@ -267,7 +271,8 @@ def filter_article(entry: Dict) -> Optional[str]:
 
     return None
 
-# ---------------- PICK ARTICLE (UPDATED WITH FALLBACK) ----------------
+
+# ---------------- PICK ARTICLE (NEW LOGIC) ----------------
 
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
     strong_soft = []   # новости по ключам
@@ -284,15 +289,17 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
         summary = e.get("summary", "")
         text = (title + " " + summary).lower()
 
+        # сразу отбрасываем игры и мусор
         if any(kw in text for kw in EXCLUDE_KEYWORDS):
             continue
 
-        level = filter_article(e)
+        level = filter_article(e)  # вернёт 'strong'/'soft'/None
 
         if level:
             score = 2 if level == "strong" else 1
             strong_soft.append((score, e))
         else:
+            # сюда попадают «просто техно»-новости без наших ключей
             fallback.append(e)
 
     print(f"Пропущено опубликованных: {skipped}")
@@ -315,6 +322,7 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
         return fallback[0]
 
     return None
+
 
 # ---------------- OPENAI ----------------
 
@@ -345,9 +353,10 @@ def short_summary(title: str, summary: str) -> str:
     )
     text = res.choices[0].message.content.strip()
 
-    # один раз добавляем PS вручную
+    # добавляем PS только один раз вручную
     text += "\n\n" + ps
     return text
+
 
 def generate_image_prompt(title: str, summary: str) -> str:
     base_prompt = (
@@ -359,6 +368,7 @@ def generate_image_prompt(title: str, summary: str) -> str:
         messages=[{"role": "user", "content": base_prompt}],
     )
     return res.choices[0].message.content.strip()[:200]
+
 
 def generate_image_pollinations(prompt: str) -> Optional[str]:
     try:
@@ -386,6 +396,7 @@ def generate_image_pollinations(prompt: str) -> Optional[str]:
         print("Ошибка картинки:", e)
         return None
 
+
 # ---------------- MAIN ----------------
 
 async def autopost():
@@ -401,13 +412,22 @@ async def autopost():
         print("Нет подходящих статей")
         return
 
+    aid = art["id"]
+
+    # защита от дублей: сразу помечаем, что эту статью «заняли»
+    if aid in posted_articles:
+        print("Статья уже в posted_articles, выходим")
+        return
+    posted_articles[aid] = datetime.now().timestamp()
+    save_posted_articles()
+
     print("\nВыбрана статья:", art["title"], "\n")
 
-    text = short_summary(art["title"], art.get("summary", ""))
-    img_prompt = generate_image_prompt(art["title"], art.get("summary", ""))
-    img_file = generate_image_pollinations(img_prompt)
-
     try:
+        text = short_summary(art["title"], art.get("summary", ""))
+        img_prompt = generate_image_prompt(art["title"], art.get("summary", ""))
+        img_file = generate_image_pollinations(img_prompt)
+
         if img_file and os.path.exists(img_file):
             await bot.send_photo(
                 chat_id=CHANNEL_ID,
@@ -423,13 +443,18 @@ async def autopost():
                 parse_mode=ParseMode.HTML,
             )
 
-        save_posted(art["id"])
-        print("Статья сохранена.")
+        print("Статья успешно отправлена.")
     except Exception as e:
         print("Ошибка Telegram:", e)
+        # если отправка не удалась, можно вернуть статью «в пул»:
+        # posted_articles.pop(aid, None)
+        # save_posted_articles()
+
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
+
 
 
 

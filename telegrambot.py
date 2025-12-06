@@ -13,6 +13,8 @@ from aiogram.types import FSInputFile
 
 from openai import OpenAI
 
+# ---------------- CONFIG ----------------
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
@@ -23,7 +25,6 @@ bot = Bot(
     token=TELEGRAM_BOT_TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
 )
-
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 HEADERS = {
@@ -32,6 +33,11 @@ HEADERS = {
         "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
     )
 }
+
+POSTED_FILE = "posted_articles.json"
+RETENTION_DAYS = 7
+
+# ---------------- KEYWORDS ----------------
 
 STRONG_KEYWORDS = [
     "vpn", "впн", "прокси", "proxy", "tor", "shadowsocks",
@@ -71,8 +77,8 @@ EXCLUDE_KEYWORDS = [
     "шутер", "rpg", "mmorpg", "moba", "battle royale",
 ]
 
-POSTED_FILE = "posted_articles.json"
-RETENTION_DAYS = 7
+
+# ---------------- STATE ----------------
 
 if os.path.exists(POSTED_FILE):
     with open(POSTED_FILE, "r", encoding="utf-8") as f:
@@ -88,23 +94,6 @@ else:
     posted_articles = {}
 
 
-def clean_old_posts() -> None:
-    global posted_articles
-    now = datetime.now().timestamp()
-    cutoff = now - (RETENTION_DAYS * 86400)
-    
-    old_count = len(posted_articles)
-    posted_articles = {
-        id_str: ts for id_str, ts in posted_articles.items()
-        if ts is None or ts > cutoff
-    }
-    removed = old_count - len(posted_articles)
-    if removed > 0:
-        print(f"🗑️ Удалено старых постов: {removed}")
-    
-    save_posted_articles()
-
-
 def save_posted_articles() -> None:
     data = [
         {"id": id_str, "timestamp": ts}
@@ -114,10 +103,29 @@ def save_posted_articles() -> None:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
+def clean_old_posts() -> None:
+    global posted_articles
+    now = datetime.now().timestamp()
+    cutoff = now - (RETENTION_DAYS * 86400)
+
+    old_count = len(posted_articles)
+    posted_articles = {
+        id_str: ts for id_str, ts in posted_articles.items()
+        if ts is None or ts > cutoff
+    }
+    removed = old_count - len(posted_articles)
+    if removed > 0:
+        print(f"🗑️ Удалено старых постов: {removed}")
+
+    save_posted_articles()
+
+
 def save_posted(article_id: str) -> None:
     posted_articles[article_id] = datetime.now().timestamp()
     save_posted_articles()
 
+
+# ---------------- HELPERS ----------------
 
 def safe_get(url: str) -> Optional[str]:
     try:
@@ -135,13 +143,15 @@ def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
 
 
+# ---------------- PARSERS ----------------
+
 def load_3dnews() -> List[Dict]:
     url = "https://3dnews.ru/"
     html = safe_get(url)
     if not html:
         return []
 
-    articles: List[Dict] = []
+    articles = []
     parts = html.split('<a href="/')
 
     for part in parts[1:4]:
@@ -181,25 +191,20 @@ def load_3dnews() -> List[Dict]:
     return articles
 
 
-VC_RU_FEED = "https://vc.ru/rss"
+def load_rss(url: str, source: str) -> List[Dict]:
+    print(f"Загружаем RSS: {url}")
+    articles = []
 
-
-def load_vcru_from_rss() -> List[Dict]:
-    articles: List[Dict] = []
-
-    print(f"Загружаем RSS VC.ru: {VC_RU_FEED}")
     try:
-        feed = feedparser.parse(VC_RU_FEED)
+        feed = feedparser.parse(url)
     except Exception as e:
-        print(f"Ошибка RSS {VC_RU_FEED}: {e}")
+        print(f"Ошибка RSS {url}: {e}")
         return articles
 
     for entry in feed.entries[:30]:
         link = entry.get("link", "")
-        title = clean_text(entry.get("title", "") or "")
-        summary = clean_text(
-            entry.get("summary", "") or entry.get("description", "") or ""
-        )[:400]
+        title = clean_text(entry.get("title") or "")
+        summary = clean_text(entry.get("summary") or entry.get("description") or "")[:400]
 
         if not link or not title:
             continue
@@ -208,7 +213,7 @@ def load_vcru_from_rss() -> List[Dict]:
         if hasattr(entry, "published_parsed") and entry.published_parsed:
             try:
                 published_parsed = datetime(*entry.published_parsed[:6])
-            except Exception:
+            except:
                 pass
 
         articles.append({
@@ -216,53 +221,73 @@ def load_vcru_from_rss() -> List[Dict]:
             "title": title,
             "summary": summary,
             "link": link,
-            "source": "VC.ru/rss",
+            "source": source,
             "published_parsed": published_parsed,
         })
 
-    print(f"DEBUG: VC.ru RSS - {len(articles)} статей")
+    print(f"DEBUG: {source} - {len(articles)} статей")
     return articles
 
 
 def load_articles_from_sites() -> List[Dict]:
-    articles: List[Dict] = []
+    articles = []
     articles.extend(load_3dnews())
-    articles.extend(load_vcru_from_rss())
+    articles.extend(load_rss("https://vc.ru/rss", "VC.ru/rss"))
+    articles.extend(load_rss("https://habr.com/ru/rss/all/all/?fl=ru", "Habr/rss"))
+    articles.extend(load_rss("https://xakep.ru/feed/", "Xakep.ru/rss"))
 
-    print(f"\n{'=' * 60}")
+    print("\n" + "=" * 60)
     print(f"ВСЕГО СПАРСЕНО: {len(articles)} статей")
-    print(f"В памяти опубликовано: {len(posted_articles)} статей")
-    print(f"{'=' * 60}")
-    for i, art in enumerate(articles, 1):
-        print(f"{i}. [{art['source']}] {art['title'][:80]}")
-    print(f"{'=' * 60}\n")
+    print(f"В памяти опубликовано: {len(posted_articles)}")
+    print("=" * 60)
 
     return articles
 
+
+# ---------------- FILTER ----------------
 
 def filter_article(entry: Dict) -> Optional[str]:
     title = entry.get("title", "")
     summary = entry.get("summary", "")
     text = (title + " " + summary).lower()
 
-    if any(kw.lower() in text for kw in EXCLUDE_KEYWORDS):
+    if any(kw in text for kw in EXCLUDE_KEYWORDS):
         return None
 
-    if any(kw.lower() in text for kw in STRONG_KEYWORDS):
+    source = entry.get("source", "")
+
+    tech_keywords = [
+        "уязвимость", "эксплойт", "ddos", "malware", "ботнет",
+        "шифровальщик", "ransomware", "фишинг", "инфостилер",
+        "vpn", "впн", "proxy", "прокси", "трафик", "шифрование",
+        "хакер", "кибер", "кибератака", "утечка данных",
+    ]
+
+    if source in ("Habr/rss", "Xakep.ru/rss"):
+        if any(kw in text for kw in STRONG_KEYWORDS):
+            return "strong"
+        if any(kw in text for kw in SOFT_KEYWORDS + tech_keywords):
+            return "soft"
+
+    if any(kw in text for kw in STRONG_KEYWORDS):
         return "strong"
-    if any(kw.lower() in text for kw in SOFT_KEYWORDS):
+
+    if any(kw in text for kw in SOFT_KEYWORDS):
         return "soft"
+
     return None
 
 
+# ---------------- PICK ARTICLE (UPDATED) ----------------
+
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
     scored = []
-    skipped_count = 0
-    
+    skipped = 0
+
     for e in articles:
-        article_id = e.get("id", e.get("link"))
-        if article_id in posted_articles:
-            skipped_count += 1
+        aid = e.get("id")
+        if aid in posted_articles:
+            skipped += 1
             continue
 
         level = filter_article(e)
@@ -272,161 +297,147 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
         score = 2 if level == "strong" else 1
         scored.append((score, e))
 
-    print(f"ПРОПУЩЕНО ОПУБЛИКОВАННЫХ: {skipped_count}")
-    print(f"ПОДХОДЯЩИХ НОВЫХ СТАТЕЙ: {len(scored)}")
-    for i, (score, art) in enumerate(scored[:5], 1):
-        level = "STRONG" if score == 2 else "SOFT"
-        print(f"{i}. [{level}] [{art['source']}] {art['title'][:80]}")
-    print(f"{'=' * 60}\n")
+    print(f"Пропущено опубликованных: {skipped}")
+    print(f"Подходящих: {len(scored)}")
 
-    if scored:
-        scored.sort(
-            key=lambda x: (
-                x[0],
-                x[1].get("published_parsed", datetime.now())
-            ),
-            reverse=True,
-        )
-        return scored[0][1]
+    # вывод топ-5 кандидатов
+    for i, (score, art) in enumerate(
+        sorted(
+            scored,
+            key=lambda x: (x[0], x[1]["published_parsed"]),
+            reverse=True
+        )[:5], 1
+    ):
+        lvl = "STRONG" if score == 2 else "SOFT"
+        print(f"{i}. [{lvl}] [{art['source']}] {art['title'][:80]}")
 
-    return None
+    if not scored:
+        return None
 
+    scored.sort(key=lambda x: (x[0], x[1]["published_parsed"]), reverse=True)
+    return scored[0][1]
+
+
+# ---------------- OPENAI ----------------
 
 def short_summary(title: str, summary: str) -> str:
     news_text = f"{title}. {summary}" if summary else title
 
     prompt = (
-        f"Перепиши эту техническую новость в стиле Telegram-канала:\n\n"
+        f"Перепиши новость в стиле Telegram-канала:\n\n"
         f"{news_text}\n\n"
         f"ПРАВИЛА:\n"
-        f"1. Пиши КОНКРЕТНО — если упомянуто название компании/продукта, используй его! НЕ пиши 'Компания X' или 'Продукт Y'.\n"
-        f"2. Если есть версии, цифры, проценты — обязательно указывай.\n"
-        f"3. Пиши простым языком, без канцелярита.\n"
-        f"4. Объём основного текста: примерно 400–600 символов.\n"
-        f"5. Формат строго такой:\n"
-        f"   [эмоджи] Строка 1: что произошло\n"
-        f"   [эмоджи] Строка 2: какая была проблема\n"
-        f"   [эмоджи] Строка 3: что улучшилось\n"
-        f"   [эмоджи] Строка 4: зачем это нужно\n"
-        f"   ПУСТАЯ СТРОКА\n"
-        f"   PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6\n\n"
-        f"Верни только готовый текст поста целиком, включая строку PS."
+        f"1. Используй реальные названия.\n"
+        f"2. Если есть цифры — оставляй.\n"
+        f"3. Объем: 400–600 символов.\n"
+        f"4. Формат:\n"
+        f"   [эмоджи] Что произошло\n"
+        f"   [эмоджи] Какая была проблема\n"
+        f"   [эмоджи] Что улучшилось\n"
+        f"   [эмоджи] Зачем это нужно\n\n"
+        f"В конце обязательно добавь:\n"
+        f"PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
     )
 
-    result = openai_client.chat.completions.create(
+    res = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": prompt}],
     )
-    text = result.choices[0].message.content.strip()
+    text = res.choices[0].message.content.strip()
 
-    ps = "PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
+    ps = "PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ЗTE6"
     if ps not in text:
-        text = f"{text.rstrip()}\n\n{ps}"
+        text += "\n\n" + ps
 
     return text
 
 
 def generate_image_prompt(title: str, summary: str) -> str:
     base_prompt = (
-        f"Create a short image prompt for: {title}. "
-        f"Style: cinematic realistic, dramatic lighting, dark tech atmosphere, high detail. "
-        f"Focus on technology/cybersecurity/internet themes. No text, no logos. Max 200 chars."
+        f"Create cinematic, realistic image about: {title}. "
+        f"Dark tech atmosphere. No text. Max 200 chars."
     )
-    result = openai_client.chat.completions.create(
+    res = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "user", "content": base_prompt}],
     )
-    return result.choices[0].message.content.strip()[:200]
+    return res.choices[0].message.content.strip()[:200]
 
 
 def generate_image_pollinations(prompt: str) -> Optional[str]:
     try:
-        print(f"Генерация Pollinations: {prompt}")
+        print("Пытаюсь сгенерировать картинку Pollinations...")
 
-        url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}"
-        params = {
-            "width": "1024",
-            "height": "1024",
-            "nologo": "true",
-            "model": "flux",
-        }
+        url = (
+            f"https://image.pollinations.ai/prompt/"
+            f"{requests.utils.quote(prompt)}"
+        )
 
-        response = requests.get(url, params=params, timeout=60)
+        params = {"width": "1024", "height": "1024", "nologo": "true", "model": "flux"}
 
-        if response.status_code == 200:
-            filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            with open(filename, "wb") as f:
-                f.write(response.content)
-            print(f"✅ Картинка: {filename}")
-            return filename
-        else:
-            print(f"❌ Ошибка Pollinations: {response.status_code}")
+        r = requests.get(url, params=params, timeout=60)
+        if r.status_code != 200:
+            print("Ошибка Pollinations:", r.status_code)
             return None
+
+        filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        with open(filename, "wb") as f:
+            f.write(r.content)
+
+        return filename
+
     except Exception as e:
-        print(f"❌ Ошибка генерации: {e}")
+        print("Ошибка картинки:", e)
         return None
 
 
+# ---------------- MAIN ----------------
+
 async def autopost():
     clean_old_posts()
-    
-    articles = load_articles_from_sites()
 
+    articles = load_articles_from_sites()
     if not articles:
-        print("❌ Нет статей для обработки")
+        print("Нет статей")
         return
 
     art = pick_article(articles)
-
     if not art:
-        print("❌ Нет подходящих статей (все либо опубликованы, либо не подходят)")
+        print("Нет подходящих статей")
         return
 
-    # Генерация текста поста
-    print(f"\n{'=' * 60}")
-    print(f"📰 Выбрана статья: {art['title']}")
-    print(f"🔗 Источник: {art['source']}")
-    print(f"{'=' * 60}\n")
+    print("\nВыбрана статья:", art["title"], "\n")
 
     text = short_summary(art["title"], art.get("summary", ""))
-    print(f"📝 Текст сгенерирован ({len(text)} символов)")
-
-    # Генерация изображения
     img_prompt = generate_image_prompt(art["title"], art.get("summary", ""))
-    print(f"🎨 Промпт для картинки: {img_prompt}")
-    
-    image_path = generate_image_pollinations(img_prompt)
+    img_file = generate_image_pollinations(img_prompt)
 
-    # Отправка в Telegram
     try:
-        if image_path and os.path.exists(image_path):
-            photo = FSInputFile(image_path)
+        if img_file and os.path.exists(img_file):
             await bot.send_photo(
                 chat_id=CHANNEL_ID,
-                photo=photo,
+                photo=FSInputFile(img_file),
                 caption=text,
                 parse_mode=ParseMode.HTML,
             )
-            print(f"✅ Пост с картинкой отправлен")
-            os.remove(image_path)
+            os.remove(img_file)
         else:
             await bot.send_message(
                 chat_id=CHANNEL_ID,
                 text=text,
                 parse_mode=ParseMode.HTML,
             )
-            print(f"✅ Пост без картинки отправлен")
 
-        # Сохраняем как опубликованную
-        save_posted(art.get("id", art.get("link")))
-        print(f"💾 Статья сохранена в posted_articles.json")
-
+        save_posted(art["id"])
+        print("Статья сохранена.")
     except Exception as e:
-        print(f"❌ Ошибка отправки в Telegram: {e}")
+        print("Ошибка Telegram:", e)
 
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
+
 
 
 

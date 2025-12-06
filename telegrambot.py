@@ -77,7 +77,6 @@ EXCLUDE_KEYWORDS = [
     "шутер", "rpg", "mmorpg", "moba", "battle royale",
 ]
 
-
 # ---------------- STATE ----------------
 
 if os.path.exists(POSTED_FILE):
@@ -93,7 +92,6 @@ if os.path.exists(POSTED_FILE):
 else:
     posted_articles = {}
 
-
 def save_posted_articles() -> None:
     data = [
         {"id": id_str, "timestamp": ts}
@@ -101,7 +99,6 @@ def save_posted_articles() -> None:
     ]
     with open(POSTED_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-
 
 def clean_old_posts() -> None:
     global posted_articles
@@ -119,11 +116,9 @@ def clean_old_posts() -> None:
 
     save_posted_articles()
 
-
 def save_posted(article_id: str) -> None:
     posted_articles[article_id] = datetime.now().timestamp()
     save_posted_articles()
-
 
 # ---------------- HELPERS ----------------
 
@@ -138,10 +133,8 @@ def safe_get(url: str) -> Optional[str]:
         print(f"Ошибка при запросе {url}:", e)
         return None
 
-
 def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
-
 
 # ---------------- PARSERS ----------------
 
@@ -190,7 +183,6 @@ def load_3dnews() -> List[Dict]:
     print(f"DEBUG: 3DNews - {len(articles)} статей")
     return articles
 
-
 def load_rss(url: str, source: str) -> List[Dict]:
     print(f"Загружаем RSS: {url}")
     articles = []
@@ -228,7 +220,6 @@ def load_rss(url: str, source: str) -> List[Dict]:
     print(f"DEBUG: {source} - {len(articles)} статей")
     return articles
 
-
 def load_articles_from_sites() -> List[Dict]:
     articles = []
     articles.extend(load_3dnews())
@@ -242,7 +233,6 @@ def load_articles_from_sites() -> List[Dict]:
     print("=" * 60)
 
     return articles
-
 
 # ---------------- FILTER ----------------
 
@@ -277,11 +267,11 @@ def filter_article(entry: Dict) -> Optional[str]:
 
     return None
 
-
-# ---------------- PICK ARTICLE (UPDATED) ----------------
+# ---------------- PICK ARTICLE (UPDATED WITH FALLBACK) ----------------
 
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
-    scored = []
+    strong_soft = []   # новости по ключам
+    fallback = []      # любые техно-новости без ключей, но и без EXCLUDE
     skipped = 0
 
     for e in articles:
@@ -290,39 +280,48 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
             skipped += 1
             continue
 
-        level = filter_article(e)
-        if not level:
+        title = e.get("title", "")
+        summary = e.get("summary", "")
+        text = (title + " " + summary).lower()
+
+        if any(kw in text for kw in EXCLUDE_KEYWORDS):
             continue
 
-        score = 2 if level == "strong" else 1
-        scored.append((score, e))
+        level = filter_article(e)
+
+        if level:
+            score = 2 if level == "strong" else 1
+            strong_soft.append((score, e))
+        else:
+            fallback.append(e)
 
     print(f"Пропущено опубликованных: {skipped}")
-    print(f"Подходящих: {len(scored)}")
+    print(f"По ключам найдено: {len(strong_soft)}, запасных: {len(fallback)}")
 
-    for i, (score, art) in enumerate(
-        sorted(
-            scored,
-            key=lambda x: (x[0], x[1]["published_parsed"]),
-            reverse=True
-        )[:5], 1
-    ):
-        lvl = "STRONG" if score == 2 else "SOFT"
-        print(f"{i}. [{lvl}] [{art['source']}] {art['title'][:80]}")
+    # 1) если есть приоритетные — берём лучшую из них
+    if strong_soft:
+        strong_soft.sort(
+            key=lambda x: x[1].get("published_parsed", datetime.now()),
+            reverse=True,
+        )
+        return strong_soft[0][1]
 
-    if not scored:
-        return None
+    # 2) иначе берём первую доступную запасную
+    if fallback:
+        fallback.sort(
+            key=lambda x: x.get("published_parsed", datetime.now()),
+            reverse=True,
+        )
+        return fallback[0]
 
-    scored.sort(key=lambda x: (x[0], x[1]["published_parsed"]), reverse=True)
-    return scored[0][1]
-
+    return None
 
 # ---------------- OPENAI ----------------
 
 def short_summary(title: str, summary: str) -> str:
     news_text = f"{title}. {summary}" if summary else title
 
-    ps = "PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ЗTE6"
+    ps = "PS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
 
     prompt = (
         f"Перепиши новость в стиле Telegram-канала:\n\n"
@@ -346,12 +345,9 @@ def short_summary(title: str, summary: str) -> str:
     )
     text = res.choices[0].message.content.strip()
 
-    # защита от дублей
-    if ps not in text:
-        text += "\n\n" + ps
-
+    # один раз добавляем PS вручную
+    text += "\n\n" + ps
     return text
-
 
 def generate_image_prompt(title: str, summary: str) -> str:
     base_prompt = (
@@ -363,7 +359,6 @@ def generate_image_prompt(title: str, summary: str) -> str:
         messages=[{"role": "user", "content": base_prompt}],
     )
     return res.choices[0].message.content.strip()[:200]
-
 
 def generate_image_pollinations(prompt: str) -> Optional[str]:
     try:
@@ -390,7 +385,6 @@ def generate_image_pollinations(prompt: str) -> Optional[str]:
     except Exception as e:
         print("Ошибка картинки:", e)
         return None
-
 
 # ---------------- MAIN ----------------
 
@@ -434,9 +428,9 @@ async def autopost():
     except Exception as e:
         print("Ошибка Telegram:", e)
 
-
 if __name__ == "__main__":
     asyncio.run(autopost())
+
 
 
 

@@ -229,7 +229,6 @@ def check_keywords(text: str) -> Optional[str]:
     """Строгая проверка по ключевым словам"""
     text_lower = text.lower()
     
-    # СНАЧАЛА проверяем исключения
     for kw in EXCLUDE_KEYWORDS:
         if kw in text_lower:
             print(f"❌ Отклонено по слову: '{kw}'")
@@ -326,57 +325,73 @@ def short_summary(title: str, summary: str) -> str:
         return f"{short} 🔐🌐\n\n#tech #новости\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
 
 def generate_image_prompt(title: str, summary: str) -> str:
-    base = f"Create short prompt for 1:1 tech image: {title}. Max 150 chars. Dark style, no text."
+    base = f"Create short prompt for 1:1 tech image: {title}. Max 100 chars. Dark style, no text."
     
     try:
         res = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": base}],
         )
-        return res.choices[0].message.content.strip()[:150]
+        return res.choices[0].message.content.strip()[:100]
     except Exception as e:
         print(f"❌ Промпт: {e}")
-        return "Dark cyberpunk tech illustration, 1:1 square, no text"
+        return "Dark tech cyberpunk illustration 1:1 no text"
 
-def generate_image_pollinations(prompt: str) -> Optional[str]:
-    """Синхронная генерация с retry"""
-    max_retries = 2
-    
-    for attempt in range(max_retries):
-        try:
-            print(f"Генерация ({attempt + 1}/{max_retries})...")
-            url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}"
-            params = {
+def generate_image(prompt: str) -> Optional[str]:
+    """
+    Попытка генерации через несколько сервисов:
+    1. Pollinations AI (flux)
+    2. Pollinations AI (turbo - быстрее)
+    """
+    services = [
+        {
+            "name": "Pollinations Flux",
+            "url": "https://image.pollinations.ai/prompt/",
+            "params": {
                 "width": "1024",
                 "height": "1024",
                 "nologo": "true",
                 "model": "flux",
                 "enhance": "false"
-            }
-            
-            r = requests.get(url, params=params, timeout=90)
-            if r.status_code != 200:
-                print(f"HTTP {r.status_code}")
-                if attempt < max_retries - 1:
-                    time.sleep(3)  # Используем time.sleep вместо await
-                continue
-            
-            filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            with open(filename, "wb") as f:
-                f.write(r.content)
-            print(f"✅ Картинка: {filename}")
-            return filename
-            
-        except requests.exceptions.Timeout:
-            print(f"⏱️ Timeout {attempt + 1}")
-            if attempt < max_retries - 1:
-                time.sleep(3)
-        except Exception as e:
-            print(f"❌ Ошибка: {e}")
-            if attempt < max_retries - 1:
-                time.sleep(3)
+            },
+            "timeout": 60
+        },
+        {
+            "name": "Pollinations Turbo",
+            "url": "https://image.pollinations.ai/prompt/",
+            "params": {
+                "width": "1024",
+                "height": "1024",
+                "nologo": "true",
+                "model": "turbo",
+                "enhance": "false"
+            },
+            "timeout": 30
+        }
+    ]
     
-    print("❌ Картинка не создана")
+    for service in services:
+        try:
+            print(f"🎨 Пробую {service['name']}...")
+            url = f"{service['url']}{requests.utils.quote(prompt)}"
+            
+            r = requests.get(url, params=service['params'], timeout=service['timeout'])
+            
+            if r.status_code == 200:
+                filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                with open(filename, "wb") as f:
+                    f.write(r.content)
+                print(f"✅ Картинка создана: {filename}")
+                return filename
+            else:
+                print(f"❌ {service['name']}: HTTP {r.status_code}")
+                
+        except requests.exceptions.Timeout:
+            print(f"⏱️ {service['name']}: Timeout")
+        except Exception as e:
+            print(f"❌ {service['name']}: {e}")
+    
+    print("❌ Все сервисы недоступны, отправляю без картинки")
     return None
 
 # ---------------- AUTOPOST ----------------
@@ -400,7 +415,7 @@ async def autopost():
     try:
         text = short_summary(art["title"], art.get("summary", ""))
         img_prompt = generate_image_prompt(art["title"], art.get("summary", ""))
-        img_file = generate_image_pollinations(img_prompt)
+        img_file = generate_image(img_prompt)
 
         if img_file and os.path.exists(img_file):
             await bot.send_photo(
@@ -410,14 +425,14 @@ async def autopost():
                 parse_mode=ParseMode.HTML,
             )
             os.remove(img_file)
-            print("✅ С картинкой")
+            print("✅ Отправлено с картинкой")
         else:
             await bot.send_message(
                 chat_id=CHANNEL_ID,
                 text=text,
                 parse_mode=ParseMode.HTML,
             )
-            print("✅ Без картинки")
+            print("✅ Отправлено без картинки")
 
         save_posted(aid)
         
@@ -426,6 +441,7 @@ async def autopost():
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
 
 
 

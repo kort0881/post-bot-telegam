@@ -1,7 +1,7 @@
 import os
 import json
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Dict, Optional
 
 import requests
@@ -43,20 +43,33 @@ RETENTION_DAYS = 7
 STRONG_KEYWORDS = [
     "vpn", "впн", "прокси", "proxy", "tor", "shadowsocks",
     "wireguard", "openvpn", "роскомнадзор", "ркн",
-    "блокировка сайтов", "блокировка ресурса",
-    "обход блокировок", "обход цензуры", "цензура",
-    "telegram", "телеграм", "dpi", "минцифры",
+    "блокировка сайтов", "блокировка", "блокиров",
+    "обход блокировок", "обход цензуры", "цензур",
+    "telegram", "телеграм", "whatsapp", "signal",
+    "dpi", "минцифры", "суверенный интернет",
+    "белые списки", "роскомсвобода", "запрещенн",
 ]
 
 SOFT_KEYWORDS = [
-    "кибербезопасность", "информационная безопасность",
-    "конфиденциальность", "privacy", "нейросеть", "ai",
-    "машинное обучение", "искусственный интеллект",
+    "кибербезопасность", "киберзащита", "информационная безопасность",
+    "конфиденциальность", "privacy", "анонимность",
+    "шифрование", "encryption", "безопасность данных",
+    "утечка данных", "взлом", "хакер", "malware", "вирус",
+    "уязвимость", "vulnerability", "эксплойт",
 ]
 
+# СТРОГИЕ ИСКЛЮЧЕНИЯ - убираем такие статьи
 EXCLUDE_KEYWORDS = [
+    # Спорт и игры
+    "теннис", "футбол", "хоккей", "баскетбол", "волейбол", "спорт",
     "игра", "геймплей", "gameplay", "dungeon", "quest",
     "playstation", "xbox", "nintendo", "steam", "boss", "raid",
+    "шутер", "mmorpg", "battle royale", "геймер",
+    # Личные истории и блоги
+    "моя жизнь", "мой опыт", "как я", "моя история",
+    "вернулся", "вернулась", "личный опыт",
+    # Развлечения
+    "кино", "фильм", "сериал", "музыка", "концерт",
 ]
 
 # ---------------- STATE ----------------
@@ -127,7 +140,7 @@ def load_3dnews() -> List[Dict]:
         articles = []
         parts = html.split('<a href="/')
 
-        for part in parts[1:4]:
+        for part in parts[1:15]:
             try:
                 href_end = part.find('"')
                 title_start = part.find(">")
@@ -161,7 +174,6 @@ def load_3dnews() -> List[Dict]:
                     "published_parsed": datetime.now(),
                 })
             except Exception as e:
-                print(f"Ошибка парсинга 3DNews: {e}")
                 continue
 
         return articles
@@ -174,7 +186,7 @@ def load_rss(url: str, source: str) -> List[Dict]:
     try:
         feed = feedparser.parse(url)
         
-        for entry in feed.entries[:30]:
+        for entry in feed.entries[:50]:
             try:
                 link = entry.get("link", "")
                 title = clean_text(entry.get("title") or "")
@@ -198,7 +210,6 @@ def load_rss(url: str, source: str) -> List[Dict]:
                     "published_parsed": published_parsed,
                 })
             except Exception as e:
-                print(f"Ошибка RSS {source}: {e}")
                 continue
 
     except Exception as e:
@@ -215,59 +226,96 @@ def load_articles_from_sites() -> List[Dict]:
     print(f"ВСЕГО: {len(articles)} статей")
     return articles
 
-# ---------------- FILTER ----------------
+# ---------------- FILTER (УСИЛЕННЫЙ) ----------------
 
-def filter_article(entry: Dict) -> Optional[str]:
-    title = entry.get("title", "")
-    summary = entry.get("summary", "")
-    text = (title + " " + summary).lower()
-
-    if any(kw in text for kw in EXCLUDE_KEYWORDS):
-        return None
-
-    if any(kw in text for kw in STRONG_KEYWORDS):
+def check_keywords(text: str) -> Optional[str]:
+    """Строгая проверка по ключевым словам"""
+    text_lower = text.lower()
+    
+    # СНАЧАЛА проверяем исключения (если хоть одно слово - отклоняем)
+    for kw in EXCLUDE_KEYWORDS:
+        if kw in text_lower:
+            print(f"❌ Отклонено по слову: '{kw}'")
+            return None
+    
+    # Проверяем сильные ключевые слова
+    if any(kw in text_lower for kw in STRONG_KEYWORDS):
         return "strong"
-    if any(kw in text for kw in SOFT_KEYWORDS):
+    
+    # Проверяем слабые ключевые слова
+    if any(kw in text_lower for kw in SOFT_KEYWORDS):
         return "soft"
-
+    
     return None
 
 # ---------------- PICK ARTICLE ----------------
 
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
-    strong_soft = []
-    fallback = []
+    """
+    ЛОГИКА:
+    1. Сначала ищем по ключевым словам (strong/soft)
+    2. Если НЕ нашли - берём самую свежую ИЗ ТЕХНИЧЕСКИХ источников
+    3. НО только если она прошла проверку на исключения
+    """
+    filtered_strong = []
+    filtered_soft = []
+    all_fresh = []
     skipped = 0
+    excluded = 0
 
     for e in articles:
         aid = e.get("id")
+        
+        # Пропускаем уже опубликованные
         if aid in posted_articles:
             skipped += 1
             continue
 
         title = e.get("title", "")
         summary = e.get("summary", "")
-        text = (title + " " + summary).lower()
+        text = title + " " + summary
 
-        if any(kw in text for kw in EXCLUDE_KEYWORDS):
-            continue
+        # Проверяем по ключевым словам
+        level = check_keywords(text)
+        
+        if level == "strong":
+            filtered_strong.append(e)
+        elif level == "soft":
+            filtered_soft.append(e)
+        elif level is None:
+            # Если вернуло None но НЕ из-за исключений (а просто нет ключей)
+            # Дополнительно проверяем на исключения
+            text_lower = text.lower()
+            if not any(kw in text_lower for kw in EXCLUDE_KEYWORDS):
+                all_fresh.append(e)
+            else:
+                excluded += 1
 
-        level = filter_article(e)
-        if level:
-            score = 2 if level == "strong" else 1
-            strong_soft.append((score, e))
-        else:
-            fallback.append(e)
+    print(f"Пропущено опубликованных: {skipped}")
+    print(f"Исключено (спорт/блоги): {excluded}")
+    print(f"По сильным ключам: {len(filtered_strong)}")
+    print(f"По слабым ключам: {len(filtered_soft)}")
+    print(f"Свежих технических: {len(all_fresh)}")
 
-    print(f"Пропущено: {skipped}, найдено: {len(strong_soft)}, запас: {len(fallback)}")
+    # ПРИОРИТЕТ 1: Сильные ключевые слова
+    if filtered_strong:
+        filtered_strong.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
+        print("✅ Выбрана по СИЛЬНЫМ ключам")
+        return filtered_strong[0]
 
-    if strong_soft:
-        strong_soft.sort(key=lambda x: (x[0], x[1].get("published_parsed", datetime.now())), reverse=True)
-        return strong_soft[0][1]
-    if fallback:
-        fallback.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
-        return fallback[0]
+    # ПРИОРИТЕТ 2: Слабые ключевые слова
+    if filtered_soft:
+        filtered_soft.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
+        print("✅ Выбрана по СЛАБЫМ ключам")
+        return filtered_soft[0]
 
+    # ПРИОРИТЕТ 3: Самая свежая техническая
+    if all_fresh:
+        all_fresh.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
+        print("⚠️ Выбрана СВЕЖАЯ техническая (нет по фильтрам)")
+        return all_fresh[0]
+
+    print("❌ Подходящих статей не найдено")
     return None
 
 # ---------------- OPENAI ----------------
@@ -282,12 +330,12 @@ def short_summary(title: str, summary: str) -> str:
         f"1. Ровно 197 символов текста (считай внимательно!)\n"
         f"2. Добавь 2-3 эмодзи В КОНЦЕ текста\n"
         f"3. После текста на новой строке добавь 3-5 хештегов по теме\n"
-        f"4. Пиши конкретно, без вводных фраз типа 'Что произошло', 'Какая проблема'\n"
+        f"4. Пиши конкретно, без вводных фраз\n"
         f"5. Структура:\n"
         f"   [текст 197 символов] [эмодзи]\n\n"
         f"   #хештег1 #хештег2 #хештег3\n\n"
-        f"6. ЗАПРЕЩЕНО начинать со слов: 'Что произошло', 'Какая проблема', 'Что улучшилось'\n"
-        f"7. Пиши сразу по сути новости"
+        f"6. ЗАПРЕЩЕНО: 'Что произошло', 'Какая проблема'\n"
+        f"7. Пиши сразу по сути"
     )
     
     try:
@@ -304,38 +352,62 @@ def short_summary(title: str, summary: str) -> str:
         print(f"❌ OpenAI ошибка: {e}")
         short = (title[:180] + "...") if len(title) > 180 else title
         ps = "\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
-        return f"{short} 🔐🌐\n\n#VPN #блокировки #интернет{ps}"
+        return f"{short} 🔐🌐\n\n#tech #новости{ps}"
 
 def generate_image_prompt(title: str, summary: str) -> str:
     """Промпт для картинки 1:1"""
-    base = f"Создай промпт на английском для изображения 1:1:\n\nНовость: {title}\n\nТребования:\n- Квадрат 1:1\n- Темная tech-атмосфера\n- Киберпанк стиль\n- Без текста\n- Макс 200 символов"
+    base = f"Create short English prompt for 1:1 tech image about: {title}. Max 150 chars. Dark cyberpunk style, no text."
     
     try:
         res = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": base}],
         )
-        return res.choices[0].message.content.strip()[:200]
+        return res.choices[0].message.content.strip()[:150]
     except Exception as e:
         print(f"❌ Промпт ошибка: {e}")
-        return f"Dark cyberpunk tech illustration, VPN security concept, 1:1 square, dramatic lighting, no text"
+        return f"Dark tech cyberpunk illustration, 1:1 square, no text"
 
 def generate_image_pollinations(prompt: str) -> Optional[str]:
-    try:
-        print("Генерация картинки...")
-        url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}"
-        params = {"width": "1024", "height": "1024", "nologo": "true", "model": "flux"}
-        r = requests.get(url, params=params, timeout=60)
-        if r.status_code != 200:
-            return None
-        
-        filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        with open(filename, "wb") as f:
-            f.write(r.content)
-        return filename
-    except Exception as e:
-        print(f"❌ Ошибка генерации: {e}")
-        return None
+    """Генерация с увеличенным timeout и retry"""
+    max_retries = 2
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"Генерация картинки (попытка {attempt + 1}/{max_retries})...")
+            url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}"
+            params = {
+                "width": "1024",
+                "height": "1024",
+                "nologo": "true",
+                "model": "flux",
+                "enhance": "false"  # отключаем улучшение для скорости
+            }
+            
+            # Увеличенный timeout
+            r = requests.get(url, params=params, timeout=90)
+            if r.status_code != 200:
+                print(f"HTTP {r.status_code}")
+                continue
+            
+            filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            with open(filename, "wb") as f:
+                f.write(r.content)
+            print(f"✅ Картинка сохранена: {filename}")
+            return filename
+            
+        except requests.exceptions.Timeout:
+            print(f"⏱️ Timeout при попытке {attempt + 1}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(3)
+                continue
+        except Exception as e:
+            print(f"❌ Ошибка генерации: {e}")
+            if attempt < max_retries - 1:
+                continue
+    
+    print("❌ Не удалось сгенерировать картинку после всех попыток")
+    return None
 
 # ---------------- AUTOPOST ----------------
 
@@ -348,15 +420,12 @@ async def autopost():
 
     art = pick_article(articles)
     if not art:
-        print("Нет подходящих")
+        print("Нет подходящих статей")
         return
 
     aid = art["id"]
-    if aid in posted_articles:
-        print("Уже опубликовано")
-        return
-
-    print(f"\n✅ Выбрана: {art['title']}\n")
+    print(f"\n✅ Выбрана: {art['title']}")
+    print(f"Источник: {art['source']}, Дата: {art['published_parsed']}\n")
 
     try:
         text = short_summary(art["title"], art.get("summary", ""))
@@ -371,21 +440,23 @@ async def autopost():
                 parse_mode=ParseMode.HTML,
             )
             os.remove(img_file)
+            print("✅ Отправлено с картинкой")
         else:
             await bot.send_message(
                 chat_id=CHANNEL_ID,
                 text=text,
                 parse_mode=ParseMode.HTML,
             )
+            print("✅ Отправлено БЕЗ картинки")
 
         save_posted(aid)
-        print("✅ Отправлено!")
         
     except Exception as e:
         print(f"❌ Ошибка отправки: {e}")
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
 
 
 

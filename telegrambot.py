@@ -58,17 +58,23 @@ SOFT_KEYWORDS = [
     "утечка данных", "взлом", "хакер", "malware", "вирус",
     "уязвимость", "vulnerability", "эксплойт",
     "искусственный интеллект", "нейросет", "машинное обучение",
+    "chatgpt", "claude", "gemini", "llm",
 ]
 
 EXCLUDE_KEYWORDS = [
+    # Спорт и игры
     "теннис", "футбол", "хоккей", "баскетбол", "волейбол", "спорт",
+    "олимпиад", "соревнован", "чемпионат", "турнир",
     "игра", "геймплей", "gameplay", "dungeon", "quest",
     "playstation", "xbox", "nintendo", "steam", "boss", "raid",
     "шутер", "mmorpg", "battle royale", "геймер", "gamer",
     "helldivers", "routine", "игровой", "игровых",
+    # Личные истории
     "моя жизнь", "мой опыт", "как я", "моя история",
     "вернулся", "вернулась", "личный опыт",
+    # Развлечения
     "кино", "фильм", "сериал", "музыка", "концерт",
+    # Разное
     "дайджест", "digest", "обзор игр", "новости игр",
 ]
 
@@ -218,11 +224,11 @@ def load_rss(url: str, source: str) -> List[Dict]:
     return articles
 
 def load_articles_from_sites() -> List[Dict]:
-    """Загрузить статьи со всех источников"""
+    """Загрузить статьи со всех источников (БЕЗ HABR)"""
     articles = []
     articles.extend(load_3dnews())
     articles.extend(load_rss("https://vc.ru/rss", "VC.ru"))
-    articles.extend(load_rss("https://habr.com/ru/rss/all/all/?fl=ru", "Habr"))
+    # УБРАЛИ HABR
     articles.extend(load_rss("https://xakep.ru/feed/", "Xakep.ru"))
     articles.extend(load_rss("https://xakep.ru/tag/iskusstvennyj-intellekt/feed/", "Xakep.ru/AI"))
     print(f"ВСЕГО: {len(articles)} статей")
@@ -234,6 +240,7 @@ def check_keywords(text: str) -> Optional[str]:
     """Строгая проверка по ключевым словам"""
     text_lower = text.lower()
     
+    # ПЕРВЫМ ДЕЛОМ проверяем исключения
     for kw in EXCLUDE_KEYWORDS:
         if kw in text_lower:
             return None
@@ -250,10 +257,10 @@ def check_keywords(text: str) -> Optional[str]:
 
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
     """
-    ЛОГИКА:
-    1. Сначала ищем по СИЛЬНЫМ ключам во всех источниках
-    2. Потом по СЛАБЫМ ключам во всех источниках
-    3. Если не нашли - берём ТОЛЬКО из Xakep.ru/AI
+    СТРОГАЯ ЛОГИКА:
+    1. Сначала ищем по СИЛЬНЫМ ключам во ВСЕХ источниках
+    2. Потом по СЛАБЫМ ключам во ВСЕХ источниках
+    3. Если НЕ нашли - берём ТОЛЬКО из Xakep.ru/AI (без фильтров, но без исключений)
     """
     filtered_strong = []
     filtered_soft = []
@@ -272,18 +279,25 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
         summary = e.get("summary", "")
         text = title + " " + summary
         source = e.get("source", "")
+        text_lower = text.lower()
 
+        # Проверяем на исключения в любом случае
+        has_exclusion = any(kw in text_lower for kw in EXCLUDE_KEYWORDS)
+        
+        if has_exclusion:
+            excluded += 1
+            continue
+
+        # Проверяем по ключевым словам
         level = check_keywords(text)
         
         if level == "strong":
             filtered_strong.append(e)
         elif level == "soft":
             filtered_soft.append(e)
-        elif level is None:
-            text_lower = text.lower()
-            if any(kw in text_lower for kw in EXCLUDE_KEYWORDS):
-                excluded += 1
-            elif source == "Xakep.ru/AI":
+        else:
+            # Если не прошла фильтры, но это AI - в резерв
+            if source == "Xakep.ru/AI":
                 ai_articles.append(e)
 
     print(f"Пропущено: {skipped}, Исключено: {excluded}")
@@ -301,9 +315,10 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
 
     if ai_articles:
         ai_articles.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
-        print("⚠️ Из Xakep.ru/AI")
+        print("⚠️ Из Xakep.ru/AI (резерв)")
         return ai_articles[0]
 
+    print("❌ Подходящих статей не найдено")
     return None
 
 # ---------------- OPENAI ----------------
@@ -336,17 +351,11 @@ def short_summary(title: str, summary: str) -> str:
         return f"{short} 🔐🌐\n\n#tech #новости\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
 
 def generate_image(title: str) -> Optional[str]:
-    """
-    Простая генерация без промпта от OpenAI
-    Используем прямой URL от Pollinations с минимальными параметрами
-    """
+    """Простая генерация через Pollinations"""
     try:
-        # Простой промпт на основе заголовка (первые 50 символов)
         simple_prompt = f"dark tech cyberpunk illustration {title[:50]}"
-        
         print(f"🎨 Генерирую картинку...")
         
-        # Прямой URL без лишних параметров
         url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(simple_prompt)}"
         params = {
             "width": "1024",
@@ -354,7 +363,6 @@ def generate_image(title: str) -> Optional[str]:
             "nologo": "true"
         }
         
-        # Один запрос без retry, timeout 120 секунд
         r = requests.get(url, params=params, timeout=120, stream=True)
         
         if r.status_code == 200:
@@ -421,6 +429,8 @@ async def autopost():
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
+
 
 
 

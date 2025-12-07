@@ -57,16 +57,19 @@ SOFT_KEYWORDS = [
     "шифрование", "encryption", "безопасность данных",
     "утечка данных", "взлом", "хакер", "malware", "вирус",
     "уязвимость", "vulnerability", "эксплойт",
+    "искусственный интеллект", "нейросет", "машинное обучение",
 ]
 
 EXCLUDE_KEYWORDS = [
     "теннис", "футбол", "хоккей", "баскетбол", "волейбол", "спорт",
     "игра", "геймплей", "gameplay", "dungeon", "quest",
     "playstation", "xbox", "nintendo", "steam", "boss", "raid",
-    "шутер", "mmorpg", "battle royale", "геймер",
+    "шутер", "mmorpg", "battle royale", "геймер", "gamer",
+    "helldivers", "routine", "игровой", "игровых",
     "моя жизнь", "мой опыт", "как я", "моя история",
     "вернулся", "вернулась", "личный опыт",
     "кино", "фильм", "сериал", "музыка", "концерт",
+    "дайджест", "digest", "обзор игр", "новости игр",
 ]
 
 # ---------------- STATE ----------------
@@ -215,11 +218,13 @@ def load_rss(url: str, source: str) -> List[Dict]:
     return articles
 
 def load_articles_from_sites() -> List[Dict]:
+    """Загрузить статьи со всех источников"""
     articles = []
     articles.extend(load_3dnews())
     articles.extend(load_rss("https://vc.ru/rss", "VC.ru"))
     articles.extend(load_rss("https://habr.com/ru/rss/all/all/?fl=ru", "Habr"))
     articles.extend(load_rss("https://xakep.ru/feed/", "Xakep.ru"))
+    articles.extend(load_rss("https://xakep.ru/tag/iskusstvennyj-intellekt/feed/", "Xakep.ru/AI"))
     print(f"ВСЕГО: {len(articles)} статей")
     return articles
 
@@ -231,7 +236,6 @@ def check_keywords(text: str) -> Optional[str]:
     
     for kw in EXCLUDE_KEYWORDS:
         if kw in text_lower:
-            print(f"❌ Отклонено по слову: '{kw}'")
             return None
     
     if any(kw in text_lower for kw in STRONG_KEYWORDS):
@@ -245,9 +249,15 @@ def check_keywords(text: str) -> Optional[str]:
 # ---------------- PICK ARTICLE ----------------
 
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
+    """
+    ЛОГИКА:
+    1. Сначала ищем по СИЛЬНЫМ ключам во всех источниках
+    2. Потом по СЛАБЫМ ключам во всех источниках
+    3. Если не нашли - берём ТОЛЬКО из Xakep.ru/AI
+    """
     filtered_strong = []
     filtered_soft = []
-    all_fresh = []
+    ai_articles = []
     skipped = 0
     excluded = 0
 
@@ -261,6 +271,7 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
         title = e.get("title", "")
         summary = e.get("summary", "")
         text = title + " " + summary
+        source = e.get("source", "")
 
         level = check_keywords(text)
         
@@ -270,13 +281,13 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
             filtered_soft.append(e)
         elif level is None:
             text_lower = text.lower()
-            if not any(kw in text_lower for kw in EXCLUDE_KEYWORDS):
-                all_fresh.append(e)
-            else:
+            if any(kw in text_lower for kw in EXCLUDE_KEYWORDS):
                 excluded += 1
+            elif source == "Xakep.ru/AI":
+                ai_articles.append(e)
 
     print(f"Пропущено: {skipped}, Исключено: {excluded}")
-    print(f"Сильные: {len(filtered_strong)}, Слабые: {len(filtered_soft)}, Свежие: {len(all_fresh)}")
+    print(f"Сильные: {len(filtered_strong)}, Слабые: {len(filtered_soft)}, AI-резерв: {len(ai_articles)}")
 
     if filtered_strong:
         filtered_strong.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
@@ -288,10 +299,10 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
         print("✅ По СЛАБЫМ ключам")
         return filtered_soft[0]
 
-    if all_fresh:
-        all_fresh.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
-        print("⚠️ СВЕЖАЯ техническая")
-        return all_fresh[0]
+    if ai_articles:
+        ai_articles.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
+        print("⚠️ Из Xakep.ru/AI")
+        return ai_articles[0]
 
     return None
 
@@ -324,75 +335,45 @@ def short_summary(title: str, summary: str) -> str:
         short = (title[:180] + "...") if len(title) > 180 else title
         return f"{short} 🔐🌐\n\n#tech #новости\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
 
-def generate_image_prompt(title: str, summary: str) -> str:
-    base = f"Create short prompt for 1:1 tech image: {title}. Max 100 chars. Dark style, no text."
-    
+def generate_image(title: str) -> Optional[str]:
+    """
+    Простая генерация без промпта от OpenAI
+    Используем прямой URL от Pollinations с минимальными параметрами
+    """
     try:
-        res = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": base}],
-        )
-        return res.choices[0].message.content.strip()[:100]
-    except Exception as e:
-        print(f"❌ Промпт: {e}")
-        return "Dark tech cyberpunk illustration 1:1 no text"
-
-def generate_image(prompt: str) -> Optional[str]:
-    """
-    Попытка генерации через несколько сервисов:
-    1. Pollinations AI (flux)
-    2. Pollinations AI (turbo - быстрее)
-    """
-    services = [
-        {
-            "name": "Pollinations Flux",
-            "url": "https://image.pollinations.ai/prompt/",
-            "params": {
-                "width": "1024",
-                "height": "1024",
-                "nologo": "true",
-                "model": "flux",
-                "enhance": "false"
-            },
-            "timeout": 60
-        },
-        {
-            "name": "Pollinations Turbo",
-            "url": "https://image.pollinations.ai/prompt/",
-            "params": {
-                "width": "1024",
-                "height": "1024",
-                "nologo": "true",
-                "model": "turbo",
-                "enhance": "false"
-            },
-            "timeout": 30
+        # Простой промпт на основе заголовка (первые 50 символов)
+        simple_prompt = f"dark tech cyberpunk illustration {title[:50]}"
+        
+        print(f"🎨 Генерирую картинку...")
+        
+        # Прямой URL без лишних параметров
+        url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(simple_prompt)}"
+        params = {
+            "width": "1024",
+            "height": "1024",
+            "nologo": "true"
         }
-    ]
-    
-    for service in services:
-        try:
-            print(f"🎨 Пробую {service['name']}...")
-            url = f"{service['url']}{requests.utils.quote(prompt)}"
+        
+        # Один запрос без retry, timeout 120 секунд
+        r = requests.get(url, params=params, timeout=120, stream=True)
+        
+        if r.status_code == 200:
+            filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            with open(filename, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            print(f"✅ Картинка: {filename}")
+            return filename
+        else:
+            print(f"❌ HTTP {r.status_code}")
+            return None
             
-            r = requests.get(url, params=service['params'], timeout=service['timeout'])
-            
-            if r.status_code == 200:
-                filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-                with open(filename, "wb") as f:
-                    f.write(r.content)
-                print(f"✅ Картинка создана: {filename}")
-                return filename
-            else:
-                print(f"❌ {service['name']}: HTTP {r.status_code}")
-                
-        except requests.exceptions.Timeout:
-            print(f"⏱️ {service['name']}: Timeout")
-        except Exception as e:
-            print(f"❌ {service['name']}: {e}")
-    
-    print("❌ Все сервисы недоступны, отправляю без картинки")
-    return None
+    except requests.exceptions.Timeout:
+        print("⏱️ Timeout - отправляю без картинки")
+        return None
+    except Exception as e:
+        print(f"❌ Ошибка: {e}")
+        return None
 
 # ---------------- AUTOPOST ----------------
 
@@ -414,8 +395,7 @@ async def autopost():
 
     try:
         text = short_summary(art["title"], art.get("summary", ""))
-        img_prompt = generate_image_prompt(art["title"], art.get("summary", ""))
-        img_file = generate_image(img_prompt)
+        img_file = generate_image(art["title"])
 
         if img_file and os.path.exists(img_file):
             await bot.send_photo(
@@ -441,6 +421,8 @@ async def autopost():
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
+
 
 
 

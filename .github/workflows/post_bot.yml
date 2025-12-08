@@ -2,7 +2,7 @@ name: Telegram Post Bot
 
 on:
   schedule:
-    - cron: '0 6,12,15 * * *'  # 09:00, 15:00, 18:00 по Москве (UTC+3)
+    - cron: '0 6,12,15,18 * * *'  # 09:00, 15:00, 18:00, 21:00 по Москве (UTC+3)
   workflow_dispatch:
 
 permissions:
@@ -46,6 +46,7 @@ jobs:
           git add posted_articles.json
           git diff --quiet && git diff --staged --quiet || git commit -m "Update posted articles [skip ci]"
           git push
+
 
 
 

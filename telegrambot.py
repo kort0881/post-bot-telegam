@@ -305,28 +305,28 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
 
     return None
 
-# ---------------- OPENAI (800 СИМВОЛОВ) ----------------
+# ---------------- OPENAI (950 СИМВОЛОВ MAX) ----------------
 
 def short_summary(title: str, summary: str) -> str:
-    """Развёрнутый пост 800 символов с эмодзи"""
+    """Пост 900-950 символов с учётом лимита Telegram"""
     news_text = f"{title}. {summary}" if summary else title
     prompt = (
         f"Создай ПОДРОБНЫЙ пост для Telegram-канала:\n\n"
         f"НОВОСТЬ: {news_text}\n\n"
         f"ТРЕБОВАНИЯ:\n"
-        f"1. Объём: 750-800 символов\n"
+        f"1. Объём: СТРОГО 900-950 символов (ВАЖНО - не больше!)\n"
         f"2. Раскрой тему ДЕТАЛЬНО:\n"
         f"   - Что произошло\n"
-        f"   - Какие детали известны\n"
-        f"   - Кого это касается\n"
-        f"   - Какие последствия\n"
-        f"3. Используй эмодзи (🔐🌐💻🚀⚡️🛡️) для красоты текста\n"
-        f"4. Пиши понятно, без воды\n"
-        f"5. В конце добавь 3-5 хештегов через пробел\n"
-        f"6. Структура:\n"
-        f"   [Подробный текст 750-800 символов с эмодзи]\n\n"
-        f"   #хештег1 #хештег2 #хештег3\n\n"
-        f"7. Без вводных фраз типа 'Что произошло:'"
+        f"   - Какие детали\n"
+        f"   - Кого касается\n"
+        f"   - Последствия\n"
+        f"3. Используй эмодзи (🔐🌐💻🚀⚡️🛡️📱) для красоты\n"
+        f"4. В конце добавь 3-4 хештега\n"
+        f"5. Структура:\n"
+        f"   [Текст 900-950 символов с эмодзи]\n\n"
+        f"   #хештег1 #хештег2\n\n"
+        f"6. БЕЗ вводных фраз\n"
+        f"7. КРИТИЧНО: НЕ ПРЕВЫШАЙ 950 символов!"
     )
     
     try:
@@ -334,15 +334,32 @@ def short_summary(title: str, summary: str) -> str:
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
-            max_tokens=600,
+            max_tokens=550,
         )
         text = res.choices[0].message.content.strip()
+        
+        # Обрезаем если длиннее 950
+        if len(text) > 950:
+            print(f"⚠️ Текст {len(text)} символов, обрезаю до 950")
+            text = text[:947] + "..."
+        
         ps = "\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
-        return text + ps
+        full_text = text + ps
+        
+        # Финальная проверка (лимит Telegram caption = 1024)
+        if len(full_text) > 1020:
+            print(f"⚠️ С PS получилось {len(full_text)}, сокращаю")
+            excess = len(full_text) - 1020
+            text = text[:-(excess + 3)] + "..."
+            full_text = text + ps
+        
+        print(f"📊 Итоговая длина: {len(full_text)} символов")
+        return full_text
+        
     except Exception as e:
         print(f"❌ OpenAI: {e}")
-        fallback = f"{title}\n\n{summary[:600]}" if summary else title
-        return f"{fallback} 🔐🌐\n\n#tech #новости #безопасность\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
+        fallback = f"{title}\n\n{summary[:850]}" if summary else title[:850]
+        return f"{fallback} 🔐🌐\n\n#tech #новости\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
 
 # ---------------- IMAGE GENERATION (FLUX-REALISM) ----------------
 
@@ -351,7 +368,6 @@ def generate_image(title: str) -> Optional[str]:
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
     seed = str(int(time.time()))
     
-    # Улучшенный промпт для tech-тематики
     base_prompt = f"dark cyberpunk technology illustration {title[:40]}"
     
     services = [
@@ -386,7 +402,7 @@ def generate_image(title: str) -> Optional[str]:
                 "nologo": "true",
                 "model": service["model"],
                 "seed": seed,
-                "enhance": "true"  # Улучшение качества
+                "enhance": "true"
             }
             
             r = requests.get(url, params=params, timeout=service["timeout"], stream=True)
@@ -407,7 +423,7 @@ def generate_image(title: str) -> Optional[str]:
             print(f"❌ {service['name']}: {e}")
             continue
     
-    print("❌ Все сервисы недоступны - отправляю без картинки")
+    print("❌ Все сервисы недоступны")
     return None
 
 # ---------------- AUTOPOST ----------------
@@ -456,6 +472,8 @@ async def autopost():
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
+
 
 
 

@@ -62,19 +62,15 @@ SOFT_KEYWORDS = [
 ]
 
 EXCLUDE_KEYWORDS = [
-    # Спорт и игры
     "теннис", "футбол", "хоккей", "баскетбол", "волейбол", "спорт",
     "олимпиад", "соревнован", "чемпионат", "турнир",
     "игра", "геймплей", "gameplay", "dungeon", "quest",
     "playstation", "xbox", "nintendo", "steam", "boss", "raid",
     "шутер", "mmorpg", "battle royale", "геймер", "gamer",
     "helldivers", "routine", "игровой", "игровых",
-    # Личные истории
     "моя жизнь", "мой опыт", "как я", "моя история",
     "вернулся", "вернулась", "личный опыт",
-    # Развлечения
     "кино", "фильм", "сериал", "музыка", "концерт",
-    # Разное
     "дайджест", "digest", "обзор игр", "новости игр",
 ]
 
@@ -228,7 +224,6 @@ def load_articles_from_sites() -> List[Dict]:
     articles = []
     articles.extend(load_3dnews())
     articles.extend(load_rss("https://vc.ru/rss", "VC.ru"))
-    # УБРАЛИ HABR
     articles.extend(load_rss("https://xakep.ru/feed/", "Xakep.ru"))
     articles.extend(load_rss("https://xakep.ru/tag/iskusstvennyj-intellekt/feed/", "Xakep.ru/AI"))
     print(f"ВСЕГО: {len(articles)} статей")
@@ -240,7 +235,6 @@ def check_keywords(text: str) -> Optional[str]:
     """Строгая проверка по ключевым словам"""
     text_lower = text.lower()
     
-    # ПЕРВЫМ ДЕЛОМ проверяем исключения
     for kw in EXCLUDE_KEYWORDS:
         if kw in text_lower:
             return None
@@ -253,14 +247,15 @@ def check_keywords(text: str) -> Optional[str]:
     
     return None
 
-# ---------------- PICK ARTICLE ----------------
+# ---------------- PICK ARTICLE (НОВАЯ ЛОГИКА) ----------------
 
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
     """
-    СТРОГАЯ ЛОГИКА:
-    1. Сначала ищем по СИЛЬНЫМ ключам во ВСЕХ источниках
-    2. Потом по СЛАБЫМ ключам во ВСЕХ источниках
-    3. Если НЕ нашли - берём ТОЛЬКО из Xakep.ru/AI (без фильтров, но без исключений)
+    ИСПРАВЛЕННАЯ ЛОГИКА:
+    1. Ищем НЕОПУБЛИКОВАННЫЕ по СИЛЬНЫМ ключам
+    2. Если не нашли - ищем НЕОПУБЛИКОВАННЫЕ по СЛАБЫМ ключам
+    3. Если не нашли - берём НЕОПУБЛИКОВАННУЮ из Xakep.ru/AI
+    4. Если и там всё опубликовано - возвращаем None
     """
     filtered_strong = []
     filtered_soft = []
@@ -271,6 +266,7 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
     for e in articles:
         aid = e.get("id")
         
+        # Пропускаем уже опубликованные
         if aid in posted_articles:
             skipped += 1
             continue
@@ -281,7 +277,7 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
         source = e.get("source", "")
         text_lower = text.lower()
 
-        # Проверяем на исключения в любом случае
+        # Проверяем на исключения
         has_exclusion = any(kw in text_lower for kw in EXCLUDE_KEYWORDS)
         
         if has_exclusion:
@@ -296,29 +292,32 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
         elif level == "soft":
             filtered_soft.append(e)
         else:
-            # Если не прошла фильтры, но это AI - в резерв
+            # Если не прошла фильтры, но это AI и нет исключений - в резерв
             if source == "Xakep.ru/AI":
                 ai_articles.append(e)
 
-    print(f"Пропущено: {skipped}, Исключено: {excluded}")
-    print(f"Сильные: {len(filtered_strong)}, Слабые: {len(filtered_soft)}, AI-резерв: {len(ai_articles)}")
+    print(f"Пропущено опубликованных: {skipped}, Исключено: {excluded}")
+    print(f"Сильные (новые): {len(filtered_strong)}, Слабые (новые): {len(filtered_soft)}, AI-резерв: {len(ai_articles)}")
 
+    # ПРИОРИТЕТ 1: Сильные ключевые слова (ТОЛЬКО НЕОПУБЛИКОВАННЫЕ)
     if filtered_strong:
         filtered_strong.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
-        print("✅ По СИЛЬНЫМ ключам")
+        print("✅ По СИЛЬНЫМ ключам (новая)")
         return filtered_strong[0]
 
+    # ПРИОРИТЕТ 2: Слабые ключевые слова (ТОЛЬКО НЕОПУБЛИКОВАННЫЕ)
     if filtered_soft:
         filtered_soft.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
-        print("✅ По СЛАБЫМ ключам")
+        print("✅ По СЛАБЫМ ключам (новая)")
         return filtered_soft[0]
 
+    # ПРИОРИТЕТ 3: Из Xakep.ru/AI (ТОЛЬКО НЕОПУБЛИКОВАННАЯ)
     if ai_articles:
         ai_articles.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
-        print("⚠️ Из Xakep.ru/AI (резерв)")
+        print("⚠️ Из Xakep.ru/AI (резерв - нет новых по фильтрам)")
         return ai_articles[0]
 
-    print("❌ Подходящих статей не найдено")
+    print("❌ Все статьи уже опубликованы или нет подходящих")
     return None
 
 # ---------------- OPENAI ----------------
@@ -394,7 +393,7 @@ async def autopost():
 
     art = pick_article(articles)
     if not art:
-        print("Нет подходящих")
+        print("Нет подходящих неопубликованных статей")
         return
 
     aid = art["id"]
@@ -429,6 +428,8 @@ async def autopost():
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
+
 
 
 

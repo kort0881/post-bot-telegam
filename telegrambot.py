@@ -247,16 +247,9 @@ def check_keywords(text: str) -> Optional[str]:
     
     return None
 
-# ---------------- PICK ARTICLE (НОВАЯ ЛОГИКА) ----------------
+# ---------------- PICK ARTICLE ----------------
 
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
-    """
-    ИСПРАВЛЕННАЯ ЛОГИКА:
-    1. Ищем НЕОПУБЛИКОВАННЫЕ по СИЛЬНЫМ ключам
-    2. Если не нашли - ищем НЕОПУБЛИКОВАННЫЕ по СЛАБЫМ ключам
-    3. Если не нашли - берём НЕОПУБЛИКОВАННУЮ из Xakep.ru/AI
-    4. Если и там всё опубликовано - возвращаем None
-    """
     filtered_strong = []
     filtered_soft = []
     ai_articles = []
@@ -266,7 +259,6 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
     for e in articles:
         aid = e.get("id")
         
-        # Пропускаем уже опубликованные
         if aid in posted_articles:
             skipped += 1
             continue
@@ -277,14 +269,12 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
         source = e.get("source", "")
         text_lower = text.lower()
 
-        # Проверяем на исключения
         has_exclusion = any(kw in text_lower for kw in EXCLUDE_KEYWORDS)
         
         if has_exclusion:
             excluded += 1
             continue
 
-        # Проверяем по ключевым словам
         level = check_keywords(text)
         
         if level == "strong":
@@ -292,80 +282,90 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
         elif level == "soft":
             filtered_soft.append(e)
         else:
-            # Если не прошла фильтры, но это AI и нет исключений - в резерв
             if source == "Xakep.ru/AI":
                 ai_articles.append(e)
 
-    print(f"Пропущено опубликованных: {skipped}, Исключено: {excluded}")
-    print(f"Сильные (новые): {len(filtered_strong)}, Слабые (новые): {len(filtered_soft)}, AI-резерв: {len(ai_articles)}")
+    print(f"Пропущено: {skipped}, Исключено: {excluded}")
+    print(f"Сильные: {len(filtered_strong)}, Слабые: {len(filtered_soft)}, AI: {len(ai_articles)}")
 
-    # ПРИОРИТЕТ 1: Сильные ключевые слова (ТОЛЬКО НЕОПУБЛИКОВАННЫЕ)
     if filtered_strong:
         filtered_strong.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
-        print("✅ По СИЛЬНЫМ ключам (новая)")
+        print("✅ По СИЛЬНЫМ ключам")
         return filtered_strong[0]
 
-    # ПРИОРИТЕТ 2: Слабые ключевые слова (ТОЛЬКО НЕОПУБЛИКОВАННЫЕ)
     if filtered_soft:
         filtered_soft.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
-        print("✅ По СЛАБЫМ ключам (новая)")
+        print("✅ По СЛАБЫМ ключам")
         return filtered_soft[0]
 
-    # ПРИОРИТЕТ 3: Из Xakep.ru/AI (ТОЛЬКО НЕОПУБЛИКОВАННАЯ)
     if ai_articles:
         ai_articles.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
-        print("⚠️ Из Xakep.ru/AI (резерв - нет новых по фильтрам)")
+        print("⚠️ Из Xakep.ru/AI")
         return ai_articles[0]
 
-    print("❌ Все статьи уже опубликованы или нет подходящих")
     return None
 
-# ---------------- OPENAI ----------------
+# ---------------- OPENAI (800 СИМВОЛОВ) ----------------
 
 def short_summary(title: str, summary: str) -> str:
+    """Развёрнутый пост 800 символов с эмодзи"""
     news_text = f"{title}. {summary}" if summary else title
     prompt = (
-        f"Создай пост для Telegram:\n\n{news_text}\n\n"
+        f"Создай ПОДРОБНЫЙ пост для Telegram-канала:\n\n"
+        f"НОВОСТЬ: {news_text}\n\n"
         f"ТРЕБОВАНИЯ:\n"
-        f"1. Ровно 197 символов\n"
-        f"2. Эмодзи в конце\n"
-        f"3. Хештеги после текста\n"
-        f"4. Без 'Что произошло'\n"
-        f"5. Сразу по сути"
+        f"1. Объём: 750-800 символов\n"
+        f"2. Раскрой тему ДЕТАЛЬНО:\n"
+        f"   - Что произошло\n"
+        f"   - Какие детали известны\n"
+        f"   - Кого это касается\n"
+        f"   - Какие последствия\n"
+        f"3. Используй эмодзи (🔐🌐💻🚀⚡️🛡️) для красоты текста\n"
+        f"4. Пиши понятно, без воды\n"
+        f"5. В конце добавь 3-5 хештегов через пробел\n"
+        f"6. Структура:\n"
+        f"   [Подробный текст 750-800 символов с эмодзи]\n\n"
+        f"   #хештег1 #хештег2 #хештег3\n\n"
+        f"7. Без вводных фраз типа 'Что произошло:'"
     )
     
     try:
         res = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.8,
-            frequency_penalty=0.7,
+            temperature=0.7,
+            max_tokens=600,
         )
         text = res.choices[0].message.content.strip()
         ps = "\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
         return text + ps
     except Exception as e:
         print(f"❌ OpenAI: {e}")
-        short = (title[:180] + "...") if len(title) > 180 else title
-        return f"{short} 🔐🌐\n\n#tech #новости\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
+        fallback = f"{title}\n\n{summary[:600]}" if summary else title
+        return f"{fallback} 🔐🌐\n\n#tech #новости #безопасность\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
 
 def generate_image(title: str) -> Optional[str]:
-    """Простая генерация через Pollinations"""
+    """Генерация УНИКАЛЬНОЙ картинки с timestamp"""
     try:
-        simple_prompt = f"dark tech cyberpunk illustration {title[:50]}"
-        print(f"🎨 Генерирую картинку...")
+        # Добавляем timestamp для уникальности
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        # Промпт с уникальным ID
+        simple_prompt = f"dark tech cyberpunk {title[:40]} style{timestamp}"
+        
+        print(f"🎨 Генерирую уникальную картинку...")
         
         url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(simple_prompt)}"
         params = {
             "width": "1024",
             "height": "1024",
-            "nologo": "true"
+            "nologo": "true",
+            "seed": str(int(time.time()))  # Уникальный seed
         }
         
         r = requests.get(url, params=params, timeout=120, stream=True)
         
         if r.status_code == 200:
-            filename = f"news_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            filename = f"news_{timestamp}.png"
             with open(filename, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
@@ -376,7 +376,7 @@ def generate_image(title: str) -> Optional[str]:
             return None
             
     except requests.exceptions.Timeout:
-        print("⏱️ Timeout - отправляю без картинки")
+        print("⏱️ Timeout")
         return None
     except Exception as e:
         print(f"❌ Ошибка: {e}")
@@ -393,7 +393,7 @@ async def autopost():
 
     art = pick_article(articles)
     if not art:
-        print("Нет подходящих неопубликованных статей")
+        print("Нет подходящих")
         return
 
     aid = art["id"]
@@ -428,6 +428,7 @@ async def autopost():
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
 
 
 

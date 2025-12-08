@@ -344,43 +344,71 @@ def short_summary(title: str, summary: str) -> str:
         fallback = f"{title}\n\n{summary[:600]}" if summary else title
         return f"{fallback} 🔐🌐\n\n#tech #новости #безопасность\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
 
+# ---------------- IMAGE GENERATION (FLUX-REALISM) ----------------
+
 def generate_image(title: str) -> Optional[str]:
-    """Генерация УНИКАЛЬНОЙ картинки с timestamp"""
-    try:
-        # Добавляем timestamp для уникальности
-        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-        # Промпт с уникальным ID
-        simple_prompt = f"dark tech cyberpunk {title[:40]} style{timestamp}"
-        
-        print(f"🎨 Генерирую уникальную картинку...")
-        
-        url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(simple_prompt)}"
-        params = {
-            "width": "1024",
-            "height": "1024",
-            "nologo": "true",
-            "seed": str(int(time.time()))  # Уникальный seed
+    """Самая надёжная связка Flux моделей"""
+    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    seed = str(int(time.time()))
+    
+    # Улучшенный промпт для tech-тематики
+    base_prompt = f"dark cyberpunk technology illustration {title[:40]}"
+    
+    services = [
+        {
+            "name": "Flux-Realism (лучшее качество)",
+            "model": "flux-realism",
+            "prompt": f"{base_prompt}, highly detailed, dramatic lighting, futuristic, 4k",
+            "timeout": 90
+        },
+        {
+            "name": "Flux (стандарт)",
+            "model": "flux",
+            "prompt": f"{base_prompt}, tech art, detailed",
+            "timeout": 75
+        },
+        {
+            "name": "Turbo (быстрый)",
+            "model": "turbo",
+            "prompt": f"{base_prompt}",
+            "timeout": 45
         }
-        
-        r = requests.get(url, params=params, timeout=120, stream=True)
-        
-        if r.status_code == 200:
-            filename = f"news_{timestamp}.png"
-            with open(filename, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            print(f"✅ Картинка: {filename}")
-            return filename
-        else:
-            print(f"❌ HTTP {r.status_code}")
-            return None
+    ]
+    
+    for service in services:
+        try:
+            print(f"🎨 Пробую {service['name']}...")
             
-    except requests.exceptions.Timeout:
-        print("⏱️ Timeout")
-        return None
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
-        return None
+            url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(service['prompt'])}"
+            params = {
+                "width": "1024",
+                "height": "1024",
+                "nologo": "true",
+                "model": service["model"],
+                "seed": seed,
+                "enhance": "true"  # Улучшение качества
+            }
+            
+            r = requests.get(url, params=params, timeout=service["timeout"], stream=True)
+            
+            if r.status_code == 200:
+                filename = f"news_{timestamp}.png"
+                with open(filename, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                print(f"✅ Создано через {service['name']}: {filename}")
+                return filename
+            else:
+                print(f"❌ {service['name']}: HTTP {r.status_code}")
+                
+        except requests.exceptions.Timeout:
+            print(f"⏱️ {service['name']}: Timeout, пробую следующий...")
+        except Exception as e:
+            print(f"❌ {service['name']}: {e}")
+            continue
+    
+    print("❌ Все сервисы недоступны - отправляю без картинки")
+    return None
 
 # ---------------- AUTOPOST ----------------
 
@@ -428,6 +456,8 @@ async def autopost():
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
+
 
 
 

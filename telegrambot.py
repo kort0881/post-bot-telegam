@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import time
+import random
 from datetime import datetime
 from typing import List, Dict, Optional
 
@@ -361,39 +362,68 @@ def short_summary(title: str, summary: str) -> str:
         fallback = f"{title}\n\n{summary[:850]}" if summary else title[:850]
         return f"{fallback} 🔐🌐\n\n#tech #новости\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
 
-# ---------------- IMAGE GENERATION (FLUX-REALISM) ----------------
+# ---------------- IMAGE GENERATION (RANDOM STYLES) ----------------
 
 def generate_image(title: str) -> Optional[str]:
-    """Самая надёжная связка Flux моделей"""
+    """Максимально уникальные картинки с random стилями"""
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-    seed = str(int(time.time()))
     
-    base_prompt = f"dark cyberpunk technology illustration {title[:40]}"
+    # Случайные стили для разнообразия
+    styles = [
+        "cyberpunk neon style",
+        "dark futuristic tech",
+        "matrix digital world",
+        "holographic interface",
+        "quantum computing aesthetic",
+        "sci-fi technology",
+        "dystopian tech noir",
+        "blade runner atmosphere",
+        "neural network visualization",
+        "digital rain effect"
+    ]
+    
+    # Случайные детали
+    details = [
+        "highly detailed, 4k",
+        "dramatic lighting, cinematic",
+        "ultra detailed, photorealistic",
+        "sharp focus, professional",
+        "intricate details, masterpiece",
+        "moody atmosphere, epic",
+        "vibrant colors, stunning",
+        "dark ambiance, mysterious"
+    ]
+    
+    base_prompt = f"dark cyberpunk technology illustration {title[:30]}"
     
     services = [
         {
-            "name": "Flux-Realism (лучшее качество)",
+            "name": "Flux-Realism",
             "model": "flux-realism",
-            "prompt": f"{base_prompt}, highly detailed, dramatic lighting, futuristic, 4k",
+            "prompt": f"{base_prompt}, {random.choice(styles)}, {random.choice(details)}",
             "timeout": 90
         },
         {
-            "name": "Flux (стандарт)",
+            "name": "Flux",
             "model": "flux",
-            "prompt": f"{base_prompt}, tech art, detailed",
+            "prompt": f"{base_prompt}, {random.choice(styles)}, tech art",
             "timeout": 75
         },
         {
-            "name": "Turbo (быстрый)",
+            "name": "Turbo",
             "model": "turbo",
-            "prompt": f"{base_prompt}",
+            "prompt": f"{base_prompt}, {random.choice(styles)}",
             "timeout": 45
         }
     ]
     
-    for service in services:
+    for idx, service in enumerate(services):
         try:
-            print(f"🎨 Пробую {service['name']}...")
+            # Максимально уникальный seed
+            unique_seed = str(int(time.time() * 1000) + random.randint(1000, 9999))
+            
+            print(f"🎨 {service['name']} (seed: {unique_seed})...")
+            print(f"   Промпт: {service['prompt'][:80]}...")
             
             url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(service['prompt'])}"
             params = {
@@ -401,26 +431,29 @@ def generate_image(title: str) -> Optional[str]:
                 "height": "1024",
                 "nologo": "true",
                 "model": service["model"],
-                "seed": seed,
-                "enhance": "true"
+                "seed": unique_seed,
+                "enhance": "true",
+                "noCache": "true"
             }
             
             r = requests.get(url, params=params, timeout=service["timeout"], stream=True)
             
             if r.status_code == 200:
-                filename = f"news_{timestamp}.png"
+                filename = f"news_{timestamp}_{random.randint(1000,9999)}.png"
                 with open(filename, "wb") as f:
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
-                print(f"✅ Создано через {service['name']}: {filename}")
+                print(f"✅ {filename}")
                 return filename
             else:
-                print(f"❌ {service['name']}: HTTP {r.status_code}")
+                print(f"❌ HTTP {r.status_code}")
                 
         except requests.exceptions.Timeout:
-            print(f"⏱️ {service['name']}: Timeout, пробую следующий...")
+            print(f"⏱️ Timeout, пробую следующий...")
+            time.sleep(1)
         except Exception as e:
-            print(f"❌ {service['name']}: {e}")
+            print(f"❌ {e}")
+            time.sleep(1)
             continue
     
     print("❌ Все сервисы недоступны")
@@ -472,6 +505,8 @@ async def autopost():
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
+
 
 
 

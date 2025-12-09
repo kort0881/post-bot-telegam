@@ -3,12 +3,11 @@ import json
 import asyncio
 import random
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Dict, Optional
 
 import requests
 import feedparser
-import aiohttp
 
 from aiogram import Bot
 from aiogram.client.bot import DefaultBotProperties
@@ -29,24 +28,18 @@ MAX_ARTICLES = 500
 bot = Bot(token=TELEGRAM_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-
 # ------------------------------------------
-# Загружаем лог
+# Загрузка и сохранение логов
 # ------------------------------------------
 def load_articles() -> Dict:
     if not os.path.exists(ARTICLES_FILE):
         return {"articles": [], "timestamps": {}}
-
     try:
         with open(ARTICLES_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except:
         return {"articles": [], "timestamps": {}}
 
-
-# ------------------------------------------
-# Сохраняем лог
-# ------------------------------------------
 def save_articles(db: Dict):
     try:
         with open(ARTICLES_FILE, "w", encoding="utf-8") as f:
@@ -54,19 +47,13 @@ def save_articles(db: Dict):
     except:
         pass
 
-
-# ------------------------------------------
-# Чистим старье
-# ------------------------------------------
 def clean_old_articles(db: Dict):
     articles = db.get("articles", [])
-
     if len(articles) > MAX_ARTICLES:
         db["articles"] = articles[-MAX_ARTICLES:]
 
-
 # ------------------------------------------
-# Парсим RSS
+# RSS парсер
 # ------------------------------------------
 def fetch_rss(feed_urls: List[str]) -> List[Dict]:
     items = []
@@ -83,23 +70,16 @@ def fetch_rss(feed_urls: List[str]) -> List[Dict]:
             continue
     return items
 
-
-# ----------------------------------------------------
-# Генерация изображения (НИКАКИХ КИБЕРПАНКОВ)
-# ----------------------------------------------------
+# ------------------------------------------
+# Генерация корпоративного фото
+# ------------------------------------------
 def generate_image(title: str) -> Optional[str]:
-    """
-    Реалистичное кинематографичное изображение.
-    Без неона, sci-fi, цифрового дождя, фиолетовых бликов.
-    """
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-
-    style = "realistic cinematic detailed photo, professional lighting, high clarity, neutral tech aesthetic"
+    style = "realistic corporate photo, cinematic lighting, professional, high clarity, neutral tech aesthetic, clean, detailed, sharp"
 
     prompt = (
-        f"{style}. Illustration related to '{title[:60]}'. "
-        "No cyberpunk. No neon. No futuristic elements. No holograms. No sci-fi. "
-        "No dystopia. No glowing effects. Clean, realistic, neutral, corporate tech mood."
+        f"{style}. Related to '{title[:60]}'. "
+        "No cyberpunk, no neon, no futuristic, no sci-fi, no holograms, no dystopia."
     )
 
     services = [
@@ -108,55 +88,53 @@ def generate_image(title: str) -> Optional[str]:
         ("Turbo", "turbo", 45)
     ]
 
-    for name, model, timeout in services:
-        try:
-            seed = str(int(time.time() * 1000) + random.randint(1000, 9999))
+    with requests.Session() as session:
+        for name, model, timeout in services:
+            try:
+                seed = str(int(time.time() * 1000) + random.randint(1000, 9999))
+                print(f"🎨 {name} (seed: {seed})")
+                print(f"   Промпт: {prompt[:120]}...")
 
-            print(f"🎨 {name} (seed: {seed})")
-            print(f"   Промпт: {prompt[:120]}...")
+                url = "https://image.pollinations.ai/prompt/" + requests.utils.quote(prompt)
+                params = {
+                    "width": "1024",
+                    "height": "1024",
+                    "nologo": "true",
+                    "model": model,
+                    "seed": seed,
+                }
 
-            url = "https://image.pollinations.ai/prompt/" + requests.utils.quote(prompt)
-            params = {
-                "width": "1024",
-                "height": "1024",
-                "nologo": "true",
-                "model": model,
-                "seed": seed,
-            }
-
-            r = requests.get(url, params=params, timeout=timeout)
-
-            if r.status_code == 200:
-                path = f"generated_{timestamp}.jpg"
-                with open(path, "wb") as f:
-                    f.write(r.content)
-                return path
-
-        except:
-            continue
-
+                r = session.get(url, params=params, timeout=timeout)
+                if r.status_code == 200:
+                    path = f"generated_{timestamp}.jpg"
+                    with open(path, "wb") as f:
+                        f.write(r.content)
+                    return path
+            except:
+                continue
     return None
 
-
 # ------------------------------------------
-# Генерация текста через OpenAI
+# Генерация текста через OpenAI (700-800 символов)
 # ------------------------------------------
 def ai_generate_text(title: str, summary: str) -> str:
     prompt = (
-        "Сделай короткий новостной текст (850–950 символов) по теме:\n"
-        f"Заголовок: {title}\n\n"
-        f"Описание: {summary}\n\n"
-        "Стиль: нейтральный, информационный, технологичный."
+        "Сделай короткий новостной текст (700–800 символов) по теме:\n"
+        f"Заголовок: {title}\n"
+        f"Описание: {summary}\n"
+        "Стиль: нейтральный, информационный, технологичный, чуть жестче."
     )
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=300
-    )
-
-    return response.choices[0].message.content.strip()
-
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=300
+        )
+        return response.choices[0].message.content.strip()
+    except:
+        return f"{title}\n\n{summary[:750]}"
 
 # ------------------------------------------
 # Отправка в Telegram
@@ -167,9 +145,8 @@ async def send_message(text: str, image_path: Optional[str]):
     else:
         await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text)
 
-
 # ------------------------------------------
-# Основная логика
+# Основной цикл
 # ------------------------------------------
 async def main_loop():
     FEEDS = [
@@ -185,24 +162,21 @@ async def main_loop():
             print("\n=== Обновление RSS ===")
             items = fetch_rss(FEEDS)
 
-            strong = []
-            weak = []
-            ai = []
+            strong, weak, ai = [], [], []
 
             for item in items:
                 title = item["title"]
-
                 if title in db["articles"]:
                     continue
-
                 db["articles"].append(title)
                 clean_old_articles(db)
                 save_articles(db)
 
                 # Классификация
-                if "уязв" in title.lower() or "атака" in title.lower():
+                t_lower = title.lower()
+                if "уязв" in t_lower or "атака" in t_lower:
                     strong.append(item)
-                elif "обновл" in title.lower():
+                elif "обновл" in t_lower:
                     weak.append(item)
                 else:
                     ai.append(item)
@@ -210,14 +184,7 @@ async def main_loop():
             print(f"ВСЕГО: {len(items)} статей")
             print(f"Сильные: {len(strong)}, Слабые: {len(weak)}, AI: {len(ai)}")
 
-            target = None
-            if strong:
-                target = strong[0]
-            elif weak:
-                target = weak[0]
-            elif ai:
-                target = ai[0]
-
+            target = strong[0] if strong else weak[0] if weak else ai[0] if ai else None
             if not target:
                 await asyncio.sleep(120)
                 continue
@@ -226,9 +193,7 @@ async def main_loop():
             summary = target["summary"]
 
             print(f"▶ Обрабатываю: {title}")
-
             text = ai_generate_text(title, summary)
-
             img = generate_image(title)
             if img:
                 print("Картинка создана.")
@@ -242,12 +207,12 @@ async def main_loop():
 
         await asyncio.sleep(120)
 
-
 # ------------------------------------------
 # START
 # ------------------------------------------
 if __name__ == "__main__":
     asyncio.run(main_loop())
+
 
 
 

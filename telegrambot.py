@@ -20,6 +20,7 @@ from openai import OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
+HF_TOKEN = os.getenv("HF_TOKEN")  # токен HuggingFace
 
 if not all([OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, CHANNEL_ID]):
     raise ValueError("❌ Не все ENV переменные установлены!")
@@ -40,26 +41,33 @@ HEADERS = {
 POSTED_FILE = "posted_articles.json"
 RETENTION_DAYS = 7
 
-# ---------------- KEYWORDS ----------------
+# ---------------- KEYWORDS (ТВОЙ СПИСОК STRONG) ----------------
 
 STRONG_KEYWORDS = [
-    "vpn", "впн", "прокси", "proxy", "tor", "shadowsocks",
-    "wireguard", "openvpn", "роскомнадзор", "ркн",
-    "блокировка сайтов", "блокировка", "блокиров",
-    "обход блокировок", "обход цензуры", "цензур",
-    "telegram", "телеграм", "whatsapp", "signal",
-    "dpi", "минцифры", "суверенный интернет",
-    "белые списки", "роскомсвобода", "запрещенн",
-]
-
-SOFT_KEYWORDS = [
-    "кибербезопасность", "киберзащита", "информационная безопасность",
-    "конфиденциальность", "privacy", "анонимность",
-    "шифрование", "encryption", "безопасность данных",
-    "утечка данных", "взлом", "хакер", "malware", "вирус",
-    "уязвимость", "vulnerability", "эксплойт",
-    "искусственный интеллект", "нейросет", "машинное обучение",
-    "chatgpt", "claude", "gemini", "llm",
+    "интернет", "vpn", "прокси", "шифрование", "анонимность", "приватность",
+    "трафик", "обход блокировок", "обход цензуры", "цензура", "блокировка сайтов",
+    "роскомнадзор", "ркн", "минцифры", "суверенный интернет", "белые списки",
+    "черные списки", "тспу", "dpi", "глубокая инспекция трафика", "обфускация",
+    "туннелирование", "маскировка трафика", "маскировка ip", "скрытие адреса",
+    "приватный доступ", "безопасный доступ", "теневой трафик", "скрытый трафик",
+    "резолвер", "альтернативный dns", "защищенный dns", "l2tp", "ipsec",
+    "openvpn", "wireguard", "shadowsocks", "mtproto", "tor", "darknet",
+    "мосты tor", "узлы tor", "прокси сервер", "прокси цепочка", "ротация прокси",
+    "фильтрация трафика", "антиблокировка", "антидпи", "обход фаервола", "фаервол",
+    "сетевые ограничения", "обход ограничений", "приватный канал", "шифрованный канал",
+    "защищенный канал", "интернет свобода", "цифровая свобода", "сетевой контроль",
+    "интернет контроль", "анализ трафика", "скрытие трафика", "защищенная связь",
+    "приватная связь", "безопасная связь", "разрешенный трафик", "запрещенный трафик",
+    "обход запретов", "анти мониторинг", "анти слежка", "цифровая защита",
+    "сетевые атаки", "сетевые фильтры", "интернет фильтры", "стелс режим",
+    "скрытый режим", "безопасный протокол", "альтернативный протокол",
+    "туннельный протокол", "сетевой туннель", "зашифрованный туннель",
+    "приватный туннель", "скрытый туннель", "защищённый сервер", "анонимный сервер",
+    "приватный сервер", "обход трекинга", "защита данных", "конфиденциальность",
+    "доступ без ограничений", "доступ к сети", "заблокированные сайты",
+    "доступ к сервисам", "нейросети", "ии", "искусственный интеллект",
+    "ai-анализ", "ai-безопасность", "нейросетевой контроль", "ai-фильтрация",
+    "ai-обход", "нейросетевые алгоритмы",
 ]
 
 EXCLUDE_KEYWORDS = [
@@ -161,12 +169,12 @@ def load_3dnews() -> List[Dict]:
 
                 desc_start = part.find('class="')
                 if desc_start != -1:
-                    desc_chunk = part[desc_start:desc_start + 500]
+                    desc_chunk = part[desc_start:desc_start + 700]
                     p_start = desc_chunk.find(">")
                     if p_start != -1:
                         p_end = desc_chunk.find("</", p_start)
                         if p_end != -1:
-                            summary = clean_text(desc_chunk[p_start + 1:p_end])[:300]
+                            summary = clean_text(desc_chunk[p_start + 1:p_end])[:700]
 
                 articles.append({
                     "id": link,
@@ -192,7 +200,9 @@ def load_rss(url: str, source: str) -> List[Dict]:
             try:
                 link = entry.get("link", "")
                 title = clean_text(entry.get("title") or "")
-                summary = clean_text(entry.get("summary") or entry.get("description") or "")[:400]
+                summary = clean_text(
+                    entry.get("summary") or entry.get("description") or ""
+                )[:700]
                 if not link or not title:
                     continue
 
@@ -226,12 +236,14 @@ def load_articles_from_sites() -> List[Dict]:
     print(f"ВСЕГО: {len(articles)} статей до фильтрации")
     return articles
 
-# ---------------- FILTER ----------------
+# ---------------- FILTER (ТОЛЬКО STRONG) ----------------
 
 def check_keywords_strong(text: str) -> bool:
     text_lower = text.lower()
+
     if any(kw in text_lower for kw in EXCLUDE_KEYWORDS):
         return False
+
     return any(kw in text_lower for kw in STRONG_KEYWORDS)
 
 # ---------------- PICK ARTICLE (ТОЛЬКО STRONG) ----------------
@@ -264,40 +276,43 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
     if not strong_articles:
         return None
 
-    strong_articles.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
-    print("✅ Выбор только из СИЛЬНЫХ по ключам")
+    strong_articles.sort(
+        key=lambda x: x.get("published_parsed", datetime.now()),
+        reverse=True
+    )
+    print("✅ Выбор только из СИЛЬНЫХ по ключам (только STRONG)")
     return strong_articles[0]
 
-# ---------------- OPENAI TEXT (650–700) ----------------
+# ---------------- OPENAI TEXT (500–600, МАКСИМУМ ФАКТОВ) ----------------
 
 def short_summary(title: str, summary: str) -> str:
-    """Пост 650–700 символов с завершённой мыслью"""
     news_text = f"{title}. {summary}" if summary else title
     prompt = (
-        "Сделай новостной пост для Telegram по теме ниже.\n\n"
+        "Вот фрагмент новостной статьи. Сохрани факты максимально близко к тексту, "
+        "перефразируй только чтобы читалось плавно.\n\n"
         f"{news_text}\n\n"
-        "Требования:\n"
-        "- Объём: строго 650–700 символов.\n"
-        "- Мысль должна быть законченной, без обрыва.\n"
-        "- Стиль: технологичный, нейтральный, чуть жёсткий.\n"
-        "- Кратко объясни: что произошло, кому это важно и к чему может привести.\n"
-        "- В конце 2–4 релевантных хештега через пробел.\n"
-        "- 2–3 эмодзи по смыслу внутри текста."
+        "Сделай короткий новостной пост для Telegram:\n"
+        "- Объём строго 500–600 символов.\n"
+        "- Удали всё, что похоже на рекламу, маркетинговые формулировки, промо, призывы купить/подписаться.\n"
+        "- Никаких выдуманных деталей, только то, что есть в тексте.\n"
+        "- В начале одно короткое предложение контекста, дальше сухие факты из статьи.\n"
+        "- В конце 2–3 релевантных хештега через пробел.\n"
+        "- 1–2 эмодзи по смыслу внутри текста."
     )
 
     try:
         res = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=450,
+            temperature=0.4,
+            max_tokens=350,
         )
         text = res.choices[0].message.content.strip()
 
-        if len(text) > 700:
-            print(f"⚠️ Текст {len(text)} символов, режу до 700")
-            text = text[:697] + "…"
-        elif len(text) < 650:
+        if len(text) > 600:
+            print(f"⚠️ Текст {len(text)} символов, режу до 600")
+            text = text[:597] + "…"
+        elif len(text) < 500:
             print(f"⚠️ Текст всего {len(text)} символов")
 
         ps = "\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
@@ -313,60 +328,57 @@ def short_summary(title: str, summary: str) -> str:
 
     except Exception as e:
         print(f"❌ OpenAI: {e}")
-        fallback = f"{title}\n\n{(summary or '')[:660]}"
+        fallback = f"{title}\n\n{(summary or '')[:520]}"
         return f"{fallback} 🔐🌐\n\n#tech #новости\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
 
-# ---------------- IMAGE GENERATION (DeepAI REALISTIC) ----------------
+# ---------------- IMAGE GENERATION (HuggingFace Stable Diffusion 2) ----------------
 
 def generate_image(title: str) -> Optional[str]:
     """
-    Реалистичное кинематографичное изображение без киберпанка и неона.
-    Используем DeepAI text2img как бесплатный генератор.
+    Генерация реалистичной иллюстрации через HuggingFace Inference API
+    (stabilityai/stable-diffusion-2), токен берётся из HF_TOKEN.
     """
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    if not HF_TOKEN:
+        print("❌ HF_TOKEN не задан, пропускаю генерацию картинки")
+        return None
+
+    api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2"
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
 
     base_prompt = (
-        f"realistic cinematic detailed photo about {title[:60]}, "
-        "modern cybersecurity and technology, professional corporate style, "
-        "clean composition, neutral background, sharp focus, high detail, 4k. "
-        "No cyberpunk, no neon, no sci-fi, no holograms, no glowing effects, no dystopia."
+        f"realistic cinematic detailed illustration about {title[:80]}, "
+        "modern cybersecurity, internet privacy, censorship bypass, professional corporate style, "
+        "clean composition, neutral colors, sharp focus, high detail, 4k. "
+        "no cyberpunk, no neon, no sci-fi, no glowing effects, no dystopia."
     )
 
-    print("🎨 Генерация через DeepAI")
+    print("🎨 Генерация через HuggingFace Stable Diffusion 2")
     print(f"   Промпт: {base_prompt[:140]}...")
 
     try:
-        url = "https://api.deepai.org/api/text2img"
-        data = {"text": base_prompt}
-
-        resp = requests.post(url, data=data, timeout=90)
+        resp = requests.post(
+            api_url,
+            headers=headers,
+            json={"inputs": base_prompt},
+            timeout=120,
+        )
         if resp.status_code != 200:
-            print(f"❌ DeepAI HTTP {resp.status_code}")
+            print(f"❌ HF SD HTTP {resp.status_code}: {resp.text[:200]}")
             return None
 
-        result = resp.json()
-        img_url = result.get("output_url")
-        if not img_url:
-            print("❌ DeepAI не вернул output_url")
-            return None
-
-        img_resp = requests.get(img_url, timeout=60)
-        if img_resp.status_code != 200:
-            print(f"❌ Не удалось скачать картинку DeepAI: HTTP {img_resp.status_code}")
-            return None
-
-        filename = f"news_{timestamp}_{random.randint(1000,9999)}.jpg"
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        filename = f"news_{timestamp}_{random.randint(1000,9999)}.png"
         with open(filename, "wb") as f:
-            f.write(img_resp.content)
+            f.write(resp.content)
 
         print(f"✅ Картинка сохранена: {filename}")
         return filename
 
     except requests.exceptions.Timeout:
-        print("⏱️ Timeout DeepAI")
+        print("⏱️ Timeout HuggingFace SD")
         return None
     except Exception as e:
-        print(f"❌ Ошибка DeepAI: {e}")
+        print(f"❌ Ошибка HuggingFace SD: {e}")
         return None
 
 # ---------------- AUTOPOST ----------------
@@ -413,6 +425,7 @@ async def autopost():
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
 
 
 

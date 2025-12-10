@@ -423,8 +423,18 @@ async def autopost():
     except Exception as e:
         print(f"❌ Ошибка отправки: {e}")
 
+async def main():
+    try:
+        await autopost()
+    finally:
+        # аккуратно закрываем сессию бота, чтобы не было
+        # Unclosed client session / connector
+        session = await bot.get_session()
+        await session.close()
+
 if __name__ == "__main__":
-    asyncio.run(autopost())
+    asyncio.run(main())
+
 
 
 

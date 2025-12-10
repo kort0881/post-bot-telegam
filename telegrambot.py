@@ -19,18 +19,25 @@ from openai import OpenAI
 # ---------------- CONFIG ----------------
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+# Фолбек для старых секретов
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHANNEL_ID")
 
 ARTICLES_FILE = "articles_log.json"
 MAX_ARTICLES = 500
+
+print("TELEGRAM_TOKEN is None:", TELEGRAM_TOKEN is None)
+if not TELEGRAM_TOKEN:
+    raise ValueError("TELEGRAM_TOKEN не задан! Проверь secrets в GitHub Actions.")
 
 bot = Bot(token=TELEGRAM_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # ------------------------------------------
-# Загрузка и сохранение логов
+# Загрузка/сохранение логов
 # ------------------------------------------
+
 def load_articles() -> Dict:
     if not os.path.exists(ARTICLES_FILE):
         return {"articles": [], "timestamps": {}}
@@ -55,6 +62,7 @@ def clean_old_articles(db: Dict):
 # ------------------------------------------
 # RSS парсер
 # ------------------------------------------
+
 def fetch_rss(feed_urls: List[str]) -> List[Dict]:
     items = []
     for url in feed_urls:
@@ -73,9 +81,13 @@ def fetch_rss(feed_urls: List[str]) -> List[Dict]:
 # ------------------------------------------
 # Генерация корпоративного фото
 # ------------------------------------------
+
 def generate_image(title: str) -> Optional[str]:
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-    style = "realistic corporate photo, cinematic lighting, professional, high clarity, neutral tech aesthetic, clean, detailed, sharp"
+    style = (
+        "realistic corporate photo, cinematic lighting, professional, high clarity, "
+        "neutral tech aesthetic, clean, detailed, sharp"
+    )
 
     prompt = (
         f"{style}. Related to '{title[:60]}'. "
@@ -85,7 +97,7 @@ def generate_image(title: str) -> Optional[str]:
     services = [
         ("Flux-Realism", "flux-realism", 90),
         ("Flux", "flux", 75),
-        ("Turbo", "turbo", 45)
+        ("Turbo", "turbo", 45),
     ]
 
     with requests.Session() as session:
@@ -110,13 +122,15 @@ def generate_image(title: str) -> Optional[str]:
                     with open(path, "wb") as f:
                         f.write(r.content)
                     return path
-            except:
+            except Exception as e:
+                print(f"❌ Ошибка {name}: {e}")
                 continue
     return None
 
 # ------------------------------------------
-# Генерация текста через OpenAI (700-800 символов)
+# Генерация текста (700–800 символов)
 # ------------------------------------------
+
 def ai_generate_text(title: str, summary: str) -> str:
     prompt = (
         "Сделай короткий новостной текст (700–800 символов) по теме:\n"
@@ -130,24 +144,37 @@ def ai_generate_text(title: str, summary: str) -> str:
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
-            max_tokens=300
+            max_tokens=300,
         )
-        return response.choices[0].message.content.strip()
-    except:
+        text = response.choices[0].message.content.strip()
+        if len(text) > 950:
+            text = text[:947] + "..."
+        return text
+    except Exception as e:
+        print("❌ Ошибка OpenAI:", e)
         return f"{title}\n\n{summary[:750]}"
 
 # ------------------------------------------
-# Отправка в Telegram
+# Telegram
 # ------------------------------------------
+
 async def send_message(text: str, image_path: Optional[str]):
     if image_path and os.path.exists(image_path):
-        await bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=FSInputFile(image_path), caption=text)
+        await bot.send_photo(
+            chat_id=TELEGRAM_CHAT_ID,
+            photo=FSInputFile(image_path),
+            caption=text,
+        )
     else:
-        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text)
+        await bot.send_message(
+            chat_id=TELEGRAM_CHAT_ID,
+            text=text,
+        )
 
 # ------------------------------------------
 # Основной цикл
 # ------------------------------------------
+
 async def main_loop():
     FEEDS = [
         "https://xakep.ru/feed/",
@@ -168,11 +195,11 @@ async def main_loop():
                 title = item["title"]
                 if title in db["articles"]:
                     continue
+
                 db["articles"].append(title)
                 clean_old_articles(db)
                 save_articles(db)
 
-                # Классификация
                 t_lower = title.lower()
                 if "уязв" in t_lower or "атака" in t_lower:
                     strong.append(item)
@@ -190,10 +217,11 @@ async def main_loop():
                 continue
 
             title = target["title"]
-            summary = target["summary"]
+            summary = target.get("summary", "")
 
             print(f"▶ Обрабатываю: {title}")
             text = ai_generate_text(title, summary)
+
             img = generate_image(title)
             if img:
                 print("Картинка создана.")
@@ -210,8 +238,10 @@ async def main_loop():
 # ------------------------------------------
 # START
 # ------------------------------------------
+
 if __name__ == "__main__":
     asyncio.run(main_loop())
+
 
 
 

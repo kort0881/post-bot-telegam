@@ -132,7 +132,7 @@ def safe_get(url: str) -> Optional[str]:
 def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
 
-# ---------------- PARSERS ----------------
+# ---------------- PARSERS (3 САЙТА) ----------------
 
 def load_3dnews() -> List[Dict]:
     try:
@@ -218,33 +218,26 @@ def load_rss(url: str, source: str) -> List[Dict]:
     return articles
 
 def load_articles_from_sites() -> List[Dict]:
+    """3 источника: 3DNews, VC.ru, Xakep."""
     articles = []
     articles.extend(load_3dnews())
     articles.extend(load_rss("https://vc.ru/rss", "VC.ru"))
     articles.extend(load_rss("https://xakep.ru/feed/", "Xakep.ru"))
-    articles.extend(load_rss("https://xakep.ru/tag/iskusstvennyj-intellekt/feed/", "Xakep.ru/AI"))
-    print(f"ВСЕГО: {len(articles)} статей")
+    print(f"ВСЕГО: {len(articles)} статей до фильтрации")
     return articles
 
 # ---------------- FILTER ----------------
 
-def check_keywords(text: str) -> Optional[str]:
+def check_keywords_strong(text: str) -> bool:
     text_lower = text.lower()
-    for kw in EXCLUDE_KEYWORDS:
-        if kw in text_lower:
-            return None
-    if any(kw in text_lower for kw in STRONG_KEYWORDS):
-        return "strong"
-    if any(kw in text_lower for kw in SOFT_KEYWORDS):
-        return "soft"
-    return None
+    if any(kw in text_lower for kw in EXCLUDE_KEYWORDS):
+        return False
+    return any(kw in text_lower for kw in STRONG_KEYWORDS)
 
-# ---------------- PICK ARTICLE ----------------
+# ---------------- PICK ARTICLE (ТОЛЬКО STRONG) ----------------
 
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
-    filtered_strong = []
-    filtered_soft = []
-    ai_articles = []
+    strong_articles: List[Dict] = []
     skipped = 0
     excluded = 0
 
@@ -256,41 +249,24 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
 
         title = e.get("title", "")
         summary = e.get("summary", "")
-        text = title + " " + summary
-        source = e.get("source", "")
-        text_lower = text.lower()
+        text = f"{title} {summary}"
 
-        if any(kw in text_lower for kw in EXCLUDE_KEYWORDS):
+        if not check_keywords_strong(text):
             excluded += 1
             continue
 
-        level = check_keywords(text)
-        if level == "strong":
-            filtered_strong.append(e)
-        elif level == "soft":
-            filtered_soft.append(e)
-        elif source == "Xakep.ru/AI":
-            ai_articles.append(e)
+        strong_articles.append(e)
 
-    print(f"Пропущено: {skipped}, Исключено: {excluded}")
-    print(f"Сильные: {len(filtered_strong)}, Слабые: {len(filtered_soft)}, AI: {len(ai_articles)}")
+    print(f"Пропущено (уже были): {skipped}")
+    print(f"Отсеяно по ключам/исключениям: {excluded}")
+    print(f"Сильных по ключам: {len(strong_articles)}")
 
-    if filtered_strong:
-        filtered_strong.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
-        print("✅ По СИЛЬНЫМ ключам")
-        return filtered_strong[0]
+    if not strong_articles:
+        return None
 
-    if filtered_soft:
-        filtered_soft.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
-        print("✅ По СЛАБЫМ ключам")
-        return filtered_soft[0]
-
-    if ai_articles:
-        ai_articles.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
-        print("⚠️ Из Xakep.ru/AI")
-        return ai_articles[0]
-
-    return None
+    strong_articles.sort(key=lambda x: x.get("published_parsed", datetime.now()), reverse=True)
+    print("✅ Выбор только из СИЛЬНЫХ по ключам")
+    return strong_articles[0]
 
 # ---------------- OPENAI TEXT (650–700) ----------------
 
@@ -345,7 +321,7 @@ def short_summary(title: str, summary: str) -> str:
 def generate_image(title: str) -> Optional[str]:
     """
     Реалистичное кинематографичное изображение без киберпанка и неона.
-    Используем DeepAI text2img как новый бесплатный генератор.
+    Используем DeepAI text2img как бесплатный генератор.
     """
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
@@ -404,7 +380,7 @@ async def autopost():
 
     art = pick_article(articles)
     if not art:
-        print("Нет подходящих")
+        print("Нет подходящих по СИЛЬНЫМ ключам")
         return
 
     aid = art["id"]
@@ -437,6 +413,7 @@ async def autopost():
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
 
 
 

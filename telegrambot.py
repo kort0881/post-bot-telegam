@@ -292,21 +292,21 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
 
     return None
 
-# ---------------- OPENAI TEXT (750–800) ----------------
+# ---------------- OPENAI TEXT (650–700) ----------------
 
 def short_summary(title: str, summary: str) -> str:
-    """Пост 750–800 символов с учётом лимита Telegram"""
+    """Пост 650–700 символов с завершённой мыслью"""
     news_text = f"{title}. {summary}" if summary else title
     prompt = (
         "Сделай новостной пост для Telegram по теме ниже.\n\n"
         f"{news_text}\n\n"
         "Требования:\n"
-        "- Объём: строго 750–800 символов.\n"
-        "- Сразу по сути, без подзаголовков и вступлений.\n"
-        "- Стиль: технологичный, нейтральный, немного жёсткий.\n"
-        "- Упомяни, что произошло, кому важно и какие последствия.\n"
-        "- В конце 3–4 релевантных хештега через пробел.\n"
-        "- Используй 2–4 эмодзи внутри текста по смыслу."
+        "- Объём: строго 650–700 символов.\n"
+        "- Мысль должна быть законченной, без обрыва.\n"
+        "- Стиль: технологичный, нейтральный, чуть жёсткий.\n"
+        "- Кратко объясни: что произошло, кому это важно и к чему может привести.\n"
+        "- В конце 2–4 релевантных хештега через пробел.\n"
+        "- 2–3 эмодзи по смыслу внутри текста."
     )
 
     try:
@@ -314,14 +314,14 @@ def short_summary(title: str, summary: str) -> str:
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
-            max_tokens=500,
+            max_tokens=450,
         )
         text = res.choices[0].message.content.strip()
 
-        if len(text) > 800:
-            print(f"⚠️ Текст {len(text)} символов, режу до 800")
-            text = text[:797] + "…"
-        elif len(text) < 750:
+        if len(text) > 700:
+            print(f"⚠️ Текст {len(text)} символов, режу до 700")
+            text = text[:697] + "…"
+        elif len(text) < 650:
             print(f"⚠️ Текст всего {len(text)} символов")
 
         ps = "\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
@@ -337,86 +337,61 @@ def short_summary(title: str, summary: str) -> str:
 
     except Exception as e:
         print(f"❌ OpenAI: {e}")
-        fallback = f"{title}\n\n{summary[:760]}" if summary else title[:760]
+        fallback = f"{title}\n\n{(summary or '')[:660]}"
         return f"{fallback} 🔐🌐\n\n#tech #новости\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
 
-# ---------------- IMAGE GENERATION (REALISTIC CINEMATIC) ----------------
+# ---------------- IMAGE GENERATION (DeepAI REALISTIC) ----------------
 
 def generate_image(title: str) -> Optional[str]:
-    """Реалистичные кинематографичные картинки (без киберпанка)"""
-    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    """
+    Реалистичное кинематографичное изображение без киберпанка и неона.
+    Используем DeepAI text2img как новый бесплатный генератор.
+    """
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
-    styles = [
-        "realistic cinematic shot",
-        "realistic corporate office scene",
-        "cinematic technology workspace",
-        "realistic server room photo",
-        "cinematic security operations center",
-        "realistic city at night, tech atmosphere",
-    ]
-
-    details = [
-        "high detail, 4k, sharp focus",
-        "soft cinematic lighting, natural colors",
-        "high contrast, clear textures, realistic shadows",
-        "subtle depth of field, film look",
-        "clean composition, neutral background",
-    ]
-
-    base_prompt = f"realistic cinematic detailed illustration about {title[:50]}"
-    style = random.choice(styles)
-    detail = random.choice(details)
-
-    prompt = (
-        f"{base_prompt}, {style}, {detail}. "
-        "No cyberpunk, no neon, no sci-fi, no holograms, no dystopia, no glowing effects. "
-        "Neutral, realistic, modern tech mood."
+    base_prompt = (
+        f"realistic cinematic detailed photo about {title[:60]}, "
+        "modern cybersecurity and technology, professional corporate style, "
+        "clean composition, neutral background, sharp focus, high detail, 4k. "
+        "No cyberpunk, no neon, no sci-fi, no holograms, no glowing effects, no dystopia."
     )
 
-    services = [
-        ("Flux-Realism", "flux-realism", 90),
-        ("Flux", "flux", 75),
-        ("Turbo", "turbo", 45),
-    ]
+    print("🎨 Генерация через DeepAI")
+    print(f"   Промпт: {base_prompt[:140]}...")
 
-    for name, model, timeout in services:
-        try:
-            seed = str(int(time.time() * 1000) + random.randint(1000, 9999))
-            print(f"🎨 {name} (seed: {seed})")
-            print(f"   Промпт: {prompt[:140]}...")
+    try:
+        url = "https://api.deepai.org/api/text2img"
+        data = {"text": base_prompt}
 
-            url = "https://image.pollinations.ai/prompt/" + requests.utils.quote(prompt)
-            params = {
-                "width": "1024",
-                "height": "1024",
-                "nologo": "true",
-                "model": model,
-                "seed": seed,
-                "enhance": "true",
-                "noCache": "true",
-            }
+        resp = requests.post(url, data=data, timeout=90)
+        if resp.status_code != 200:
+            print(f"❌ DeepAI HTTP {resp.status_code}")
+            return None
 
-            r = requests.get(url, params=params, timeout=timeout, stream=True)
-            if r.status_code == 200:
-                filename = f"news_{timestamp}_{random.randint(1000,9999)}.png"
-                with open(filename, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                print(f"✅ Картинка: {filename}")
-                return filename
-            else:
-                print(f"❌ {name} HTTP {r.status_code}")
+        result = resp.json()
+        img_url = result.get("output_url")
+        if not img_url:
+            print("❌ DeepAI не вернул output_url")
+            return None
 
-        except requests.exceptions.Timeout:
-            print(f"⏱️ Timeout на {name}, пробую следующий...")
-            time.sleep(1)
-        except Exception as e:
-            print(f"❌ Ошибка {name}: {e}")
-            time.sleep(1)
-            continue
+        img_resp = requests.get(img_url, timeout=60)
+        if img_resp.status_code != 200:
+            print(f"❌ Не удалось скачать картинку DeepAI: HTTP {img_resp.status_code}")
+            return None
 
-    print("❌ Все сервисы недоступны – без картинки")
-    return None
+        filename = f"news_{timestamp}_{random.randint(1000,9999)}.jpg"
+        with open(filename, "wb") as f:
+            f.write(img_resp.content)
+
+        print(f"✅ Картинка сохранена: {filename}")
+        return filename
+
+    except requests.exceptions.Timeout:
+        print("⏱️ Timeout DeepAI")
+        return None
+    except Exception as e:
+        print(f"❌ Ошибка DeepAI: {e}")
+        return None
 
 # ---------------- AUTOPOST ----------------
 
@@ -462,6 +437,8 @@ async def autopost():
 
 if __name__ == "__main__":
     asyncio.run(autopost())
+
+
 
 
 

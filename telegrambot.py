@@ -68,6 +68,13 @@ STRONG_KEYWORDS = [
     "ai-обход", "нейросетевые алгоритмы",
 ]
 
+# --- ключи для РФ ---
+
+RUSSIA_KEYWORDS = [
+    "россия", "рф", "россий", "российский", "российская", "российские",
+    "российских", "московск", "москве", "московской области",
+]
+
 # ---------------- EXCLUDE (спорт, игры, бизнес) ----------------
 
 EXCLUDE_KEYWORDS = [
@@ -262,10 +269,11 @@ def check_keywords_strong(text: str) -> bool:
 
     return any(kw in text_lower for kw in STRONG_KEYWORDS)
 
-# ---------------- PICK ARTICLE ----------------
+# ---------------- PICK ARTICLE (мягкий приоритет РФ) ----------------
 
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
-    strong_articles: List[Dict] = []
+    strong_ru: List[Dict] = []
+    strong_other: List[Dict] = []
     skipped = 0
     excluded = 0
 
@@ -278,26 +286,32 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
         title = e.get("title", "")
         summary = e.get("summary", "")
         text = f"{title} {summary}"
+        text_lower = text.lower()
 
         if not check_keywords_strong(text):
             excluded += 1
             continue
 
-        strong_articles.append(e)
+        if any(kw in text_lower for kw in RUSSIA_KEYWORDS):
+            strong_ru.append(e)
+        else:
+            strong_other.append(e)
 
     print(f"Пропущено (уже были): {skipped}")
     print(f"Отсеяно по ключам/исключениям: {excluded}")
-    print(f"Сильных по ключам: {len(strong_articles)}")
+    print(f"Сильных по ключам РФ: {len(strong_ru)}")
+    print(f"Сильных по ключам (другие): {len(strong_other)}")
 
-    if not strong_articles:
+    target = strong_ru if strong_ru else strong_other
+    if not target:
         return None
 
-    strong_articles.sort(
+    target.sort(
         key=lambda x: x.get("published_parsed", datetime.now()),
         reverse=True
     )
-    print("✅ Выбор только из СИЛЬНЫХ по ключам (только STRONG)")
-    return strong_articles[0]
+    print("✅ Выбор только из СИЛЬНЫХ по ключам (приоритет РФ)")
+    return target[0]
 
 # ---------------- OPENAI TEXT (500–600) ----------------
 
@@ -440,6 +454,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

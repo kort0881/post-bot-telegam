@@ -1,18 +1,17 @@
 import os
 import json
 import asyncio
-import time
 import random
 from datetime import datetime
 from typing import List, Dict, Optional
 
 import requests
 import feedparser
+import urllib.parse
 from aiogram import Bot
 from aiogram.client.bot import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import FSInputFile
-
 from openai import OpenAI
 
 # ---------------- CONFIG ----------------
@@ -20,7 +19,6 @@ from openai import OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
-HF_TOKEN = os.getenv("HF_TOKEN")  # токен HuggingFace
 
 if not all([OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, CHANNEL_ID]):
     raise ValueError("❌ Не все ENV переменные установлены!")
@@ -41,7 +39,7 @@ HEADERS = {
 POSTED_FILE = "posted_articles.json"
 RETENTION_DAYS = 7
 
-# ---------------- KEYWORDS (ТВОЙ СПИСОК STRONG) ----------------
+# ---------------- KEYWORDS (STRONG) ----------------
 
 STRONG_KEYWORDS = [
     "интернет", "vpn", "прокси", "шифрование", "анонимность", "приватность",
@@ -70,7 +68,10 @@ STRONG_KEYWORDS = [
     "ai-обход", "нейросетевые алгоритмы",
 ]
 
+# ---------------- EXCLUDE (спорт, игры, бизнес) ----------------
+
 EXCLUDE_KEYWORDS = [
+    # спорт / развлечения / личное
     "теннис", "футбол", "хоккей", "баскетбол", "волейбол", "спорт",
     "олимпиад", "соревнован", "чемпионат", "турнир",
     "игра", "геймплей", "gameplay", "dungeon", "quest",
@@ -81,6 +82,22 @@ EXCLUDE_KEYWORDS = [
     "вернулся", "вернулась", "личный опыт",
     "кино", "фильм", "сериал", "музыка", "концерт",
     "дайджест", "digest", "обзор игр", "новости игр",
+
+    # бизнес / корпорации
+    "coca-cola", "coca cola", "pepsi", "nestle", "tesla", "apple",
+    "meta", "google", "microsoft", "amazon", "samsung", "sony",
+    "компания сообщила", "компания объявила",
+    "корпорация", "корпоративный", "корпоративная",
+    "акции", "биржа", "инвестор", "инвестиции", "капитализация",
+    "выручка", "прибыль", "убыток", "доход", "оборот",
+    "финансовые результаты", "финансовый отчет",
+    "отчетность", "квартальный отчет", "годовой отчет",
+    "генеральный директор", "ceo", "cfo", "совет директоров",
+    "топ-менеджмент", "менеджмент компании",
+    "маркетинг", "бренд", "брендовый", "реклама",
+    "рекламная кампания", "кампания бренда",
+    "лонч продукта", "выход продукта",
+    "новый продукт", "новая линейка",
 ]
 
 # ---------------- STATE ----------------
@@ -228,7 +245,6 @@ def load_rss(url: str, source: str) -> List[Dict]:
     return articles
 
 def load_articles_from_sites() -> List[Dict]:
-    """3 источника: 3DNews, VC.ru, Xakep."""
     articles = []
     articles.extend(load_3dnews())
     articles.extend(load_rss("https://vc.ru/rss", "VC.ru"))
@@ -246,7 +262,7 @@ def check_keywords_strong(text: str) -> bool:
 
     return any(kw in text_lower for kw in STRONG_KEYWORDS)
 
-# ---------------- PICK ARTICLE (ТОЛЬКО STRONG) ----------------
+# ---------------- PICK ARTICLE ----------------
 
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
     strong_articles: List[Dict] = []
@@ -283,7 +299,7 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
     print("✅ Выбор только из СИЛЬНЫХ по ключам (только STRONG)")
     return strong_articles[0]
 
-# ---------------- OPENAI TEXT (500–600, МАКСИМУМ ФАКТОВ) ----------------
+# ---------------- OPENAI TEXT (500–600) ----------------
 
 def short_summary(title: str, summary: str) -> str:
     news_text = f"{title}. {summary}" if summary else title
@@ -331,54 +347,45 @@ def short_summary(title: str, summary: str) -> str:
         fallback = f"{title}\n\n{(summary or '')[:520]}"
         return f"{fallback} 🔐🌐\n\n#tech #новости\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
 
-# ---------------- IMAGE GENERATION (HuggingFace Stable Diffusion 2) ----------------
+# ---------------- IMAGE GENERATION (Pollinations) ----------------
 
 def generate_image(title: str) -> Optional[str]:
     """
-    Генерация реалистичной иллюстрации через HuggingFace Inference API
-    (stabilityai/stable-diffusion-2), токен берётся из HF_TOKEN.
+    Картинка через Pollinations, максимально реалистичная,
+    без киберпанка и неона.
     """
-    if not HF_TOKEN:
-        print("❌ HF_TOKEN не задан, пропускаю генерацию картинки")
-        return None
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
-    api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2"
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-
-    base_prompt = (
-        f"realistic cinematic detailed illustration about {title[:80]}, "
-        "modern cybersecurity, internet privacy, censorship bypass, professional corporate style, "
-        "clean composition, neutral colors, sharp focus, high detail, 4k. "
-        "no cyberpunk, no neon, no sci-fi, no glowing effects, no dystopia."
+    prompt = (
+        f"realistic cinematic illustration about {title[:80]}, "
+        "modern cybersecurity, internet privacy and censorship bypass, "
+        "professional corporate style, clean composition, neutral colors, "
+        "sharp focus, high detail, 4k, photography style. "
+        "no cyberpunk, no neon, no sci-fi, no futuristic city, "
+        "no glowing effects, no dystopia, no text on image"
     )
 
-    print("🎨 Генерация через HuggingFace Stable Diffusion 2")
-    print(f"   Промпт: {base_prompt[:140]}...")
+    print("🎨 Генерация через Pollinations")
+    print(f"   Промпт: {prompt[:140]}...")
 
     try:
-        resp = requests.post(
-            api_url,
-            headers=headers,
-            json={"inputs": base_prompt},
-            timeout=120,
-        )
+        encoded = urllib.parse.quote(prompt)
+        url = f"https://image.pollinations.ai/prompt/{encoded}"
+
+        resp = requests.get(url, timeout=120)
         if resp.status_code != 200:
-            print(f"❌ HF SD HTTP {resp.status_code}: {resp.text[:200]}")
+            print(f"❌ Pollinations HTTP {resp.status_code}")
             return None
 
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        filename = f"news_{timestamp}_{random.randint(1000,9999)}.png"
+        filename = f"news_{timestamp}_{random.randint(1000,9999)}.jpg"
         with open(filename, "wb") as f:
             f.write(resp.content)
 
         print(f"✅ Картинка сохранена: {filename}")
         return filename
 
-    except requests.exceptions.Timeout:
-        print("⏱️ Timeout HuggingFace SD")
-        return None
     except Exception as e:
-        print(f"❌ Ошибка HuggingFace SD: {e}")
+        print(f"❌ Ошибка Pollinations: {e}")
         return None
 
 # ---------------- AUTOPOST ----------------
@@ -427,13 +434,13 @@ async def main():
     try:
         await autopost()
     finally:
-        # аккуратно закрываем сессию бота, чтобы не было
-        # Unclosed client session / connector
         session = await bot.get_session()
         await session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

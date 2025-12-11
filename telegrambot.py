@@ -351,22 +351,22 @@ def short_summary(title: str, summary: str) -> str:
 
 def generate_image(title: str) -> Optional[str]:
     """
-    Картинка через Pollinations, максимально реалистичная,
-    без киберпанка и неона.
+    Картинка через Pollinations:
+    реалистичный, кинематографичный стиль, минимум киберпанка/неона.
     """
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
     prompt = (
-        f"realistic cinematic illustration about {title[:80]}, "
-        "modern cybersecurity, internet privacy and censorship bypass, "
-        "professional corporate style, clean composition, neutral colors, "
-        "sharp focus, high detail, 4k, photography style. "
-        "no cyberpunk, no neon, no sci-fi, no futuristic city, "
-        "no glowing effects, no dystopia, no text on image"
+        f"realistic cinematic detailed illustration about {title[:80]}, "
+        "modern cybersecurity and internet privacy, people using smartphones or computers, "
+        "daytime city or office, neutral natural colors, soft light, high detail, 4k, "
+        "photo realistic, professional editorial photography, not cartoon, not anime. "
+        "no cyberpunk, no neon lights, no sci-fi, no futuristic helmets, "
+        "no glowing effects, no dystopia, no text, no logo, no watermark"
     )
 
     print("🎨 Генерация через Pollinations")
-    print(f"   Промпт: {prompt[:140]}...")
+    print(f"   Промпт: {prompt[:160]}...")
 
     try:
         encoded = urllib.parse.quote(prompt)
@@ -430,15 +430,18 @@ async def autopost():
     except Exception as e:
         print(f"❌ Ошибка отправки: {e}")
 
+# ---------------- ENTRYPOINT ----------------
+
 async def main():
     try:
         await autopost()
     finally:
-        session = await bot.get_session()
-        await session.close()
+        await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

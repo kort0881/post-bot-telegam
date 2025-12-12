@@ -36,7 +36,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
         run: python telegrambot.py
       
       - name: Commit posted articles

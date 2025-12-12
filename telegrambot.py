@@ -13,16 +13,14 @@ from aiogram.client.bot import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import FSInputFile
 from openai import OpenAI
-from xai_sdk import Client
 
 # ---------------- CONFIG ----------------
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
-XAI_API_KEY = os.getenv("XAI_API_KEY")
 
-if not all([OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, CHANNEL_ID, XAI_API_KEY]):
+if not all([OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, CHANNEL_ID]):
     raise ValueError("❌ Не все ENV переменные установлены!")
 
 bot = Bot(
@@ -30,7 +28,6 @@ bot = Bot(
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
 )
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
-xai_client = Client(api_key=XAI_API_KEY)
 
 HEADERS = {
     "User-Agent": (
@@ -438,53 +435,49 @@ def short_summary(title: str, summary: str, link: str) -> str:
         fallback = f"{title}\n\n{(summary or '')[:400]}"
         return f"{fallback}\n\n🔗 {link}\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
 
-# ============ КАРТИНКИ (опционально) ============
+# ============ КАРТИНКИ (POLLINATIONS - БЕСПЛАТНО) ============
 
 def generate_image(title: str) -> Optional[str]:
     """
-    Картинка через XAI Grok-2-image.
-    Если ошибка — постим БЕЗ картинки (это нормально).
+    Картинка через Pollinations (бесплатно).
+    Каждый раз новый seed, чтобы картинки были разные.
     """
-    if not XAI_API_KEY:
-        print("⚠️ XAI_API_KEY не задан, пропускаем картинку")
-        return None
-
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    prompt = (
+    seed = random.randint(0, 10_000_000)
+
+    prompt_core = (
         f"realistic cinematic detailed illustration about {title[:100]}, "
         "modern cybersecurity and internet privacy, people using computers, "
-        "daytime city or office, neutral colors, soft light, high detail, 4k, "
-        "photo realistic, professional editorial photography, not anime. "
-        "no cyberpunk, no neon, no sci-fi, no glowing, no dystopia, no text"
+        "daytime city or office, neutral natural colors, soft light, high detail, 4k, "
+        "photo realistic, professional editorial photography, not cartoon, not anime. "
+        "no cyberpunk, no neon lights, no sci-fi, no futuristic helmets, "
+        "no glowing effects, no dystopia, no text, no logo, no watermark"
     )
 
-    print("🎨 Генерация картинки XAI Grok-2-image...")
+    # Добавляем noise в промпт, чтобы ломать HTTP-кэш
+    prompt = prompt_core + f" random detail id {seed}"
+
+    print("🎨 Генерация через Pollinations")
+    print(f"   Seed: {seed}")
 
     try:
-        response = xai_client.image.sample(
-            model="grok-2-image",
-            prompt=prompt,
-            image_format="url"
-        )
+        encoded = urllib.parse.quote(prompt)
+        url = f"https://image.pollinations.ai/prompt/{encoded}?seed={seed}"
 
-        if not response.url:
-            print("⚠️ XAI не вернул URL")
-            return None
-
-        resp = requests.get(response.url, timeout=30)
+        resp = requests.get(url, timeout=120)
         if resp.status_code != 200:
-            print(f"⚠️ Ошибка скачивания: HTTP {resp.status_code}")
+            print(f"❌ Pollinations HTTP {resp.status_code}")
             return None
 
         filename = f"news_{timestamp}_{random.randint(1000,9999)}.jpg"
         with open(filename, "wb") as f:
             f.write(resp.content)
 
-        print(f"✅ Картинка: {filename}")
+        print(f"✅ Картинка сохранена: {filename}")
         return filename
 
     except Exception as e:
-        print(f"⚠️ Генерация не сработала: {e}")
+        print(f"❌ Ошибка Pollinations: {e}")
         return None
 
 # ============ АВТОПОСТ ============
@@ -537,6 +530,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

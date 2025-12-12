@@ -44,47 +44,37 @@ RETENTION_DAYS = 7
 REQUIRE_KEYWORDS = [
     # VPN, Прокси, Туннелирование
     "vpn", "прокси", "туннель", "proxy", "tunnel",
-    
     # Шифрование, Безопасность, Приватность
     "шифрование", "шифр", "encrypt", "приватность", "privacy",
     "безопасность", "security", "защита данных",
-    
     # Интернет, Сеть
     "интернет", "интернета", "интернету", "internet", "сеть",
     "сети", "network", "протокол", "protocol",
-    
     # Анонимность, Скрытие
     "анонимность", "анонимный", "anonymous", "скрытие", "скрывать",
     "incognito", "скрытый", "hidden", "маскировка",
-    
     # Цензура, Блокировки
     "цензура", "блокировка", "блокиров", "блокир", "blocking",
     "censorship", "restrict", "ограничение", "запрет",
-    
     # DNS, DPI, Фильтрация
     "dns", "dpi", "фильтр", "filter", "фильтрация",
-    
     # Обход ограничений
     "обход", "bypass", "circumvent", "обходить", "обогнуть",
-    
     # Российские органы (РКН, Минцифры, etc)
     "роскомнадзор", "ркн", "минцифры", "минцифр", "федсу",
     "заблокирова", "разблокир", "деблокир",
-    
     # Технические термины
     "трафик", "traffic", "пакет", "packet", "соединение",
     "connection", "канал", "channel", "линия связи",
     "tor", "darknet", "darkweb", "луковая маршрутизация",
     "wireguard", "openvpn", "shadowsocks", "mtproto",
     "обфускация", "obfuscation", "маскировка трафика",
-    
-    # Нейросети (новое направление)
+    # Нейросети
     "нейросеть", "нейросети", "ии", "ai", "искусственный интеллект",
     "llm", "gpt", "claude", "chatgpt",
 ]
 
 # ============ ОБЯЗАТЕЛЬНО РОССИЯ ============
-# НОВОСТЬ ДОЛЖНА СОДЕРЖАТЬ ХОТЯ БЫ ОДНО СЛОВО ОТСЮДА
 
 RUSSIA_KEYWORDS = [
     "россия", "рф", "рф ", "российск", "россий",
@@ -99,23 +89,19 @@ EXCLUDE_KEYWORDS = [
     "теннис", "футбол", "хоккей", "баскетбол", "волейбол",
     "спорт", "олимпиад", "чемпионат", "турнир", "матч",
     "игрок", "команда", "лига", "чемпион",
-    
     # Развлечения / Игры
     "игра", "геймплей", "gameplay", "dungeon", "quest",
     "playstation", "xbox", "nintendo", "steam", "boss", "raid",
     "шутер", "mmorpg", "battle royale", "геймер", "gamer",
     "helldivers", "routine", "игровой", "игровых",
-    
     # Личное / Блог
     "моя жизнь", "мой опыт", "как я", "моя история",
     "вернулся", "вернулась", "личный опыт", "я делаю",
-    
     # Кино, ТВ, Музыка
     "кино", "фильм", "сериал", "музыка", "концерт",
     "актер", "режиссер", "песня", "клип", "видеоклип",
     "дайджест", "digest", "обзор игр", "новости игр",
     "премьера", "выпуск сезона",
-    
     # Корпорации / Финансы
     "coca-cola", "pepsi", "nestle", "tesla",
     "samsung", "sony", "lg", "huawei",
@@ -128,32 +114,25 @@ EXCLUDE_KEYWORDS = [
     "генеральный директор", "ceo", "cfo",
     "маркетинг", "бренд", "реклама", "кампания",
     "лонч продукта", "выход продукта", "новый продукт",
-    
-    # Политика (в общем)
+    # Политика
     "выборы", "президент", "парламент", "закон",
     "политик", "политическ", "партия",
-    
     # Медицина / Здоровье
     "болезнь", "заболева", "вирус", "covid", "коронавирус",
     "лекарство", "таблетка", "терапия", "лечение",
-    
     # Криптовалюта
     "биткойн", "bitcoin", "эфириум", "ethereum",
     "крипто", "crypto", "блокчейн", "blockchain",
-    
     # Автомобили
     "автомобиль", "машина", "авто", "car",
     "двигатель", "мотор", "бензин", "газ",
-    
-    # Судебные дела (если не про РФ и цензуру)
+    # Судебные дела (в основном нерф)
     "суд", "судебный", "судья", "апелляция", "иск",
     "австралия", "австралийский", "новая зеландия",
     "великобритания", "англия", "канада",
-    
     # Социальные сети (если не про блокировку)
     "reddit", "twitter", "instagram", "tiktok",
     "facebook", "youtube ban",
-    
     # Прочее
     "полнолуние", "астрономия", "космос",
     "погода", "климат", "температура",
@@ -317,17 +296,14 @@ def load_articles_from_sites() -> List[Dict]:
 # ============ ФИЛЬТРАЦИЯ ============
 
 def check_require_keywords(text: str) -> bool:
-    """Проверяет, есть ли хотя бы один REQUIRE ключ."""
     text_lower = text.lower()
     return any(kw in text_lower for kw in REQUIRE_KEYWORDS)
 
 def check_exclude_keywords(text: str) -> bool:
-    """Проверяет, есть ли EXCLUDE ключи — если есть, отсеиваем."""
     text_lower = text.lower()
     return any(kw in text_lower for kw in EXCLUDE_KEYWORDS)
 
 def has_russia_mention(text: str) -> bool:
-    """ОБЯЗАТЕЛЬНО: в новости должна быть РОССИЯ."""
     text_lower = text.lower()
     return any(kw in text_lower for kw in RUSSIA_KEYWORDS)
 
@@ -350,22 +326,18 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
         summary = e.get("summary", "")
         text = f"{title} {summary}"
 
-        # ШАГ 1: Проверка исключений
         if check_exclude_keywords(text):
             excluded_blacklist += 1
             continue
 
-        # ШАГ 2: Проверка обязательных ключей
         if not check_require_keywords(text):
             excluded_require += 1
             continue
 
-        # ШАГ 3: СТРОГО ОБЯЗАТЕЛЬНО - РОССИЯ В ТЕКСТЕ
         if not has_russia_mention(text):
             excluded_no_russia += 1
             continue
 
-        # ✅ Все проверки пройдены
         suitable_articles.append(e)
         print(f"  ✅ Подходит: {title[:70]}")
 
@@ -418,7 +390,6 @@ def short_summary(title: str, summary: str, link: str) -> str:
             print(f"⚠️ Текст {len(text)} символов, режу до 550")
             text = text[:547] + "…"
 
-        # Добавляем ссылку и PS
         ps = f"\n\n🔗 Оригинал: {link}\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
         full_text = text + ps
 
@@ -435,30 +406,52 @@ def short_summary(title: str, summary: str, link: str) -> str:
         fallback = f"{title}\n\n{(summary or '')[:400]}"
         return f"{fallback}\n\n🔗 {link}\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
 
-# ============ КАРТИНКИ (POLLINATIONS - БЕСПЛАТНО) ============
+# ============ КАРТИНКИ (POLLINATIONS - РАНДОМНЫЙ ПРОМПТ) ============
 
 def generate_image(title: str) -> Optional[str]:
     """
-    Картинка через Pollinations (бесплатно).
-    Каждый раз новый seed, чтобы картинки были разные.
+    Картинка через Pollinations.
+    Промпт и seed каждый раз разные.
     """
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     seed = random.randint(0, 10_000_000)
+    noise = random.randint(0, 10_000_000)
 
-    prompt_core = (
-        f"realistic cinematic detailed illustration about {title[:100]}, "
-        "modern cybersecurity and internet privacy, people using computers, "
-        "daytime city or office, neutral natural colors, soft light, high detail, 4k, "
-        "photo realistic, professional editorial photography, not cartoon, not anime. "
+    scene_options = [
+        "crowded office with computers and cables",
+        "small home office with a single monitor and router",
+        "modern coworking space with glass walls",
+        "dark room lit only by monitor light",
+        "daytime cafe with people using laptops and phones",
+        "server room with racks and blinking lights",
+    ]
+    angle_options = [
+        "wide angle shot",
+        "close up shot",
+        "over the shoulder view",
+        "side view",
+        "top down view",
+    ]
+
+    scene = random.choice(scene_options)
+    angle = random.choice(angle_options)
+
+    prompt = (
+        f"unique id {timestamp}_{noise}, "
+        f"{angle}, {scene}, "
+        f"about: {title[:120]}, "
+        "modern cybersecurity and internet privacy, people using computers or smartphones, "
+        "neutral natural colors, soft light, high detail, 4k, "
+        "photo realistic, professional editorial photography, not cartoon, not anime, "
         "no cyberpunk, no neon lights, no sci-fi, no futuristic helmets, "
         "no glowing effects, no dystopia, no text, no logo, no watermark"
     )
 
-    # Добавляем noise в промпт, чтобы ломать HTTP-кэш
-    prompt = prompt_core + f" random detail id {seed}"
-
     print("🎨 Генерация через Pollinations")
     print(f"   Seed: {seed}")
+    print(f"   Noise: {noise}")
+    print(f"   Angle: {angle}")
+    print(f"   Scene: {scene}")
 
     try:
         encoded = urllib.parse.quote(prompt)
@@ -530,6 +523,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

@@ -367,10 +367,12 @@ def generate_image(title: str) -> Optional[str]:
     """
     Картинка через Pollinations:
     реалистичный, кинематографичный стиль, минимум киберпанка/неона.
+    Каждый пост получает свой seed, чтобы картинки не повторялись.
     """
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    seed = random.randint(0, 10_000_000)
 
-    prompt = (
+    prompt_core = (
         f"realistic cinematic detailed illustration about {title[:80]}, "
         "modern cybersecurity and internet privacy, people using smartphones or computers, "
         "daytime city or office, neutral natural colors, soft light, high detail, 4k, "
@@ -379,12 +381,16 @@ def generate_image(title: str) -> Optional[str]:
         "no glowing effects, no dystopia, no text, no logo, no watermark"
     )
 
+    # небольшой шум, чтобы ломать кэш по промпту
+    prompt = prompt_core + f" random detail id {seed}"
+
     print("🎨 Генерация через Pollinations")
     print(f"   Промпт: {prompt[:160]}...")
+    print(f"   Seed: {seed}")
 
     try:
         encoded = urllib.parse.quote(prompt)
-        url = f"https://image.pollinations.ai/prompt/{encoded}"
+        url = f"https://image.pollinations.ai/prompt/{encoded}?seed={seed}"
 
         resp = requests.get(url, timeout=120)
         if resp.status_code != 200:
@@ -454,6 +460,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

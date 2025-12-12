@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://vc.ru/services/2633909-mintsifry-obnovilo-belyy-spisok-saytov?from=rss",
-    "timestamp": 1764942330.502032
-  },
-  {
     "id": "https://vc.ru/services/2634378-gosuslugi-trebuyut-podklyuchit-messendzher-max-dlya-vkhoda?from=rss",
     "timestamp": 1764949796.306919
   },
@@ -122,5 +118,9 @@
   {
     "id": "https://vc.ru/legal/2646116-reddit-podala-isk-v-avstralii-protiv-zapreta-socsetei-dlya-podrostkov?from=rss",
     "timestamp": 1765542054.094405
+  },
+  {
+    "id": "https://vc.ru/services/2644916-sboy-mobilnogo-interneta-v-sankt-peterburge?from=rss",
+    "timestamp": 1765552359.158619
   }
 ]

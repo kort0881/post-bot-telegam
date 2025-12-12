@@ -13,14 +13,16 @@ from aiogram.client.bot import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import FSInputFile
 from openai import OpenAI
+from xai_sdk import Client
 
 # ---------------- CONFIG ----------------
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
+XAI_API_KEY = os.getenv("XAI_API_KEY")
 
-if not all([OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, CHANNEL_ID]):
+if not all([OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, CHANNEL_ID, XAI_API_KEY]):
     raise ValueError("❌ Не все ENV переменные установлены!")
 
 bot = Bot(
@@ -28,6 +30,7 @@ bot = Bot(
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
 )
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
+xai_client = Client(api_key=XAI_API_KEY)
 
 HEADERS = {
     "User-Agent": (
@@ -361,19 +364,17 @@ def short_summary(title: str, summary: str) -> str:
         fallback = f"{title}\n\n{(summary or '')[:520]}"
         return f"{fallback} 🔐🌐\n\n#tech #новости\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
 
-# ---------------- IMAGE GENERATION (Pollinations) ----------------
+# ---------------- IMAGE GENERATION (XAI Grok-2-image) ----------------
 
 def generate_image(title: str) -> Optional[str]:
     """
-    Картинка через Pollinations:
-    реалистичный, кинематографичный стиль, минимум киберпанка/неона.
-    Каждый пост получает свой seed, чтобы картинки не повторялись.
+    Картинка через XAI Grok-2-image:
+    реалистичный, кинематографичный стиль, высокое качество.
     """
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    seed = random.randint(0, 10_000_000)
 
-    prompt_core = (
-        f"realistic cinematic detailed illustration about {title[:80]}, "
+    prompt = (
+        f"realistic cinematic detailed illustration about {title[:100]}, "
         "modern cybersecurity and internet privacy, people using smartphones or computers, "
         "daytime city or office, neutral natural colors, soft light, high detail, 4k, "
         "photo realistic, professional editorial photography, not cartoon, not anime. "
@@ -381,20 +382,24 @@ def generate_image(title: str) -> Optional[str]:
         "no glowing effects, no dystopia, no text, no logo, no watermark"
     )
 
-    # небольшой шум, чтобы ломать кэш по промпту
-    prompt = prompt_core + f" random detail id {seed}"
-
-    print("🎨 Генерация через Pollinations")
+    print("🎨 Генерация через XAI Grok-2-image")
     print(f"   Промпт: {prompt[:160]}...")
-    print(f"   Seed: {seed}")
 
     try:
-        encoded = urllib.parse.quote(prompt)
-        url = f"https://image.pollinations.ai/prompt/{encoded}?seed={seed}"
+        response = xai_client.image.sample(
+            model="grok-2-image",
+            prompt=prompt,
+            image_format="url"
+        )
 
-        resp = requests.get(url, timeout=120)
+        if not response.url:
+            print("❌ XAI не вернул URL картинки")
+            return None
+
+        # скачиваем картинку по URL
+        resp = requests.get(response.url, timeout=30)
         if resp.status_code != 200:
-            print(f"❌ Pollinations HTTP {resp.status_code}")
+            print(f"❌ Ошибка скачивания картинки: HTTP {resp.status_code}")
             return None
 
         filename = f"news_{timestamp}_{random.randint(1000,9999)}.jpg"
@@ -405,7 +410,7 @@ def generate_image(title: str) -> Optional[str]:
         return filename
 
     except Exception as e:
-        print(f"❌ Ошибка Pollinations: {e}")
+        print(f"❌ Ошибка XAI: {e}")
         return None
 
 # ---------------- AUTOPOST ----------------

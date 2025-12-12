@@ -36,8 +36,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-          REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
         run: python telegrambot.py
       
       - name: Commit posted articles
@@ -47,7 +46,6 @@ jobs:
           git add posted_articles.json
           git diff --quiet && git diff --staged --quiet || git commit -m "Update posted articles [skip ci]"
           git push
-
 
 
 

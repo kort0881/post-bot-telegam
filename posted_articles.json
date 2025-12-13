@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://habr.com/ru/articles/974016/?utm_source=habrahabr&utm_medium=rss&utm_campaign=974016",
-    "timestamp": 1765034537.398505
-  },
-  {
     "id": "https://habr.com/ru/articles/974056/?utm_source=habrahabr&utm_medium=rss&utm_campaign=974056",
     "timestamp": 1765046600.622637
   },
@@ -114,5 +110,9 @@
   {
     "id": "https://vc.ru/services/2647075-google-perevodchik-perevod-rechi-v-realnom-vremeni?from=rss",
     "timestamp": 1765638578.864199
+  },
+  {
+    "id": "https://xakep.ru/2025/12/12/graylog-howto/",
+    "timestamp": 1765649628.224118
   }
 ]

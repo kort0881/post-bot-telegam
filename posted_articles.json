@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://habr.com/ru/articles/973974/?utm_source=habrahabr&utm_medium=rss&utm_campaign=973974",
-    "timestamp": 1765024925.454152
-  },
-  {
-    "id": "https://habr.com/ru/companies/selectel/articles/973878/?utm_source=habrahabr&utm_medium=rss&utm_campaign=973878",
-    "timestamp": 1765025218.825633
-  },
-  {
     "id": "https://habr.com/ru/articles/974016/?utm_source=habrahabr&utm_medium=rss&utm_campaign=974016",
     "timestamp": 1765034537.398505
   },
@@ -118,5 +110,9 @@
   {
     "id": "https://xakep.ru/2025/12/12/gogs-attacks/",
     "timestamp": 1765628313.10307
+  },
+  {
+    "id": "https://vc.ru/services/2647075-google-perevodchik-perevod-rechi-v-realnom-vremeni?from=rss",
+    "timestamp": 1765638578.864199
   }
 ]

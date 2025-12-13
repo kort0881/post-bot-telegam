@@ -307,9 +307,7 @@ def has_russia_mention(text: str) -> bool:
     text_lower = text.lower()
     return any(kw in text_lower for kw in RUSSIA_KEYWORDS)
 
-# ============ ВЫБОР СТАТЬИ ============
-
-def pick_article(articles: List[Dict]) -> Optional[Dict]:
+def filter_articles(articles: List[Dict]) -> List[Dict]:
     suitable_ru: List[Dict] = []
     suitable_world: List[Dict] = []
 
@@ -337,12 +335,10 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
 
         if has_russia_mention(text):
             suitable_ru.append(e)
-            print(f"  🇷🇺 РФ: {title[:70]}")
         else:
             suitable_world.append(e)
-            print(f"  🌍 World: {title[:70]}")
 
-    print(f"\n📊 Статистика фильтрации:")
+    print(f"\n📊 Фильтрация:")
     print(f"  Пропущено (уже были): {skipped}")
     print(f"  Исключено (чёрный список): {excluded_blacklist}")
     print(f"  Исключено (нет обязательных ключей): {excluded_require}")
@@ -350,21 +346,30 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
     print(f"  World-новости: {len(suitable_world)}")
 
     target = suitable_ru if suitable_ru else suitable_world
-    if not target:
-        print("❌ Нет статей по нужным ключам!")
-        return None
-
     target.sort(
         key=lambda x: x.get("published_parsed", datetime.now()),
         reverse=True
     )
-    chosen = target[0]
-    print(f"\n🎯 Выбрана: {chosen['title'][:80]}")
-    return chosen
+    return target
+
+# ============ ФИЛЬТР «НИ О ЧЁМ» ============
+
+BAD_PHRASES = [
+    "в мире программного обеспечения продолжаются",
+    "компании обновляют свои платформы и инструменты",
+    "оставайтесь в курсе актуальных трендов и технологий",
+    "важно следить за последними обновлениями",
+]
+
+def is_too_generic(text: str) -> bool:
+    low = text.lower()
+    if any(p in low for p in BAD_PHRASES):
+        return True
+    return False
 
 # ============ OPENAI TEXT ============
 
-def short_summary(title: str, summary: str, link: str) -> str:
+def short_summary(title: str, summary: str, link: str) -> Optional[str]:
     news_text = f"{title}. {summary}" if summary else title
     prompt = (
         "Вот фрагмент новостной статьи. Сохрани факты максимально близко к тексту, "
@@ -376,7 +381,8 @@ def short_summary(title: str, summary: str, link: str) -> str:
         "- Никаких выдуманных деталей, только то, что есть в тексте.\n"
         "- В конце 2–3 релевантных хештега через пробел.\n"
         "- 1–2 эмодзи по смыслу внутри текста.\n"
-        "- Не добавляй призыв на подписку или ссылку на канал."
+        "- Не добавляй призыв на подписку или ссылку на канал.\n"
+        "- Не используй общие фразы типа 'в мире программного обеспечения продолжаются изменения'."
     )
 
     try:
@@ -392,72 +398,91 @@ def short_summary(title: str, summary: str, link: str) -> str:
             print(f"⚠️ Текст {len(text)} символов, режу до 550")
             text = text[:547] + "…"
 
-        ps = f"\n\n🔗 Оригинал: {link}\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
+        if is_too_generic(text):
+            print("⚠️ Текст слишком общий, пропускаем эту статью")
+            return None
+
+        # Добавляем ТОЛЬКО PS про ключи, без ссылки на оригинал
+        ps = "\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
         full_text = text + ps
 
+        # ограничение телеги 1024 символа на caption
         if len(full_text) > 1020:
             excess = len(full_text) - 1020
             text = text[:-(excess + 3)] + "…"
             full_text = text + ps
 
-        print(f"📊 Итоговая длина: {len(full_text)} символов")
         return full_text
 
     except Exception as e:
         print(f"❌ OpenAI: {e}")
-        fallback = f"{title}\n\n{(summary or '')[:400]}"
-        return f"{fallback}\n\n🔗 {link}\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
+        fallback_core = f"{title}\n\n{(summary or '')[:400]}"
+        if is_too_generic(fallback_core):
+            return None
+        return fallback_core + "\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
 
-# ============ КАРТИНКИ (POLLINATIONS - РАНДОМНЫЙ ПРОМПТ) ============
+# ============ КАРТИНКИ (POLLINATIONS – РАЗНЫЕ СТИЛИ) ============
 
 def generate_image(title: str) -> Optional[str]:
     """
-    Картинка через Pollinations.
-    Промпт и seed каждый раз разные.
+    Картинка через Pollinations с разными сценами и стилями.
+    Без киберпанка и неоновых огней.
     """
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     seed = random.randint(0, 10_000_000)
     noise = random.randint(0, 10_000_000)
 
     scene_options = [
-        "crowded office with computers and cables",
-        "small home office with a single monitor and router",
-        "modern coworking space with glass walls",
-        "dark room lit only by monitor light",
-        "daytime cafe with people using laptops and phones",
-        "server room with racks and blinking lights",
+        "people connecting through secure lines over a world map",
+        "abstract data streams flowing between servers",
+        "shield protecting data cubes in cyberspace",
+        "person using a laptop at home in a calm atmosphere",
+        "minimalistic shapes symbolizing secure internet connection",
+        "router and laptop on a desk with glowing network cables",
+        "group of people using smartphones with shield icons around them",
     ]
-    angle_options = [
-        "wide angle shot",
-        "close up shot",
-        "over the shoulder view",
-        "side view",
-        "top down view",
+
+    style_options = [
+        "flat vector illustration, clean minimal style",
+        "isometric illustration, detailed but simple",
+        "semi-realistic digital painting with soft shading",
+        "3d render with soft lighting, realistic materials",
+        "editorial illustration for a technology magazine",
+    ]
+
+    color_options = [
+        "warm pastel colors",
+        "cool blue and teal palette",
+        "black and white with one vivid accent color",
+        "soft muted colors, low contrast",
+        "light neutral colors with subtle gradients",
     ]
 
     scene = random.choice(scene_options)
-    angle = random.choice(angle_options)
+    style = random.choice(style_options)
+    colors = random.choice(color_options)
 
     prompt = (
         f"unique id {timestamp}_{noise}, "
-        f"{angle}, {scene}, "
+        f"{scene}, "
         f"about: {title[:120]}, "
-        "modern cybersecurity and internet privacy, people using computers or smartphones, "
-        "neutral natural colors, soft light, high detail, 4k, "
-        "photo realistic, professional editorial photography, not cartoon, not anime, "
-        "no cyberpunk, no neon lights, no sci-fi, no futuristic helmets, "
-        "no glowing effects, no dystopia, no text, no logo, no watermark"
+        f"{style}, {colors}, "
+        "related to cybersecurity, internet privacy and vpn usage, "
+        "no cyberpunk, no neon lights, no sci-fi, "
+        "no futuristic helmets, no dystopia, "
+        "no text, no logo, no watermark"
     )
 
     print("🎨 Генерация через Pollinations")
     print(f"   Seed: {seed}")
     print(f"   Noise: {noise}")
-    print(f"   Angle: {angle}")
     print(f"   Scene: {scene}")
+    print(f"   Style: {style}")
+    print(f"   Colors: {colors}")
 
     try:
         encoded = urllib.parse.quote(prompt)
-        url = f"https://image.pollinations.ai/prompt/{encoded}?seed={seed}"
+        url = f"https://image.pollinations.ai/prompt/{encoded}?seed={seed}"  # [web:22]
 
         resp = requests.get(url, timeout=120)
         if resp.status_code != 200:
@@ -484,31 +509,48 @@ async def autopost():
         print("Нет статей")
         return
 
-    art = pick_article(articles)
-    if not art:
+    candidates = filter_articles(articles)
+    if not candidates:
         print("Нет статей по нужным ключам")
         return
 
-    aid = art["id"]
-    print(f"\n✅ Выбрана: {art['title']}")
-    print(f"Источник: {art['source']}\n")
+    text_to_post = None
+    chosen_article = None
+
+    # пробуем несколько статей подряд, пока не получим нормальный текст
+    for art in candidates[:10]:
+        print(f"\n🔍 Пробуем статью: {art['title']}")
+        txt = short_summary(art["title"], art.get("summary", ""), art.get("link", ""))
+        if txt:
+            text_to_post = txt
+            chosen_article = art
+            break
+        else:
+            print("⏭️ Статья отброшена (общий текст)")
+
+    if not text_to_post or not chosen_article:
+        print("❌ Не удалось получить нормальный текст для поста")
+        return
+
+    aid = chosen_article["id"]
+    print(f"\n✅ Выбрана: {chosen_article['title']}")
+    print(f"Источник (в пост не идёт): {chosen_article['source']}\n")
 
     try:
-        text = short_summary(art["title"], art.get("summary", ""), art.get("link", ""))
-        img_file = generate_image(art["title"])
+        img_file = generate_image(chosen_article["title"])
 
         if img_file and os.path.exists(img_file):
             await bot.send_photo(
                 chat_id=CHANNEL_ID,
                 photo=FSInputFile(img_file),
-                caption=text,
+                caption=text_to_post,
             )
             os.remove(img_file)
             print("✅ Отправлено с картинкой")
         else:
             await bot.send_message(
                 chat_id=CHANNEL_ID,
-                text=text,
+                text=text_to_post,
             )
             print("✅ Отправлено текстом (без картинки)")
 

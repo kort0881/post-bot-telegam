@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://habr.com/ru/articles/973916/?utm_source=habrahabr&utm_medium=rss&utm_campaign=973916",
-    "timestamp": 1765011135.935337
-  },
-  {
-    "id": "https://habr.com/ru/articles/973914/?utm_source=habrahabr&utm_medium=rss&utm_campaign=973914",
-    "timestamp": 1765011200.282023
-  },
-  {
     "id": "https://habr.com/ru/articles/973974/?utm_source=habrahabr&utm_medium=rss&utm_campaign=973974",
     "timestamp": 1765024925.454152
   },
@@ -122,5 +114,9 @@
   {
     "id": "https://3dnews.ru/software-news",
     "timestamp": 1765608971.550917
+  },
+  {
+    "id": "https://xakep.ru/2025/12/12/gogs-attacks/",
+    "timestamp": 1765628313.10307
   }
 ]

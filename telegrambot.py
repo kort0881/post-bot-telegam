@@ -74,7 +74,7 @@ REQUIRE_KEYWORDS = [
     "llm", "gpt", "claude", "chatgpt",
 ]
 
-# ============ ОБЯЗАТЕЛЬНО РОССИЯ ============
+# ============ РОССИЯ (для приоритета, не обязательно) ============
 
 RUSSIA_KEYWORDS = [
     "россия", "рф", "рф ", "российск", "россий",
@@ -130,7 +130,7 @@ EXCLUDE_KEYWORDS = [
     "суд", "судебный", "судья", "апелляция", "иск",
     "австралия", "австралийский", "новая зеландия",
     "великобритания", "англия", "канада",
-    # Социальные сети (если не про блокировку)
+    # Соцсети (если не про блокировку)
     "reddit", "twitter", "instagram", "tiktok",
     "facebook", "youtube ban",
     # Прочее
@@ -310,11 +310,12 @@ def has_russia_mention(text: str) -> bool:
 # ============ ВЫБОР СТАТЬИ ============
 
 def pick_article(articles: List[Dict]) -> Optional[Dict]:
-    suitable_articles: List[Dict] = []
+    suitable_ru: List[Dict] = []
+    suitable_world: List[Dict] = []
+
     skipped = 0
     excluded_require = 0
     excluded_blacklist = 0
-    excluded_no_russia = 0
 
     for e in articles:
         aid = e.get("id")
@@ -334,29 +335,30 @@ def pick_article(articles: List[Dict]) -> Optional[Dict]:
             excluded_require += 1
             continue
 
-        if not has_russia_mention(text):
-            excluded_no_russia += 1
-            continue
-
-        suitable_articles.append(e)
-        print(f"  ✅ Подходит: {title[:70]}")
+        if has_russia_mention(text):
+            suitable_ru.append(e)
+            print(f"  🇷🇺 РФ: {title[:70]}")
+        else:
+            suitable_world.append(e)
+            print(f"  🌍 World: {title[:70]}")
 
     print(f"\n📊 Статистика фильтрации:")
     print(f"  Пропущено (уже были): {skipped}")
     print(f"  Исключено (чёрный список): {excluded_blacklist}")
     print(f"  Исключено (нет обязательных ключей): {excluded_require}")
-    print(f"  Исключено (НЕТ РОССИИ в тексте): {excluded_no_russia}")
-    print(f"  Подходят (ВСЕ условия): {len(suitable_articles)}")
+    print(f"  РФ-новости: {len(suitable_ru)}")
+    print(f"  World-новости: {len(suitable_world)}")
 
-    if not suitable_articles:
-        print("❌ Нет статей про Россию!")
+    target = suitable_ru if suitable_ru else suitable_world
+    if not target:
+        print("❌ Нет статей по нужным ключам!")
         return None
 
-    suitable_articles.sort(
+    target.sort(
         key=lambda x: x.get("published_parsed", datetime.now()),
         reverse=True
     )
-    chosen = suitable_articles[0]
+    chosen = target[0]
     print(f"\n🎯 Выбрана: {chosen['title'][:80]}")
     return chosen
 
@@ -484,7 +486,7 @@ async def autopost():
 
     art = pick_article(articles)
     if not art:
-        print("Нет статей про Россию с нужными ключами")
+        print("Нет статей по нужным ключам")
         return
 
     aid = art["id"]
@@ -523,6 +525,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

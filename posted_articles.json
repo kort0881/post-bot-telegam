@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://habr.com/ru/articles/974056/?utm_source=habrahabr&utm_medium=rss&utm_campaign=974056",
-    "timestamp": 1765046600.622637
-  },
-  {
     "id": "https://habr.com/ru/articles/974104/?utm_source=habrahabr&utm_medium=rss&utm_campaign=974104",
     "timestamp": 1765089306.052223
   },
@@ -114,5 +110,9 @@
   {
     "id": "https://xakep.ru/2025/12/12/graylog-howto/",
     "timestamp": 1765649628.224118
+  },
+  {
+    "id": "https://xakep.ru/2025/12/12/pcie-flaws/",
+    "timestamp": 1765692926.431632
   }
 ]

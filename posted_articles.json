@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://vc.ru/services/2637386-prilozhenie-finansy-onlain-ot-sbera?from=rss",
-    "timestamp": 1765176086.740357
-  },
-  {
     "id": "https://xakep.ru/2025/12/08/whitelistv3/",
     "timestamp": 1765198374.385379
   },
@@ -94,5 +90,9 @@
   {
     "id": "https://xakep.ru/2025/12/12/pcie-flaws/",
     "timestamp": 1765692926.431632
+  },
+  {
+    "id": "https://vc.ru/tech/2650032-irobot-ob-yavil-o-bankrotstve?from=rss",
+    "timestamp": 1765801365.67247
   }
 ]

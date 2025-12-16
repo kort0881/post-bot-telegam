@@ -72,6 +72,15 @@ REQUIRE_KEYWORDS = [
     # Нейросети
     "нейросеть", "нейросети", "ии", "ai", "искусственный интеллект",
     "llm", "gpt", "claude", "chatgpt",
+    # Кибербез, уязвимости, малварь
+    "уязвимость", "уязвимости", "vulnerability", "vulnerabilities",
+    "эксплойт", "exploit", "zero-day", "0-day",
+    "malware", "вредонос", "вредоносное ПО",
+    "кибератака", "кибер атака", "атака", "хакерская атака",
+    "компрометация", "compromise", "breach",
+    "security patch", "патч безопасности",
+    "обновление безопасности", "critical update", "security update",
+    "temp.sh", "notepad++", "notepad ++",
 ]
 
 # ============ РОССИЯ (для приоритета, не обязательно) ============
@@ -402,11 +411,9 @@ def short_summary(title: str, summary: str, link: str) -> Optional[str]:
             print("⚠️ Текст слишком общий, пропускаем эту статью")
             return None
 
-        # Добавляем ТОЛЬКО PS про ключи, без ссылки на оригинал
         ps = "\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
         full_text = text + ps
 
-        # ограничение телеги 1024 символа на caption
         if len(full_text) > 1020:
             excess = len(full_text) - 1020
             text = text[:-(excess + 3)] + "…"
@@ -482,7 +489,7 @@ def generate_image(title: str) -> Optional[str]:
 
     try:
         encoded = urllib.parse.quote(prompt)
-        url = f"https://image.pollinations.ai/prompt/{encoded}?seed={seed}"  # [web:22]
+        url = f"https://image.pollinations.ai/prompt/{encoded}?seed={seed}"  # [web:19]
 
         resp = requests.get(url, timeout=120)
         if resp.status_code != 200:
@@ -517,7 +524,6 @@ async def autopost():
     text_to_post = None
     chosen_article = None
 
-    # пробуем несколько статей подряд, пока не получим нормальный текст
     for art in candidates[:10]:
         print(f"\n🔍 Пробуем статью: {art['title']}")
         txt = short_summary(art["title"], art.get("summary", ""), art.get("link", ""))
@@ -567,6 +573,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

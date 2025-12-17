@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import asyncio
 import random
@@ -207,7 +208,7 @@ def safe_get(url: str) -> Optional[str]:
 def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
 
-# ---------------- PARSERS (3 САЙТА) ----------------
+# ---------------- PARСERS ----------------
 
 def load_3dnews() -> List[Dict]:
     try:
@@ -294,10 +295,53 @@ def load_rss(url: str, source: str) -> List[Dict]:
         print(f"Ошибка RSS {url}: {e}")
     return articles
 
+def load_vc_new() -> List[Dict]:
+    """
+    Парсим свежие статьи с https://vc.ru/new.
+    Берём до 20 карточек.
+    """
+    try:
+        html = safe_get("https://vc.ru/new")
+        if not html:
+            return []
+
+        articles: List[Dict] = []
+
+        # Ищем ссылки вида href="/u123456/..." с заголовком в span
+        for match in re.finditer(
+            r'href="(/[^"]+)"[^>]*>\s*<span[^>]*>([^<]+)</span>',
+            html,
+        ):
+            href = match.group(1)
+            title = clean_text(match.group(2))
+
+            if not title or not href:
+                continue
+
+            link = "https://vc.ru" + href.lstrip("/")
+            articles.append({
+                "id": link,
+                "title": title,
+                "summary": "",
+                "link": link,
+                "source": "VC.ru New",
+                "published_parsed": datetime.now(),
+            })
+
+            if len(articles) >= 20:
+                break
+
+        print(f"VC.ru New: найдено {len(articles)} статей")
+        return articles
+
+    except Exception as e:
+        print(f"Ошибка VC.ru New: {e}")
+        return []
+
 def load_articles_from_sites() -> List[Dict]:
-    articles = []
+    articles: List[Dict] = []
     articles.extend(load_3dnews())
-    articles.extend(load_rss("https://vc.ru/rss", "VC.ru"))
+    articles.extend(load_vc_new())  # свежие VC.ru/new
     articles.extend(load_rss("https://xakep.ru/feed/", "Xakep.ru"))
     print(f"ВСЕГО: {len(articles)} статей до фильтрации")
     return articles
@@ -578,6 +622,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

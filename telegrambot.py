@@ -307,7 +307,6 @@ def load_vc_new() -> List[Dict]:
 
         articles: List[Dict] = []
 
-        # Ищем ссылки вида href="/u123456/..." с заголовком в span
         for match in re.finditer(
             r'href="(/[^"]+)"[^>]*>\s*<span[^>]*>([^<]+)</span>',
             html,
@@ -341,7 +340,7 @@ def load_vc_new() -> List[Dict]:
 def load_articles_from_sites() -> List[Dict]:
     articles: List[Dict] = []
     articles.extend(load_3dnews())
-    articles.extend(load_vc_new())  # свежие VC.ru/new
+    articles.extend(load_vc_new())
     articles.extend(load_rss("https://xakep.ru/feed/", "Xakep.ru"))
     print(f"ВСЕГО: {len(articles)} статей до фильтрации")
     return articles
@@ -349,8 +348,18 @@ def load_articles_from_sites() -> List[Dict]:
 # ============ ФИЛЬТРАЦИЯ ============
 
 def check_require_keywords(text: str) -> bool:
+    """
+    Мягкий фильтр: считаем совпадения ключей и берём статью,
+    если найдено минимум 2 разных ключа.
+    """
     text_lower = text.lower()
-    return any(kw in text_lower for kw in REQUIRE_KEYWORDS)
+    score = 0
+    for kw in REQUIRE_KEYWORDS:
+        if kw in text_lower:
+            score += 1
+            if score >= 2:
+                return True
+    return False
 
 def check_exclude_keywords(text: str) -> bool:
     text_lower = text.lower()
@@ -538,8 +547,7 @@ def generate_image(title: str) -> Optional[str]:
 
     try:
         encoded = urllib.parse.quote(prompt)
-        url = f"https://image.pollinations.ai/prompt/{encoded}?seed={seed}"  # [web:19]
-
+        url = f"https://image.pollinations.ai/prompt/{encoded}?seed={seed}"
         resp = requests.get(url, timeout=120)
         if resp.status_code != 200:
             print(f"❌ Pollinations HTTP {resp.status_code}")
@@ -622,6 +630,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://xakep.ru/2025/12/02/sdxl-dmd2/",
-    "timestamp": 1765369284.694206
-  },
-  {
     "id": "https://xakep.ru/2025/12/10/xss-for-begginers/",
     "timestamp": 1765379655.055954
   },
@@ -110,5 +106,9 @@
   {
     "id": "https://xakep.ru/2025/12/17/dark-web-report-closed/",
     "timestamp": 1765974087.969435
+  },
+  {
+    "id": "https://xakep.ru/2025/12/17/hashcracking-hardware/",
+    "timestamp": 1765984395.806736
   }
 ]

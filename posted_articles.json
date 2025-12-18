@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://xakep.ru/2025/12/11/spain-arrest/",
-    "timestamp": 1765455741.112526
-  },
-  {
     "id": "https://vc.ru/services/2645016-ii-pomoshchnik-2gis-dlya-otvetov-na-voprosy-o-zavedeniakh?from=rss",
     "timestamp": 1765465991.094068
   },
@@ -106,5 +102,9 @@
   {
     "id": "https://xakep.ru/2025/12/17/ai-urban-vpn/",
     "timestamp": 1765995446.116112
+  },
+  {
+    "id": "https://xakep.ru/2025/12/18/ghostposter/",
+    "timestamp": 1766070772.813828
   }
 ]

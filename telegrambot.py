@@ -40,6 +40,10 @@ HEADERS = {
 POSTED_FILE = "posted_articles.json"
 RETENTION_DAYS = 7
 
+# Дополнительный источник: GitHub Trending (неофициальный RSS)
+# Пример из GitHubTrendingRSS — при необходимости замени на свой URL. [web:241][web:244]
+GITHUB_TRENDING_RSS = "https://mshibanami.github.io/GitHubTrendingRSS/github_trending_all_daily.xml"
+
 # ============ ОБЯЗАТЕЛЬНЫЕ КЛЮЧЕВЫЕ СЛОВА ============
 
 REQUIRE_KEYWORDS = [
@@ -342,6 +346,8 @@ def load_articles_from_sites() -> List[Dict]:
     articles.extend(load_3dnews())
     articles.extend(load_vc_new())
     articles.extend(load_rss("https://xakep.ru/feed/", "Xakep.ru"))
+    # Новый источник GitHub Trending
+    articles.extend(load_rss(GITHUB_TRENDING_RSS, "GitHub Trending"))
     print(f"ВСЕГО: {len(articles)} статей до фильтрации")
     return articles
 
@@ -437,8 +443,8 @@ def short_summary(title: str, summary: str, link: str) -> Optional[str]:
         "Вот фрагмент новостной статьи. Сохрани факты максимально близко к тексту, "
         "перефразируй только чтобы читалось плавно.\n\n"
         f"{news_text}\n\n"
-        "Сделай короткий новостной пост для Telegram:\n"
-        "- Объём строго 450–550 символов.\n"
+        "Сделай короткий новостной пост для Telegram на русском:\n"
+        "- Объём строго 380–430 символов, без ссылки и без PS.\n"
         "- Обязательно укажи 2–4 конкретных действия, которые может сделать читатель "
         "(например: добавить правило iptables, включить опцию, обновить версию, "
         "проверить логи, изменить конфиг, включить защитную функцию).\n"
@@ -459,32 +465,36 @@ def short_summary(title: str, summary: str, link: str) -> Optional[str]:
             temperature=0.4,
             max_tokens=320,
         )
-        text = res.choices[0].message.content.strip()
+        core = res.choices[0].message.content.strip()
 
-        if len(text) > 550:
-            print(f"⚠️ Текст {len(text)} символов, режу до 550")
-            text = text[:547] + "…"
-
-        if is_too_generic(text):
+        if is_too_generic(core):
             print("⚠️ Текст слишком общий, пропускаем эту статью")
             return None
 
+        # Добавляем ссылку на источник и PS
+        src = f"\n\nИсточник: {link}" if link else ""
         ps = "\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
-        full_text = text + ps
+        full_text = core + src + ps
 
-        if len(full_text) > 1020:
-            excess = len(full_text) - 1020
-            text = text[:-(excess + 3)] + "…"
-            full_text = text + ps
+        # Лимит caption Telegram ~1024 символа, режем только core. [web:255][web:256]
+        if len(full_text) > 1024:
+            allowed_core_len = 1024 - len(src) - len(ps) - 1
+            core = core[:allowed_core_len].rstrip() + "…"
+            full_text = core + src + ps
 
         return full_text
 
     except Exception as e:
         print(f"❌ OpenAI: {e}")
-        fallback_core = f"{title}\n\n{(summary or '')[:400]}"
+        fallback_core = f"{title}\n\n{(summary or '')[:300]}"
         if is_too_generic(fallback_core):
             return None
-        return fallback_core + "\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
+        src = f"\n\nИсточник: {link}" if link else ""
+        ps = "\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
+        full_text = fallback_core + src + ps
+        if len(full_text) > 1024:
+            full_text = full_text[:1020] + "…"
+        return full_text
 
 # ============ КАРТИНКИ (POLLINATIONS – РАЗНЫЕ СТИЛИ) ============
 
@@ -630,6 +640,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

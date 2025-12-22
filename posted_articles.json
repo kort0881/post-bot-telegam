@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://xakep.ru/2025/12/15/htb-whiterabbit/",
-    "timestamp": 1765811745.225192
-  },
-  {
     "id": "https://xakep.ru/2025/12/15/top-cwe-2025/",
     "timestamp": 1765822654.630896
   },
@@ -70,5 +66,9 @@
   {
     "id": "https://xakep.ru/2025/12/22/uefi-bug/",
     "timestamp": 1766406109.305394
+  },
+  {
+    "id": "https://xakep.ru/2025/12/22/whatsapp-work/",
+    "timestamp": 1766427364.572922
   }
 ]

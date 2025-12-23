@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://vc.ru/legal/2652170-velikobritaniya-trebuet-ot-apple-i-google-blokirovat-nagotu?from=rss",
-    "timestamp": 1765887720.677947
-  },
-  {
     "id": "https://xakep.ru/2025/12/16/antiscan/",
     "timestamp": 1765898056.573101
   },
@@ -66,5 +62,9 @@
   {
     "id": "https://xakep.ru/2025/12/23/cve-2025-20393/",
     "timestamp": 1766492473.299247
+  },
+  {
+    "id": "https://xakep.ru/2025/12/23/nmap-for-beginners/",
+    "timestamp": 1766502697.695471
   }
 ]

@@ -25,11 +25,6 @@
     "message_id": null
   },
   {
-    "id": "https://xakep.ru/2025/12/17/dark-web-report-closed/",
-    "timestamp": 1765974087.969435,
-    "message_id": null
-  },
-  {
     "id": "https://xakep.ru/2025/12/17/hashcracking-hardware/",
     "timestamp": 1765984395.806736,
     "message_id": null
@@ -83,5 +78,10 @@
     "id": "https://xakep.ru/2025/12/23/raccoon0365-arrest/",
     "timestamp": 1766578842.46721,
     "message_id": 1152
+  },
+  {
+    "id": "https://xakep.ru/2025/12/23/mintsifry-id/",
+    "timestamp": 1766589108.262375,
+    "message_id": 1156
   }
 ]

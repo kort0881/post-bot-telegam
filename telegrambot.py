@@ -1,5 +1,4 @@
 import os
-import re
 import json
 import asyncio
 import random
@@ -40,30 +39,18 @@ HEADERS = {
 POSTED_FILE = "posted_articles.json"
 RETENTION_DAYS = 7
 
-# ============ ОБЯЗАТЕЛЬНЫЕ КЛЮЧЕВЫЕ СЛОВА (ФОКУС НА НОВИНКИ) ============
+# ============ КЛЮЧЕВЫЕ СЛОВА ============
 
 REQUIRE_KEYWORDS = [
-    # Глаголы анонсов
     "представил", "анонсировал", "презентация", "выпустил", "новинка",
     "релиз", "release", "unveiled", "launch", "показал", "дебют",
-    # Железо и компоненты
     "процессор", "чип", "chip", "cpu", "gpu", "архитектура", "техпроцесс",
     "аккумулятор", "дисплей", "экран", "зарядка", "память", "ram",
-    # Категории
     "смартфон", "ноутбук", "гаджет", "девайс", "device", "gadget",
     "робот", "беспилотник", "автопилот", "электромобиль", "vr", "ar",
-    # ИИ и Прорывы
     "нейросеть", "ии", "ai", "llm", "gpt", "claude", "модель",
     "космос", "ракета", "квантовый", "ученые", "прорыв", "breakthrough"
 ]
-
-# ============ РОССИЯ ============
-
-RUSSIA_KEYWORDS = [
-    "россия", "рф", "российск", "россий", "москв"
-]
-
-# ============ ИСКЛЮЧИТЬ (ОЧИЩЕНО ОТ БРЕНДОВ) ============
 
 EXCLUDE_KEYWORDS = [
     "теннис", "футбол", "хоккей", "баскетбол", "спорт", "олимпиад", "матч",
@@ -77,49 +64,94 @@ EXCLUDE_KEYWORDS = [
 ]
 
 # ---------------- STATE ----------------
+# Формат: {"article_id": {"timestamp": float, "message_id": int}, ...}
 
-posted_articles: Dict[str, Optional[float]] = {}
+posted_articles: Dict[str, Dict] = {}
 
 if os.path.exists(POSTED_FILE):
     with open(POSTED_FILE, "r", encoding="utf-8") as f:
         try:
             posted_data = json.load(f)
-            posted_articles = {item["id"]: item.get("timestamp") for item in posted_data}
+            # Поддержка старого и нового формата
+            for item in posted_data:
+                if isinstance(item, dict) and "id" in item:
+                    posted_articles[item["id"]] = {
+                        "timestamp": item.get("timestamp"),
+                        "message_id": item.get("message_id")
+                    }
         except Exception:
             posted_articles = {}
 
 
 def save_posted_articles() -> None:
-    data = [{"id": id_str, "timestamp": ts} for id_str, ts in posted_articles.items()]
+    data = [
+        {
+            "id": id_str,
+            "timestamp": info["timestamp"],
+            "message_id": info.get("message_id")
+        }
+        for id_str, info in posted_articles.items()
+    ]
     with open(POSTED_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def clean_old_posts() -> None:
-    global posted_articles
-    now = datetime.now().timestamp()
-    cutoff = now - (RETENTION_DAYS * 86400)
-    posted_articles = {
-        id_str: ts for id_str, ts in posted_articles.items()
-        if ts is None or ts > cutoff
+def save_posted(article_id: str, message_id: int) -> None:
+    """Сохраняем article_id + message_id для возможности удаления."""
+    posted_articles[article_id] = {
+        "timestamp": datetime.now().timestamp(),
+        "message_id": message_id
     }
     save_posted_articles()
 
 
-def save_posted(article_id: str) -> None:
-    posted_articles[article_id] = datetime.now().timestamp()
+# ---------------- ОЧИСТКА СТАРЫХ ПОСТОВ ----------------
+
+async def clean_old_posts() -> None:
+    """
+    Удаляет из канала сообщения старше RETENTION_DAYS
+    и чистит локальный список.
+    """
+    global posted_articles
+    now = datetime.now().timestamp()
+    cutoff = now - (RETENTION_DAYS * 86400)
+    
+    to_delete = []
+    to_keep = {}
+    
+    for article_id, info in posted_articles.items():
+        ts = info.get("timestamp")
+        msg_id = info.get("message_id")
+        
+        # Если старше 7 дней — удаляем
+        if ts and ts < cutoff:
+            if msg_id:
+                to_delete.append((article_id, msg_id))
+        else:
+            to_keep[article_id] = info
+    
+    # Удаляем сообщения из Telegram
+    deleted_count = 0
+    for article_id, msg_id in to_delete:
+        try:
+            await bot.delete_message(chat_id=CHANNEL_ID, message_id=msg_id)
+            deleted_count += 1
+            print(f"🗑️ Удалено сообщение {msg_id}")
+        except Exception as e:
+            # Сообщение уже удалено или ошибка
+            print(f"⚠️ Не удалось удалить {msg_id}: {e}")
+        
+        # Небольшая пауза чтобы не словить rate limit
+        await asyncio.sleep(0.5)
+    
+    # Обновляем локальный список
+    posted_articles = to_keep
     save_posted_articles()
+    
+    print(f"✅ Очистка завершена. Удалено: {deleted_count}, осталось: {len(to_keep)}")
 
 
 # ---------------- HELPERS ----------------
-
-def safe_get(url: str) -> Optional[str]:
-    try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        return resp.text if resp.status_code == 200 else None
-    except Exception:
-        return None
-
 
 def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
@@ -154,7 +186,6 @@ def load_rss(url: str, source: str) -> List[Dict]:
 
 def load_articles_from_sites() -> List[Dict]:
     articles: List[Dict] = []
-    # Основные источники новинок
     articles.extend(load_rss("https://3dnews.ru/news/rss/", "3DNews"))
     articles.extend(load_rss("https://www.ixbt.com/export/news.rss", "iXBT"))
     articles.extend(load_rss("https://servernews.ru/rss", "ServerNews"))
@@ -170,7 +201,6 @@ def filter_articles(articles: List[Dict]) -> List[Dict]:
         text = f"{e['title']} {e['summary']}".lower()
         if any(kw in text for kw in EXCLUDE_KEYWORDS):
             continue
-        # Проверка на наличие хотя бы одного ключевого слова новинки
         if any(kw in text for kw in REQUIRE_KEYWORDS):
             suitable.append(e)
 
@@ -178,7 +208,7 @@ def filter_articles(articles: List[Dict]) -> List[Dict]:
     return suitable
 
 
-# ============ OPENAI TEXT (ОБНОВЛЕННЫЙ ПРОМПТ) ============
+# ============ OPENAI TEXT ============
 
 def short_summary(title: str, summary: str, link: str) -> Optional[str]:
     news_text = f"{title}. {summary}"
@@ -186,11 +216,10 @@ def short_summary(title: str, summary: str, link: str) -> Optional[str]:
         "Вот текст новости. Сделай из него короткий обзор техно-новинки для Telegram на русском:\n"
         f"{news_text}\n\n"
         "- Объём: 380–450 символов.\n"
-        "- Фокус: Что именно представили, какие главные характеристики (цифры, возможности) и почему это круто.\n"
+        "- Фокус: Что именно представили, какие главные характеристики.\n"
         "- Стиль: Живой, но без 'воды'. Используй 1-2 эмодзи по теме.\n"
-        "- Формат: Опиши 2-3 ключевые фишки устройства или технологии.\n"
-        "- В конце: 2-3 релевантных хештега (например, #новости #технологии #гаджеты).\n"
-        "- Запрещено: Выдумывать факты и использовать общие фразы 'мир технологий не стоит на месте'.\n"
+        "- В конце: 2-3 релевантных хештега.\n"
+        "- Запрещено: Выдумывать факты.\n"
         "- Ссылку и подписи в текст не включай."
     )
 
@@ -202,7 +231,6 @@ def short_summary(title: str, summary: str, link: str) -> Optional[str]:
             max_tokens=400,
         )
         core = res.choices[0].message.content.strip()
-
         src = f"\n\nИсточник: {link}"
         ps = "\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
         return core + src + ps
@@ -236,7 +264,6 @@ def generate_image(title: str) -> Optional[str]:
 # ============ АВТОПОСТ ============
 
 async def autopost():
-    clean_old_posts()
     articles = load_articles_from_sites()
     candidates = filter_articles(articles)
 
@@ -252,17 +279,18 @@ async def autopost():
             img = generate_image(art["title"])
             try:
                 if img:
-                    await bot.send_photo(
+                    msg = await bot.send_photo(
                         CHANNEL_ID,
                         photo=FSInputFile(img),
                         caption=post_text
                     )
                     os.remove(img)
                 else:
-                    await bot.send_message(CHANNEL_ID, text=post_text)
+                    msg = await bot.send_message(CHANNEL_ID, text=post_text)
 
-                save_posted(art["id"])
-                print("✅ Опубликовано!")
+                # Сохраняем message_id для будущего удаления!
+                save_posted(art["id"], msg.message_id)
+                print(f"✅ Опубликовано! message_id: {msg.message_id}")
                 break
             except Exception as e:
                 print(f"❌ Ошибка отправки: {e}")
@@ -272,6 +300,10 @@ async def autopost():
 
 async def main():
     try:
+        # 1) Сначала чистим старые посты (и из канала, и из списка)
+        await clean_old_posts()
+        
+        # 2) Публикуем новый пост
         await autopost()
     finally:
         await bot.session.close()

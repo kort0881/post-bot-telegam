@@ -1,66 +1,87 @@
 [
   {
     "id": "https://vc.ru/services/2632748-roskomnadzor-zablokiroval-snapchat-iz-za-terrorizma?from=rss",
-    "timestamp": null
+    "timestamp": null,
+    "message_id": null
   },
   {
     "id": "https://vc.ru/social/2631439-molniya?from=rss",
-    "timestamp": null
+    "timestamp": null,
+    "message_id": null
   },
   {
     "id": "https://vc.ru/services/2631333-rkn-usilivaet-borbu-s-vpn-blokiruya-protokoly-socks5-vless-i-l2tp?from=rss",
-    "timestamp": null
+    "timestamp": null,
+    "message_id": null
   },
   {
     "id": "https://3dnews.ru/subscribe",
-    "timestamp": null
+    "timestamp": null,
+    "message_id": null
   },
   {
     "id": "https://vc.ru/services/2631629-facetime-block?from=rss",
-    "timestamp": null
+    "timestamp": null,
+    "message_id": null
   },
   {
     "id": "https://xakep.ru/2025/12/17/dark-web-report-closed/",
-    "timestamp": 1765974087.969435
+    "timestamp": 1765974087.969435,
+    "message_id": null
   },
   {
     "id": "https://xakep.ru/2025/12/17/hashcracking-hardware/",
-    "timestamp": 1765984395.806736
+    "timestamp": 1765984395.806736,
+    "message_id": null
   },
   {
     "id": "https://xakep.ru/2025/12/17/ai-urban-vpn/",
-    "timestamp": 1765995446.116112
+    "timestamp": 1765995446.116112,
+    "message_id": null
   },
   {
     "id": "https://xakep.ru/2025/12/18/ghostposter/",
-    "timestamp": 1766070772.813828
+    "timestamp": 1766070772.813828,
+    "message_id": null
   },
   {
     "id": "https://xakep.ru/2025/12/19/react2shell-new-attacks/",
-    "timestamp": 1766146818.400146
+    "timestamp": 1766146818.400146,
+    "message_id": null
   },
   {
     "id": "https://xakep.ru/2025/12/22/uefi-bug/",
-    "timestamp": 1766406109.305394
+    "timestamp": 1766406109.305394,
+    "message_id": null
   },
   {
     "id": "https://xakep.ru/2025/12/22/whatsapp-work/",
-    "timestamp": 1766427364.572922
+    "timestamp": 1766427364.572922,
+    "message_id": null
   },
   {
     "id": "https://xakep.ru/2025/12/23/cve-2025-20393/",
-    "timestamp": 1766492473.299247
+    "timestamp": 1766492473.299247,
+    "message_id": null
   },
   {
     "id": "https://xakep.ru/2025/12/23/nmap-for-beginners/",
-    "timestamp": 1766502697.695471
+    "timestamp": 1766502697.695471,
+    "message_id": null
   },
   {
     "id": "https://xakep.ru/2025/12/23/law-corrected/",
-    "timestamp": 1766513788.293604
+    "timestamp": 1766513788.293604,
+    "message_id": null
   },
   {
     "id": "https://xakep.ru/2025/12/23/be-my-eyes/",
-    "timestamp": 1766557088.52804
+    "timestamp": 1766557088.52804,
+    "message_id": null
+  },
+  {
+    "id": "https://xakep.ru/2025/12/23/raccoon0365-arrest/",
+    "timestamp": 1766578842.46721,
+    "message_id": 1152
   }
 ]

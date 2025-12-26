@@ -39,6 +39,61 @@ HEADERS = {
 POSTED_FILE = "posted_articles.json"
 RETENTION_DAYS = 7
 
+# ============ СТИЛИ ПОСТОВ (ВАРИАТИВНОСТЬ) ============
+
+POST_STYLES = [
+    {
+        "name": "восторженный_гик",
+        "intro": "Ты — восторженный техноблогер, который обожает новинки. Пишешь так, будто делишься крутой находкой с друзьями.",
+        "tone": "Энергичный, с лёгким восхищением. Используй короткие предложения, иногда риторические вопросы.",
+        "emojis": "🔥🚀💡🤖✨"
+    },
+    {
+        "name": "аналитик",
+        "intro": "Ты — умный технический аналитик. Объясняешь сложное простыми словами, выделяешь главное.",
+        "tone": "Спокойный, но увлечённый. Факты + почему это важно.",
+        "emojis": "🧠📊🔬💻⚡"
+    },
+    {
+        "name": "ироничный_обозреватель",
+        "intro": "Ты — остроумный обозреватель технологий. Подмечаешь интересные детали, иногда с лёгкой иронией.",
+        "tone": "Живой, с юмором, но информативный. Без сарказма.",
+        "emojis": "👀🎯😏🛠️💫"
+    },
+    {
+        "name": "практик",
+        "intro": "Ты — практичный технарь. Сразу к сути: что это, зачем нужно, кому пригодится.",
+        "tone": "Деловой, но не сухой. Конкретика без воды.",
+        "emojis": "⚙️✅📱🔧💪"
+    },
+    {
+        "name": "футурист",
+        "intro": "Ты — энтузиаст будущего. Видишь в новостях шаги к завтрашнему дню.",
+        "tone": "Вдохновляющий, но без пафоса. Показываешь перспективу.",
+        "emojis": "🌟🔮🚀🌍✨"
+    }
+]
+
+# Разные структуры постов
+POST_STRUCTURES = [
+    "hook_features_conclusion",  # Цепляющее начало → фишки → вывод
+    "question_answer",           # Вопрос → ответ через новость
+    "problem_solution",          # Проблема → как решает технология
+    "surprise_details",          # Удивительный факт → подробности
+    "straight_news"              # Прямая подача новости
+]
+
+# Варианты начала постов
+HOOK_TEMPLATES = [
+    "Главная фишка: {key_point}",
+    "Коротко о главном: {key_point}",
+    "{company} удивила — {key_point}",
+    "Это меняет правила игры: {key_point}",
+    "Наконец-то! {key_point}",
+    "Внезапно: {key_point}",
+    "{key_point} — и это только начало",
+]
+
 # ============ ПРИОРИТЕТ: ИИ И НЕЙРОСЕТИ ============
 
 AI_KEYWORDS = [
@@ -194,6 +249,40 @@ def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
 
 
+def detect_topic(title: str, summary: str) -> str:
+    """Определяет тему новости для выбора хештегов."""
+    text = f"{title} {summary}".lower()
+    
+    if any(kw in text for kw in ["gpt", "chatgpt", "claude", "llm", "языковая модель"]):
+        return "llm"
+    elif any(kw in text for kw in ["midjourney", "dall-e", "stable diffusion", "генерация изображ"]):
+        return "image_gen"
+    elif any(kw in text for kw in ["робот", "robot", "автономн"]):
+        return "robotics"
+    elif any(kw in text for kw in ["spacex", "космос", "ракета", "спутник"]):
+        return "space"
+    elif any(kw in text for kw in ["nvidia", "gpu", "процессор", "чип"]):
+        return "hardware"
+    elif any(kw in text for kw in ["нейросет", "neural", "ии", "ai", "искусственный интеллект"]):
+        return "ai"
+    else:
+        return "tech"
+
+
+def get_hashtags(topic: str) -> str:
+    """Возвращает релевантные хештеги по теме."""
+    hashtag_map = {
+        "llm": "#ChatGPT #LLM #нейросети",
+        "image_gen": "#AI #генерация #нейросети",
+        "robotics": "#роботы #технологии #будущее",
+        "space": "#космос #SpaceX #технологии",
+        "hardware": "#железо #GPU #технологии",
+        "ai": "#AI #нейросети #технологии",
+        "tech": "#технологии #новинки #гаджеты"
+    }
+    return hashtag_map.get(topic, "#технологии #новости")
+
+
 # ============ PARSERS ============
 
 def load_rss(url: str, source: str) -> List[Dict]:
@@ -230,77 +319,44 @@ def load_rss(url: str, source: str) -> List[Dict]:
 
 
 def load_articles_from_sites() -> List[Dict]:
-    """
-    Загружает статьи с русскоязычных источников.
-    Фокус: ИИ, нейросети, интересные технологии.
-    """
+    """Загружает статьи с русскоязычных источников."""
     articles: List[Dict] = []
 
     # === ПРИОРИТЕТ 1: ИИ и нейросети (Habr) ===
-
     articles.extend(load_rss(
         "https://habr.com/ru/rss/hub/artificial_intelligence/all/?fl=ru",
         "Habr AI"
     ))
-
     articles.extend(load_rss(
         "https://habr.com/ru/rss/hub/machine_learning/all/?fl=ru",
         "Habr ML"
     ))
-
     articles.extend(load_rss(
         "https://habr.com/ru/rss/hub/neural_networks/all/?fl=ru",
         "Habr Neural"
     ))
-
     articles.extend(load_rss(
         "https://habr.com/ru/rss/hub/data_science/all/?fl=ru",
         "Habr DS"
     ))
-
     articles.extend(load_rss(
         "https://habr.com/ru/rss/hub/natural_language_processing/all/?fl=ru",
         "Habr NLP"
     ))
-
     articles.extend(load_rss(
         "https://habr.com/ru/rss/hub/robotics/all/?fl=ru",
         "Habr Robotics"
     ))
 
     # === ПРИОРИТЕТ 2: Технологии ===
-
-    articles.extend(load_rss(
-        "https://tproger.ru/feed/",
-        "Tproger"
-    ))
-
-    articles.extend(load_rss(
-        "https://hightech.fm/feed",
-        "Хайтек"
-    ))
-
-    articles.extend(load_rss(
-        "https://nplus1.ru/rss",
-        "N+1"
-    ))
+    articles.extend(load_rss("https://tproger.ru/feed/", "Tproger"))
+    articles.extend(load_rss("https://hightech.fm/feed", "Хайтек"))
+    articles.extend(load_rss("https://nplus1.ru/rss", "N+1"))
 
     # === ПРИОРИТЕТ 3: Железо и гаджеты ===
-
-    articles.extend(load_rss(
-        "https://3dnews.ru/news/rss/",
-        "3DNews"
-    ))
-
-    articles.extend(load_rss(
-        "https://www.ixbt.com/export/news.rss",
-        "iXBT"
-    ))
-
-    articles.extend(load_rss(
-        "https://servernews.ru/rss",
-        "ServerNews"
-    ))
+    articles.extend(load_rss("https://3dnews.ru/news/rss/", "3DNews"))
+    articles.extend(load_rss("https://www.ixbt.com/export/news.rss", "iXBT"))
+    articles.extend(load_rss("https://servernews.ru/rss", "ServerNews"))
 
     return articles
 
@@ -308,90 +364,227 @@ def load_articles_from_sites() -> List[Dict]:
 # ============ ФИЛЬТРАЦИЯ ============
 
 def filter_articles(articles: List[Dict]) -> List[Dict]:
-    """
-    Фильтрует статьи.
-    Приоритет: ИИ → технологии.
-    Исключает экономику, финансы, бизнес.
-    """
+    """Фильтрует статьи с приоритетом ИИ."""
     ai_articles = []
     tech_articles = []
 
     for e in articles:
         text = f"{e['title']} {e['summary']}".lower()
 
-        # Пропускаем исключённые темы
         if any(kw in text for kw in EXCLUDE_KEYWORDS):
             continue
 
-        # Приоритет 1: ИИ/нейросети
         if any(kw in text for kw in AI_KEYWORDS):
             ai_articles.append(e)
-        # Приоритет 2: Интересные технологии
         elif any(kw in text for kw in TECH_KEYWORDS):
             tech_articles.append(e)
 
-    # Сортируем по дате
     ai_articles.sort(key=lambda x: x["published_parsed"], reverse=True)
     tech_articles.sort(key=lambda x: x["published_parsed"], reverse=True)
 
     return ai_articles + tech_articles
 
 
-# ============ OPENAI TEXT ============
+# ============ УЛУЧШЕННАЯ ГЕНЕРАЦИЯ ТЕКСТА ============
+
+def build_dynamic_prompt(title: str, summary: str, style: dict, structure: str) -> str:
+    """Строит динамический промпт с учётом стиля и структуры."""
+    
+    news_text = f"Заголовок: {title}\n\nТекст: {summary}"
+    
+    # Базовые инструкции
+    base_instructions = f"""
+{style['intro']}
+
+Тональность: {style['tone']}
+Эмодзи для использования: {style['emojis']}
+"""
+    
+    # Инструкции по структуре
+    structure_instructions = {
+        "hook_features_conclusion": """
+Структура поста:
+1. ЗАХВАТ (1 предложение) — самое интересное/удивительное из новости
+2. СУТЬ (2-3 предложения) — что именно сделали/представили, ключевые фишки
+3. ЗНАЧЕНИЕ (1 предложение) — почему это круто/важно для пользователей
+""",
+        "question_answer": """
+Структура поста:
+1. ВОПРОС — начни с интригующего вопроса по теме новости
+2. ОТВЕТ — расскажи, как новость отвечает на этот вопрос
+3. ДЕТАЛИ — 2-3 ключевые особенности
+""",
+        "problem_solution": """
+Структура поста:
+1. ПРОБЛЕМА — какую проблему решает технология (1 предложение)
+2. РЕШЕНИЕ — как именно решает (2-3 предложения)
+3. РЕЗУЛЬТАТ — что это даёт пользователям
+""",
+        "surprise_details": """
+Структура поста:
+1. УДИВИТЕЛЬНЫЙ ФАКТ — начни с самого неожиданного
+2. КОНТЕКСТ — объясни, что это значит
+3. ПОДРОБНОСТИ — ключевые технические детали
+""",
+        "straight_news": """
+Структура поста:
+1. ГЛАВНОЕ — что произошло (1 предложение)
+2. ПОДРОБНОСТИ — ключевые детали (2-3 предложения)  
+3. ИТОГ — почему это интересно
+"""
+    }
+    
+    prompt = f"""
+{base_instructions}
+
+НОВОСТЬ ДЛЯ ОБРАБОТКИ:
+{news_text}
+
+{structure_instructions.get(structure, structure_instructions['straight_news'])}
+
+ЖЁСТКИЕ ТРЕБОВАНИЯ:
+• Длина: 350-420 символов (не больше!)
+• Язык: ТОЛЬКО русский
+• 1-2 эмодзи из списка выше — органично вплетены в текст
+• Пиши как человек для людей, не как робот
+• Каждое предложение должно нести смысл
+• Не начинай с "Итак", "Ну что", "Друзья"
+
+КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО:
+• Клише: "мир не стоит на месте", "будущее уже здесь", "технологии развиваются"
+• Водянистые фразы: "стоит отметить", "важно понимать", "нельзя не заметить"  
+• Выдумывать факты, которых нет в исходнике
+• Общие слова без конкретики
+
+ВЫДАЙ ТОЛЬКО ТЕКСТ ПОСТА, без хештегов и ссылок.
+"""
+    return prompt
+
 
 def short_summary(title: str, summary: str, link: str) -> Optional[str]:
-    news_text = f"{title}. {summary}"
-    prompt = (
-        "Вот текст новости про ИИ или технологии. Сделай короткий обзор для Telegram на русском:\n"
-        f"{news_text}\n\n"
-        "- Объём: 380–450 символов.\n"
-        "- Фокус: Что представили, ключевые возможности и почему это круто.\n"
-        "- Стиль: Живой, информативный. 1-2 эмодзи по теме (🤖🧠💡🚀✨).\n"
-        "- Формат: 2-3 ключевые фишки технологии или устройства.\n"
-        "- В конце: 2-3 хештега (#AI #нейросети #технологии #гаджеты).\n"
-        "- Язык: Только русский!\n"
-        "- Запрещено: Выдумывать, клише типа 'мир не стоит на месте'.\n"
-        "- Ссылку и подписи не включай."
-    )
-
+    """Генерирует пост с вариативным стилем."""
+    
+    # Выбираем случайный стиль и структуру
+    style = random.choice(POST_STYLES)
+    structure = random.choice(POST_STRUCTURES)
+    
+    print(f"   📝 Стиль: {style['name']}, структура: {structure}")
+    
+    prompt = build_dynamic_prompt(title, summary, style, structure)
+    
     try:
         res = openai_client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.5,
-            max_tokens=400,
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "Ты — опытный автор технологического Telegram-канала. Пишешь живо, по делу, без воды. Твои посты хочется дочитать до конца."
+                },
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,  # Чуть больше креативности
+            max_tokens=500,
         )
         core = res.choices[0].message.content.strip()
-
-        src = f"\n\nИсточник: {link}"
-        ps = "\n\nPS💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
-        return core + src + ps
+        
+        # Убираем кавычки если GPT обернул текст
+        if core.startswith('"') and core.endswith('"'):
+            core = core[1:-1]
+        if core.startswith('«') and core.endswith('»'):
+            core = core[1:-1]
+        
+        # Добавляем хештеги по теме
+        topic = detect_topic(title, summary)
+        hashtags = get_hashtags(topic)
+        
+        # Финальная сборка поста
+        source_line = f"\n\n🔗 <a href=\"{link}\">Источник</a>"
+        hashtag_line = f"\n\n{hashtags}"
+        promo = "\n\n💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ZTE6"
+        
+        return core + hashtag_line + source_line + promo
+        
     except Exception as e:
-        print(f"❌ OpenAI: {e}")
+        print(f"❌ OpenAI ошибка: {e}")
         return None
 
 
-# ============ КАРТИНКИ ============
+# ============ УЛУЧШЕННАЯ ГЕНЕРАЦИЯ КАРТИНОК ============
 
-def generate_image(title: str) -> Optional[str]:
-    seed = random.randint(0, 10**6)
-    prompt = (
-        f"Futuristic technology illustration: {title[:80]}, "
-        "AI, neural networks, innovation, modern design, "
-        "soft neon lighting, 4k, no text, no letters, clean."
-    )
-    try:
-        encoded = urllib.parse.quote(prompt)
-        url = f"https://image.pollinations.ai/prompt/{encoded}?seed={seed}&width=1024&height=1024"
-        resp = requests.get(url, timeout=60)
-        if resp.status_code == 200:
-            fname = f"img_{seed}.jpg"
-            with open(fname, "wb") as f:
-                f.write(resp.content)
-            return fname
-    except Exception as e:
-        print(f"❌ Ошибка генерации изображения: {e}")
+def generate_image(title: str, max_retries: int = 3) -> Optional[str]:
+    """Генерирует картинку с повторными попытками."""
+    
+    # Разные стили для разнообразия
+    image_styles = [
+        "futuristic minimalist illustration, soft gradients, ",
+        "abstract tech visualization, geometric shapes, ",
+        "modern digital art, clean lines, ",
+        "sci-fi concept art, atmospheric lighting, ",
+        "sleek technology render, professional, "
+    ]
+    
+    style = random.choice(image_styles)
+    
+    for attempt in range(max_retries):
+        seed = random.randint(0, 10**7)
+        
+        # Очищаем заголовок от проблемных символов
+        clean_title = title[:60].replace('"', '').replace("'", "").replace('\n', ' ')
+        
+        prompt = (
+            f"{style}{clean_title}, "
+            "neural networks, innovation, technology, "
+            "4k quality, no text, no letters, no words, "
+            "clean composition, professional"
+        )
+        
+        try:
+            encoded = urllib.parse.quote(prompt)
+            url = f"https://image.pollinations.ai/prompt/{encoded}?seed={seed}&width=1024&height=1024&nologo=true"
+            
+            print(f"   🎨 Генерация изображения (попытка {attempt + 1}/{max_retries})...")
+            
+            resp = requests.get(url, timeout=90, headers=HEADERS)
+            
+            if resp.status_code == 200:
+                # Проверяем что это действительно изображение
+                content_type = resp.headers.get('content-type', '')
+                if 'image' in content_type and len(resp.content) > 10000:
+                    fname = f"img_{seed}.jpg"
+                    with open(fname, "wb") as f:
+                        f.write(resp.content)
+                    print(f"   ✅ Изображение сохранено: {fname}")
+                    return fname
+                else:
+                    print(f"   ⚠️ Получен неверный контент (size: {len(resp.content)})")
+            else:
+                print(f"   ⚠️ HTTP {resp.status_code}")
+                
+        except requests.Timeout:
+            print(f"   ⚠️ Таймаут при генерации изображения")
+        except requests.RequestException as e:
+            print(f"   ⚠️ Ошибка сети: {e}")
+        except Exception as e:
+            print(f"   ❌ Неожиданная ошибка: {e}")
+        
+        # Пауза между попытками
+        if attempt < max_retries - 1:
+            await_time = (attempt + 1) * 2
+            print(f"   ⏳ Ждём {await_time}с перед следующей попыткой...")
+            import time
+            time.sleep(await_time)
+    
+    print("   ❌ Не удалось сгенерировать изображение после всех попыток")
     return None
+
+
+def cleanup_image(filepath: Optional[str]) -> None:
+    """Безопасно удаляет файл изображения."""
+    if filepath and os.path.exists(filepath):
+        try:
+            os.remove(filepath)
+        except Exception as e:
+            print(f"   ⚠️ Не удалось удалить {filepath}: {e}")
 
 
 # ============ АВТОПОСТ ============
@@ -412,30 +605,46 @@ async def autopost():
     ))
     print(f"📊 Найдено: {len(candidates)} статей ({ai_count} про ИИ)")
 
-    for art in candidates[:5]:
-        print(f"🔍 Обработка: {art['title'][:50]}... [{art['source']}]")
+    posted_count = 0
+    max_posts = 1  # Сколько постов за запуск
+    
+    for art in candidates[:10]:  # Проверяем больше кандидатов
+        if posted_count >= max_posts:
+            break
+            
+        print(f"\n🔍 Обработка: {art['title'][:60]}... [{art['source']}]")
+        
         post_text = short_summary(art["title"], art["summary"], art["link"])
+        
+        if not post_text:
+            print("   ⚠️ Не удалось сгенерировать текст, пробуем следующую")
+            continue
+        
+        img = generate_image(art["title"])
+        
+        try:
+            if img:
+                await bot.send_photo(
+                    CHANNEL_ID,
+                    photo=FSInputFile(img),
+                    caption=post_text
+                )
+            else:
+                await bot.send_message(CHANNEL_ID, text=post_text)
 
-        if post_text:
-            img = generate_image(art["title"])
-            try:
-                if img:
-                    await bot.send_photo(
-                        CHANNEL_ID,
-                        photo=FSInputFile(img),
-                        caption=post_text
-                    )
-                    os.remove(img)
-                else:
-                    await bot.send_message(CHANNEL_ID, text=post_text)
-
-                save_posted(art["id"])
-                print(f"✅ Опубликовано: {art['source']}")
-                break
-            except Exception as e:
-                print(f"❌ Ошибка отправки: {e}")
-                if img and os.path.exists(img):
-                    os.remove(img)
+            save_posted(art["id"])
+            posted_count += 1
+            print(f"✅ Опубликовано: {art['source']}")
+            
+        except Exception as e:
+            print(f"❌ Ошибка отправки в Telegram: {e}")
+        finally:
+            cleanup_image(img)
+    
+    if posted_count == 0:
+        print("⚠️ Не удалось опубликовать ни одного поста")
+    else:
+        print(f"\n🎉 Успешно опубликовано постов: {posted_count}")
 
 
 async def main():

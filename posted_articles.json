@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://xakep.ru/2025/12/22/uefi-bug/",
-    "timestamp": 1766406109.305394
-  },
-  {
     "id": "https://xakep.ru/2025/12/22/whatsapp-work/",
     "timestamp": 1766427364.572922
   },
@@ -122,5 +118,9 @@
   {
     "id": "https://servernews.ru/1119821/",
     "timestamp": 1766989342.584671
+  },
+  {
+    "id": "https://servernews.ru/1127195/",
+    "timestamp": 1767011052.56586
   }
 ]

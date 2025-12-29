@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://xakep.ru/2025/12/22/whatsapp-work/",
-    "timestamp": 1766427364.572922
-  },
-  {
     "id": "https://xakep.ru/2025/12/23/cve-2025-20393/",
     "timestamp": 1766492473.299247
   },
@@ -126,5 +122,9 @@
   {
     "id": "https://servernews.ru/1128170/",
     "timestamp": 1767021240.530484
+  },
+  {
+    "id": "https://servernews.ru/1133180/",
+    "timestamp": 1767032332.136089
   }
 ]

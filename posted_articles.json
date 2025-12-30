@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://xakep.ru/2025/12/23/cve-2025-20393/",
-    "timestamp": 1766492473.299247
-  },
-  {
     "id": "https://xakep.ru/2025/12/23/nmap-for-beginners/",
     "timestamp": 1766502697.695471
   },
@@ -134,5 +130,9 @@
   {
     "id": "https://3dnews.ru/1134280",
     "timestamp": 1767097340.892392
+  },
+  {
+    "id": "https://3dnews.ru/1134635",
+    "timestamp": 1767107508.041664
   }
 ]

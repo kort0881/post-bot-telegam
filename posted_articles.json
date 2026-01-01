@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://xakep.ru/2025/12/24/lotusbail/",
-    "timestamp": 1766665242.06899
-  },
-  {
     "id": "https://xakep.ru/2025/12/24/react2shell-cve/",
     "timestamp": 1766675481.565917
   },
@@ -130,5 +126,9 @@
   {
     "id": "https://www.ixbt.com/news/2025/12/31/nvidia-tsmc-h200.html",
     "timestamp": 1767248327.390886
+  },
+  {
+    "id": "https://www.ixbt.com/news/2026/01/01/msi-meg-x870e-godlike-x-edition.html",
+    "timestamp": 1767270068.170568
   }
 ]

@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://xakep.ru/2025/12/23/cve-2025-37164/",
-    "timestamp": 1766600318.260054
-  },
-  {
-    "id": "https://xakep.ru/2025/12/24/whatsapp-reaction/",
-    "timestamp": 1766643474.44558
-  },
-  {
     "id": "https://xakep.ru/2025/12/24/lotusbail/",
     "timestamp": 1766665242.06899
   },
@@ -134,5 +126,9 @@
   {
     "id": "https://www.ixbt.com/news/2025/12/31/1350-geforce-rtx-5090.html",
     "timestamp": 1767204959.165581
+  },
+  {
+    "id": "https://www.ixbt.com/news/2025/12/31/nvidia-tsmc-h200.html",
+    "timestamp": 1767248327.390886
   }
 ]

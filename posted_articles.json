@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://tass.ru/ekonomika/26021047",
-    "timestamp": 1766686557.328098
-  },
-  {
-    "id": "https://servernews.ru/1045050/",
-    "timestamp": 1766729864.277319
-  },
-  {
     "id": "https://servernews.ru/1055771/",
     "timestamp": 1766751683.97381
   },
@@ -134,5 +126,9 @@
   {
     "id": "https://www.ixbt.com/news/2026/01/01/tsmc-1-4.html",
     "timestamp": 1767291381.009487
+  },
+  {
+    "id": "https://servernews.ru/1045050/",
+    "timestamp": 1767334730.130656
   }
 ]

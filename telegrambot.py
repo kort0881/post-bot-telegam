@@ -296,6 +296,7 @@ def load_rss(url: str, source: str) -> List[Dict]:
         articles.append({
             "id": link,
             "title": clean_text(entry.get("title") or ""),
+
             "summary": clean_text(
                 entry.get("summary") or entry.get("description") or ""
             )[:700],
@@ -375,7 +376,7 @@ def filter_articles(articles: List[Dict]) -> List[Dict]:
     return ai_discovery + ai_other + tech_discovery
 
 
-# ============ ГЕНЕРАЦИЯ ТЕКСТА (800 СИМВОЛОВ + УКРАШЕНИЯ) ============
+# ============ ГЕНЕРАЦИЯ ТЕКСТА (мягкий контроль длины) ============
 
 def build_dynamic_prompt(title: str, summary: str, style: dict, structure: str) -> str:
     news_text = f"Заголовок: {title}\n\nТекст: {summary}"
@@ -448,7 +449,7 @@ def decorate_post(text: str, topic: str) -> str:
 
 
 def short_summary(title: str, summary: str, link: str) -> Optional[str]:
-    """Генерирует нейтральный новостной пост 650–850 символов, украшает эмодзи."""
+    """Генерирует нейтральный новостной пост, мягко контролируя длину."""
     style = random.choice(POST_STYLES)
     structure = random.choice(POST_STRUCTURES)
 
@@ -480,11 +481,14 @@ def short_summary(title: str, summary: str, link: str) -> Optional[str]:
         if core.startswith('«') and core.endswith('»'):
             core = core[1:-1]
 
-        # Дополнительная страховка по длине
         length = len(core)
-        if length < 650 or length > 900:
-            print(f"   ⚠️ Длина текста вне диапазона (len={length}), пропускаем")
-            return None
+
+        # Вместо жёсткого отбрасывания — мягкая коррекция
+        if length < 500:
+            print(f"   ⚠️ Текст короткий (len={length}), но используем как есть")
+        elif length > 900:
+            print(f"   ⚠️ Текст длинный (len={length}), обрезаем до 900")
+            core = core[:900].rsplit(" ", 1)[0]
 
         if is_too_promotional(core):
             print("   ⚠️ Текст содержит рекламные формулировки, пропускаем")
@@ -500,11 +504,9 @@ def short_summary(title: str, summary: str, link: str) -> Optional[str]:
 
         final_text = decorated + hashtag_line + source_line
 
-        # Телега: лимит 4096 символов для сообщения, 1024–2048 для подписи к фото.
-        # 800–900 + украшения + хештеги и ссылка укладываются с большим запасом.[web:48][web:54]
         if len(final_text) > 1800:
-            print(f"   ⚠️ Финальный текст слишком длинный (len={len(final_text)}), пропускаем")
-            return None
+            print(f"   ⚠️ Финальный текст слишком длинный (len={len(final_text)}), обрежем хвост")
+            final_text = final_text[:1800].rsplit(" ", 1)[0]
 
         return final_text
 
@@ -650,6 +652,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

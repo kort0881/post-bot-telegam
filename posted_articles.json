@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://servernews.ru/1062357/",
-    "timestamp": 1766772983.323317
-  },
-  {
-    "id": "https://servernews.ru/1074481/",
-    "timestamp": 1766816189.171451
-  },
-  {
     "id": "https://servernews.ru/1097348/",
     "timestamp": 1766837959.765484
   },
@@ -134,5 +126,9 @@
   {
     "id": "https://servernews.ru/1056763/",
     "timestamp": 1767377778.232788
+  },
+  {
+    "id": "https://servernews.ru/1062357/",
+    "timestamp": 1767421031.998194
   }
 ]

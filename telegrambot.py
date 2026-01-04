@@ -39,6 +39,9 @@ HEADERS = {
 POSTED_FILE = "posted_articles.json"
 RETENTION_DAYS = 7
 
+# Безопасный лимит подписи к медиа в Telegram (реальный лимит ~1024 символа)[web:54][web:48]
+TELEGRAM_CAPTION_LIMIT = 1000
+
 # ============ СТИЛИ ПОСТОВ (СТРОГО НОВОСТНЫЕ) ============
 
 POST_STYLES = [
@@ -366,7 +369,7 @@ def build_dynamic_prompt(title: str, summary: str, style: dict, structure: str) 
 {structure_instructions.get(structure, structure_instructions['straight_news'])}
 
 ТРЕБОВАНИЯ:
-• Цель: около 800 символов. Допустимый диапазон: от 500 до 1200 символов.
+• Цель: около 700 символов. Допустимый диапазон: от 400 до 1000 символов.
 • Только русский язык.
 • Можно использовать 1–3 нейтральных эмодзи из набора {style['emojis']} и общих тех-эмодзи (⚙️, 💻, 📡, 📈, 🛰️), если они помогают визуально структурировать текст.
 • Текст должен выглядеть как законченный абзац: с вводом, деталями и чётким финальным выводом.
@@ -434,8 +437,8 @@ def short_summary(title: str, summary: str, link: str) -> Optional[str]:
             core = core[1:-1]
 
         length = len(core)
-        if length < 400 or length > 1300:
-            print(f"   ⚠️ Длина текста вне разумного диапазона (len={length}), пропускаем")
+        if length < 250:
+            print(f"   ⚠️ Текст слишком короткий (len={length}), пропускаем")
             return None
 
         if is_too_promotional(core):
@@ -451,9 +454,13 @@ def short_summary(title: str, summary: str, link: str) -> Optional[str]:
 
         final_text = decorated + hashtag_line + source_line
 
-        if len(final_text) > 1800:
-            print(f"   ⚠️ Финальный текст слишком длинный (len={len(final_text)}), пропускаем")
-            return None
+        # Жёстко ограничиваем длину подписи, чтобы не ловить Bad Request от Telegram[web:54][web:48]
+        if len(final_text) > TELEGRAM_CAPTION_LIMIT:
+            print(
+                f"   ⚠️ Подпись длиннее лимита (len={len(final_text)}), "
+                f"обрезаем до {TELEGRAM_CAPTION_LIMIT}"
+            )
+            final_text = final_text[:TELEGRAM_CAPTION_LIMIT]
 
         return final_text
 
@@ -599,6 +606,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

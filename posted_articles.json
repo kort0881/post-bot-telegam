@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://servernews.ru/1133180/",
-    "timestamp": 1767032332.136089
-  },
-  {
-    "id": "https://www.ixbt.com/news/2025/12/30/vo-vselennoj-nashli-redchajshuju-trojku-chjornyh-dyr.html",
-    "timestamp": 1767075483.120759
-  },
-  {
     "id": "https://3dnews.ru/1134280",
     "timestamp": 1767097340.892392
   },
@@ -130,5 +122,9 @@
   {
     "id": "https://servernews.ru/1112405/",
     "timestamp": 1767637125.107333
+  },
+  {
+    "id": "https://servernews.ru/1115378/",
+    "timestamp": 1767680322.676816
   }
 ]

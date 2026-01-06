@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://3dnews.ru/1134280",
-    "timestamp": 1767097340.892392
-  },
-  {
-    "id": "https://3dnews.ru/1134635",
-    "timestamp": 1767107508.041664
-  },
-  {
     "id": "https://www.ixbt.com/news/2025/12/30/120-7200-50-nfc-vivo-y500i.html",
     "timestamp": 1767118645.910678
   },
@@ -130,5 +122,9 @@
   {
     "id": "https://servernews.ru/1119821/",
     "timestamp": 1767702147.50151
+  },
+  {
+    "id": "https://servernews.ru/1127195/",
+    "timestamp": 1767712350.912754
   }
 ]

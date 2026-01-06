@@ -38,6 +38,7 @@ HEADERS = {
 
 POSTED_FILE = "posted_articles.json"
 RETENTION_DAYS = 7
+LAST_TYPE_FILE = "last_post_type.json"  # сюда пишем тип последнего поста (hardware / it)
 
 # ============ СТИЛИ ПОСТОВ (ВАРИАТИВНОСТЬ, НОВОСТИ/НАХОДКИ БЕЗ РЕКЛАМЫ) ============
 
@@ -242,6 +243,24 @@ def save_posted(article_id: str) -> None:
     save_posted_articles()
 
 
+def load_last_post_type() -> Optional[str]:
+    if not os.path.exists(LAST_TYPE_FILE):
+        return None
+    try:
+        with open(LAST_TYPE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("type")
+    except Exception:
+        return None
+
+
+def save_last_post_type(post_type: str) -> None:
+    try:
+        with open(LAST_TYPE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"type": post_type}, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
 # ============ HELPERS ============
 
 def clean_text(text: str) -> str:
@@ -348,7 +367,15 @@ def load_articles_from_sites() -> List[Dict]:
     ))
 
     # === ПРИОРИТЕТ 2: Технологии ===
-    articles.extend(load_rss("https://tproger.ru/feed/", "Tproger"))
+    # Overclockers вместо Tproger
+    articles.extend(load_rss(
+        "https://all-rss.ru/export/55.xml",  # Overclockers.ru / Новости Hardware
+        "Overclockers Hardware"
+    ))
+    articles.extend(load_rss(
+        "https://all-rss.ru/export/57.xml",  # Overclockers.ru / Новости IT-рынка
+        "Overclockers IT"
+    ))
     articles.extend(load_rss("https://hightech.fm/feed", "Хайтек"))
     articles.extend(load_rss("https://nplus1.ru/rss", "N+1"))
 
@@ -363,7 +390,7 @@ def load_articles_from_sites() -> List[Dict]:
 # ============ ФИЛЬТРАЦИЯ ============
 
 def filter_articles(articles: List[Dict]) -> List[Dict]:
-    """Фильтрует статьи с приоритетом ИИ."""
+    """Фильтрует статьи с приоритетом ИИ и помечает тип поста (hardware / it)."""
     ai_articles = []
     tech_articles = []
 
@@ -372,6 +399,13 @@ def filter_articles(articles: List[Dict]) -> List[Dict]:
 
         if any(kw in text for kw in EXCLUDE_KEYWORDS):
             continue
+
+        # Тип источника для чередования
+        source = e.get("source", "")
+        if source in ["Overclockers Hardware", "Overclockers IT", "3DNews", "iXBT", "ServerNews"]:
+            e["post_type"] = "hardware"
+        else:
+            e["post_type"] = "it"
 
         if any(kw in text for kw in AI_KEYWORDS):
             ai_articles.append(e)
@@ -500,7 +534,7 @@ def short_summary(title: str, summary: str, link: str) -> Optional[str]:
         topic = detect_topic(title, summary)
         hashtags = get_hashtags(topic)
 
-        # Финальная сборка поста (промо оставляем, как ты просил)
+        # Финальная сборка поста (промо оставляем)
         source_line = f"\n\n🔗 <a href=\"{link}\">Источник</a>"
         hashtag_line = f"\n\n{hashtags}"
         promo = "\n\n💥 Кто за ключами 👉 https://t.me/+EdEfIkn83Wg3ЗTE6"
@@ -608,14 +642,38 @@ async def autopost():
     ))
     print(f"📊 Найдено: {len(candidates)} статей ({ai_count} про ИИ)")
 
+    last_type = load_last_post_type()  # "hardware" / "it" / None
+
     posted_count = 0
     max_posts = 1  # Сколько постов за запуск
 
-    for art in candidates[:10]:  # Проверяем больше кандидатов
-        if posted_count >= max_posts:
+    # Разбиваем кандидатов по типам
+    hardware_candidates = [c for c in candidates if c.get("post_type") == "hardware"]
+    it_candidates = [c for c in candidates if c.get("post_type") == "it"]
+
+    def pick_next_article() -> Optional[Dict]:
+        nonlocal last_type
+
+        # Если в прошлый раз было "hardware" — сейчас пытаемся взять "it"
+        if last_type == "hardware":
+            if it_candidates:
+                return it_candidates.pop(0)
+            elif hardware_candidates:
+                return hardware_candidates.pop(0)
+        # Если было "it" или None — сейчас пробуем "hardware"
+        else:
+            if hardware_candidates:
+                return hardware_candidates.pop(0)
+            elif it_candidates:
+                return it_candidates.pop(0)
+        return None
+
+    while posted_count < max_posts:
+        art = pick_next_article()
+        if not art:
             break
 
-        print(f"\n🔍 Обработка: {art['title'][:60]}... [{art['source']}]")
+        print(f"\n🔍 Обработка: {art['title'][:60]}... [{art['source']}] (type={art.get('post_type')})")
 
         post_text = short_summary(art["title"], art["summary"], art["link"])
 
@@ -637,7 +695,9 @@ async def autopost():
 
             save_posted(art["id"])
             posted_count += 1
-            print(f"✅ Опубликовано: {art['source']}")
+            last_type = art.get("post_type")
+            save_last_post_type(last_type)
+            print(f"✅ Опубликовано: {art['source']} (type={last_type})")
 
         except Exception as e:
             print(f"❌ Ошибка отправки в Telegram: {e}")
@@ -659,6 +719,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

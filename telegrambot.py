@@ -2,6 +2,8 @@ import os
 import json
 import asyncio
 import random
+import re
+import time
 from datetime import datetime
 from typing import List, Dict, Optional
 
@@ -38,9 +40,9 @@ HEADERS = {
 
 POSTED_FILE = "posted_articles.json"
 RETENTION_DAYS = 7
-LAST_TYPE_FILE = "last_post_type.json"  # тип последнего поста (hardware / it)
+LAST_TYPE_FILE = "last_post_type.json"
 
-# ============ СТИЛИ ПОСТОВ (НОВОСТИ/НАХОДКИ БЕЗ РЕКЛАМЫ) ============
+# ============ СТИЛИ ПОСТОВ ============
 
 POST_STYLES = [
     {
@@ -181,7 +183,6 @@ def is_too_promotional(text: str) -> bool:
     low = text.lower()
     if any(p in low for p in BAD_PHRASES):
         return True
-    # общая проверка: много "обеспечивает/позволяет/решает" без тех. деталей
     if ("обеспечивает" in low or "позволяет" in low or "предлагает решение" in low) and \
        not any(k in low for k in ["за счёт", "за счет", "используя", "через", "например", "в том числе", "фильтрации", "анализ трафика", "rate limiting", "балансировщик"]):
         return True
@@ -199,12 +200,10 @@ if os.path.exists(POSTED_FILE):
         except Exception:
             posted_articles = {}
 
-
 def save_posted_articles() -> None:
     data = [{"id": id_str, "timestamp": ts} for id_str, ts in posted_articles.items()]
     with open(POSTED_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-
 
 def clean_old_posts() -> None:
     global posted_articles
@@ -216,11 +215,9 @@ def clean_old_posts() -> None:
     }
     save_posted_articles()
 
-
 def save_posted(article_id: str) -> None:
     posted_articles[article_id] = datetime.now().timestamp()
     save_posted_articles()
-
 
 def load_last_post_type() -> Optional[str]:
     if not os.path.exists(LAST_TYPE_FILE):
@@ -231,7 +228,6 @@ def load_last_post_type() -> Optional[str]:
             return data.get("type")
     except Exception:
         return None
-
 
 def save_last_post_type(post_type: str) -> None:
     try:
@@ -244,7 +240,6 @@ def save_last_post_type(post_type: str) -> None:
 
 def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
-
 
 def detect_topic(title: str, summary: str) -> str:
     text = f"{title} {summary}".lower()
@@ -264,7 +259,6 @@ def detect_topic(title: str, summary: str) -> str:
     else:
         return "tech"
 
-
 def get_hashtags(topic: str) -> str:
     hashtag_map = {
         "llm": "#ChatGPT #LLM #нейросети",
@@ -276,6 +270,100 @@ def get_hashtags(topic: str) -> str:
         "tech": "#технологии #новинки #гаджеты"
     }
     return hashtag_map.get(topic, "#технологии #новости")
+
+# ===== УЛУЧШЕННАЯ обрезка — только основной текст, по предложениям =====
+
+def ensure_complete_sentence(text: str) -> str:
+    """Убеждаемся, что текст заканчивается на завершённое предложение."""
+    text = text.strip()
+    if not text:
+        return text
+    
+    # Если уже заканчивается на знак препинания — ОК
+    if text[-1] in '.!?':
+        return text
+    
+    # Ищем последний знак завершения предложения
+    last_period = text.rfind('.')
+    last_exclaim = text.rfind('!')
+    last_question = text.rfind('?')
+    
+    last_end = max(last_period, last_exclaim, last_question)
+    
+    if last_end > 0:
+        return text[:last_end + 1]
+    
+    # Если знаков нет — добавляем точку
+    return text + '.'
+
+
+def trim_core_text_to_limit(core_text: str, max_core_length: int) -> str:
+    """
+    Обрезает основной текст поста по предложениям, чтобы уложиться в лимит.
+    Гарантирует, что текст заканчивается завершённым предложением.
+    """
+    core_text = core_text.strip()
+    
+    if len(core_text) <= max_core_length:
+        return ensure_complete_sentence(core_text)
+    
+    # Разбиваем на предложения (сохраняя знаки препинания)
+    # Паттерн: разделяем после .!? но не внутри сокращений типа "т.е.", "и т.д."
+    sentence_pattern = r'(?<=[.!?])\s+'
+    sentences = re.split(sentence_pattern, core_text)
+    
+    result = ""
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+            
+        candidate = (result + " " + sentence).strip() if result else sentence
+        
+        if len(candidate) <= max_core_length:
+            result = candidate
+        else:
+            # Не влезает — останавливаемся
+            break
+    
+    # Если ничего не влезло — берём первое предложение и обрезаем жёстко
+    if not result and sentences:
+        result = sentences[0][:max_core_length]
+        # Обрезаем до последнего пробела, чтобы не резать слово
+        if len(result) == max_core_length and ' ' in result:
+            result = result.rsplit(' ', 1)[0]
+    
+    return ensure_complete_sentence(result)
+
+
+def build_final_post(core_text: str, hashtags: str, link: str, max_total: int = 1024) -> str:
+    """
+    Собирает финальный пост, гарантируя что:
+    1. Общая длина не превышает лимит
+    2. Хештеги и ссылка всегда присутствуют
+    3. Основной текст заканчивается завершённым предложением
+    """
+    source_line = f'\n\n🔗 <a href="{link}">Источник</a>'
+    hashtag_line = f"\n\n{hashtags}"
+    
+    # Считаем место для служебных частей
+    service_length = len(hashtag_line) + len(source_line)
+    max_core_length = max_total - service_length - 10  # запас 10 символов
+    
+    # Обрезаем основной текст если нужно
+    trimmed_core = trim_core_text_to_limit(core_text, max_core_length)
+    
+    # Собираем финальный пост
+    final = trimmed_core + hashtag_line + source_line
+    
+    # Финальная проверка
+    if len(final) > max_total:
+        # Аварийная обрезка — уменьшаем core ещё
+        overflow = len(final) - max_total
+        trimmed_core = trim_core_text_to_limit(core_text, max_core_length - overflow - 20)
+        final = trimmed_core + hashtag_line + source_line
+    
+    return final
 
 # ============ PARSERS ============
 
@@ -309,7 +397,6 @@ def load_rss(url: str, source: str) -> List[Dict]:
         print(f"✅ {source}: {len(articles)} статей")
 
     return articles
-
 
 def load_articles_from_sites() -> List[Dict]:
     articles: List[Dict] = []
@@ -356,7 +443,6 @@ def load_articles_from_sites() -> List[Dict]:
 
     return articles
 
-
 def filter_articles(articles: List[Dict]) -> List[Dict]:
     ai_articles = []
     tech_articles = []
@@ -383,7 +469,7 @@ def filter_articles(articles: List[Dict]) -> List[Dict]:
 
     return ai_articles + tech_articles
 
-# ============ ГЕНЕРАЦИЯ ТЕКСТА (ФОКУС НА МЕХАНИКЕ, НЕ НА РЕКЛАМЕ) ============
+# ============ ГЕНЕРАЦИЯ ТЕКСТА ============
 
 def build_dynamic_prompt(title: str, summary: str, style: dict, structure: str) -> str:
     news_text = f"Заголовок: {title}\n\nТекст: {summary}"
@@ -398,21 +484,21 @@ def build_dynamic_prompt(title: str, summary: str, style: dict, structure: str) 
     structure_instructions = {
         "hook_features_conclusion": """
 Структура:
-1. КРАТКОЕ СУТЬ — что за система/исследование и в чём именно новизна (1 предложение).
+1. КРАТКОЕ СУТЬ — что за система/исследование и в чём новизна.
 2. КАК РАБОТАЕТ — 2–3 конкретных механизма или приёма, за счёт чего достигается результат.
-3. ВЫВОД — чем это полезно для ИИ/инфраструктуры/инженеров.
+3. ВЫВОД — отдельным последним предложением: чем это полезно и что это меняет.
 """,
         "problem_solution": """
 Структура:
-1. ПРОБЛЕМА — какую конкретную задачу решают (DDoS, сбои моделей, узкие места железа и т.п.).
-2. РЕШЕНИЕ — технически: какие подходы используются (фильтрация, анализ трафика, rate limiting, новые алгоритмы, архитектура и т.п.).
-3. ЭФФЕКТ — что меняется в метриках, надёжности, скорости или удобстве.
+1. ПРОБЛЕМА — какую конкретную задачу решают (узкие места, нагрузка, надёжность и т.п.).
+2. РЕШЕНИЕ — какие подходы используются (архитектура, форматы чисел, работа с памятью, алгоритмы и т.п.).
+3. ЭФФЕКТ — отдельным последним предложением: что это даёт пользователям/разработчикам/инфраструктуре.
 """,
         "straight_news": """
 Структура:
 1. ФАКТ — что представили/исследовали без рекламы.
 2. ТЕХДЕТАЛИ — 2–3 ключевых технических особенности или приёма.
-3. КОНТЕКСТ — куда это ложится: безопасность, инфраструктура, разработка, ИИ.
+3. КОНТЕКСТ — отдельным последним предложением: зачем это и в каких сценариях особенно полезно.
 """
     }
 
@@ -424,82 +510,132 @@ def build_dynamic_prompt(title: str, summary: str, style: dict, structure: str) 
 
 {structure_instructions.get(structure, structure_instructions['straight_news'])}
 
-ЖЁСТКИЕ ТРЕБОВАНИЯ:
-• Длина: 350–420 символов.
+ТРЕБОВАНИЯ:
+• Напиши один связный абзац длиной 500–800 символов.
 • Язык: только русский.
-• Обязательно упомяни 2–3 конкретных технических приёма или механизма, как система/сервис достигает эффекта (например, фильтрация трафика по сигнатурам, поведенческий анализ, rate limiting, распределение нагрузки, приоритизация запросов, эвристики и т.п.).
-• Нельзя писать общие фразы типа «обеспечивает защиту» или «предлагает решение» без пояснения «как именно».
-• Пиши по фактам из новости. Если в исходном тексте нет технических деталей — оставайся на уровне архитектуры и подхода, но не выдумывай конкретные бренды или числа.
+• Обязательно упомяни 2–3 конкретных технических приёма или механизма.
+• Последнее предложение должно быть явным выводом.
+• Текст ОБЯЗАН заканчиваться точкой, восклицательным или вопросительным знаком.
 • 0–2 эмодзи, только по делу.
+• Нельзя писать общие фразы без пояснения «как именно».
+• Пиши по фактам из новости.
 
-КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО:
-• Рекламные формулировки и преимущества без технического объяснения.
-• Клише: «позволяет сосредоточиться на своих задачах», «делает бизнес устойчивее» и подобные.
+ЗАПРЕЩЕНО:
+• Рекламные формулировки без технического объяснения.
+• Клише: «позволяет сосредоточиться на своих задачах», «делает бизнес устойчивее».
 • Продажный тон, призывы попробовать или купить.
-• Любые фразы, где система «что-то обеспечивает», но не сказано за счёт чего.
+• Обрывать текст на середине предложения.
 
 ВЫДАЙ ТОЛЬКО ТЕКСТ ПОСТА, без хештегов и ссылок.
 """
     return prompt
 
 
+def validate_generated_text(text: str) -> tuple[bool, str]:
+    """
+    Проверяет сгенерированный текст на корректность.
+    Возвращает (is_valid, reason).
+    """
+    text = text.strip()
+    
+    if not text:
+        return False, "Пустой текст"
+    
+    if len(text) < 100:
+        return False, f"Слишком короткий текст ({len(text)} символов)"
+    
+    # Проверяем завершённость
+    if text[-1] not in '.!?':
+        return False, "Текст не заканчивается знаком препинания"
+    
+    # Проверяем на обрыв (незакрытые скобки, кавычки)
+    if text.count('(') != text.count(')'):
+        return False, "Незакрытые скобки"
+    
+    if text.count('«') != text.count('»'):
+        return False, "Незакрытые кавычки"
+    
+    # Проверяем что последнее предложение не слишком короткое (признак обрыва)
+    sentences = re.split(r'[.!?]', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    if sentences and len(sentences[-1]) < 10:
+        # Последний фрагмент слишком короткий — возможно обрыв
+        # Но это может быть и нормальным коротким выводом, так что не блокируем
+        pass
+    
+    return True, "OK"
+
+
 def short_summary(title: str, summary: str, link: str) -> Optional[str]:
     style = random.choice(POST_STYLES)
     structure = random.choice(POST_STRUCTURES)
 
-    print(f" 📝 Стиль: {style['name']}, структура: {structure}")
+    print(f"  📝 Стиль: {style['name']}, структура: {structure}")
 
     prompt = build_dynamic_prompt(title, summary, style, structure)
 
-    try:
-        res = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Ты — автор новостного Telegram-канала про ИИ и технологии. "
-                        "Пишешь по фактам, с упором на механизмы и подходы, без рекламного тона."
-                    )
-                },
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.5,
-            max_tokens=500,
-        )
-        core = res.choices[0].message.content.strip()
+    max_attempts = 2
+    
+    for attempt in range(max_attempts):
+        try:
+            res = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Ты — автор новостного Telegram-канала про ИИ и технологии. "
+                            "Пишешь по фактам, с упором на механизмы и подходы, без рекламного тона. "
+                            "ВАЖНО: всегда заканчивай текст полным предложением с точкой, восклицательным или вопросительным знаком."
+                        )
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.5,
+                max_tokens=600,
+            )
+            core = res.choices[0].message.content.strip()
 
-        if core.startswith('"') and core.endswith('"'):
-            core = core[1:-1]
-        if core.startswith('«') and core.endswith('»'):
-            core = core[1:-1]
+            # Убираем внешние кавычки если есть
+            if core.startswith('"') and core.endswith('"'):
+                core = core[1:-1]
+            if core.startswith('«') and core.endswith('»'):
+                core = core[1:-1]
+            
+            core = core.strip()
 
-        # Антирекламная проверка
-        if is_too_promotional(core):
-            print(" ⚠️ Текст слишком рекламный по формулировкам, пропускаем")
+            # Валидация
+            is_valid, reason = validate_generated_text(core)
+            if not is_valid:
+                print(f"  ⚠️ Попытка {attempt + 1}: {reason}")
+                if attempt < max_attempts - 1:
+                    continue
+                # Пытаемся исправить
+                core = ensure_complete_sentence(core)
+
+            # Проверка на рекламность
+            if is_too_promotional(core):
+                print("  ⚠️ Текст слишком рекламный по формулировкам, пропускаем")
+                return None
+
+            # Определяем тему и хештеги
+            topic = detect_topic(title, summary)
+            hashtags = get_hashtags(topic)
+
+            # Собираем финальный пост с гарантией корректной длины и завершённости
+            final = build_final_post(core, hashtags, link, max_total=1024)
+
+            print(f"  ✅ Сгенерирован пост: {len(final)} символов")
+            return final
+
+        except Exception as e:
+            print(f"❌ OpenAI ошибка: {e}")
+            if attempt < max_attempts - 1:
+                time.sleep(2)
+                continue
             return None
-
-        # Лёгкий контроль длины
-        length = len(core)
-        if length > 450:
-            core = core[:450].rsplit(" ", 1)[0]
-
-        topic = detect_topic(title, summary)
-        hashtags = get_hashtags(topic)
-        source_line = f"\n\n🔗 <a href=\"{link}\">Источник</a>"
-        hashtag_line = f"\n\n{hashtags}"
-
-        final = core + hashtag_line + source_line
-
-        # С учётом лимита подписи к фото
-        if len(final) > 1000:
-            final = final[:1000].rsplit(" ", 1)[0]
-
-        return final
-
-    except Exception as e:
-        print(f"❌ OpenAI ошибка: {e}")
-        return None
+    
+    return None
 
 # ============ ГЕНЕРАЦИЯ КАРТИНОК ============
 
@@ -529,7 +665,7 @@ def generate_image(title: str, max_retries: int = 3) -> Optional[str]:
             encoded = urllib.parse.quote(prompt)
             url = f"https://image.pollinations.ai/prompt/{encoded}?seed={seed}&width=1024&height=1024&nologo=true"
 
-            print(f" 🎨 Генерация изображения (попытка {attempt + 1}/{max_retries})...")
+            print(f"  🎨 Генерация изображения (попытка {attempt + 1}/{max_retries})...")
 
             resp = requests.get(url, timeout=90, headers=HEADERS)
 
@@ -539,36 +675,34 @@ def generate_image(title: str, max_retries: int = 3) -> Optional[str]:
                     fname = f"img_{seed}.jpg"
                     with open(fname, "wb") as f:
                         f.write(resp.content)
-                    print(f" ✅ Изображение сохранено: {fname}")
+                    print(f"  ✅ Изображение сохранено: {fname}")
                     return fname
                 else:
-                    print(f" ⚠️ Получен неверный контент (size: {len(resp.content)})")
+                    print(f"  ⚠️ Получен неверный контент (size: {len(resp.content)})")
             else:
-                print(f" ⚠️ HTTP {resp.status_code}")
+                print(f"  ⚠️ HTTP {resp.status_code}")
 
         except requests.Timeout:
-            print(f" ⚠️ Таймаут при генерации изображения")
+            print("  ⚠️ Таймаут при генерации изображения")
         except requests.RequestException as e:
-            print(f" ⚠️ Ошибка сети: {e}")
+            print(f"  ⚠️ Ошибка сети: {e}")
         except Exception as e:
-            print(f" ❌ Неожиданная ошибка: {e}")
+            print(f"  ❌ Неожиданная ошибка: {e}")
 
         if attempt < max_retries - 1:
             await_time = (attempt + 1) * 2
-            print(f" ⏳ Ждём {await_time}с перед следующей попыткой...")
-            import time
+            print(f"  ⏳ Ждём {await_time}с перед следующей попыткой...")
             time.sleep(await_time)
 
-    print(" ❌ Не удалось сгенерировать изображение после всех попыток")
+    print("  ❌ Не удалось сгенерировать изображение после всех попыток")
     return None
-
 
 def cleanup_image(filepath: Optional[str]) -> None:
     if filepath and os.path.exists(filepath):
         try:
             os.remove(filepath)
         except Exception as e:
-            print(f" ⚠️ Не удалось удалить {filepath}: {e}")
+            print(f"  ⚠️ Не удалось удалить {filepath}: {e}")
 
 # ============ АВТОПОСТ ============
 
@@ -619,7 +753,7 @@ async def autopost():
         post_text = short_summary(art["title"], art["summary"], art["link"])
 
         if not post_text:
-            print(" ⚠️ Не удалось сгенерировать текст, пробуем следующую")
+            print("  ⚠️ Не удалось сгенерировать текст, пробуем следующую")
             continue
 
         img = generate_image(art["title"])
@@ -658,6 +792,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

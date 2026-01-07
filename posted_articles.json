@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://www.ixbt.com/news/2025/12/31/ryzen-9800x3d-geforce-rtx-5090-10-15-ryzen-9800x3d-150.html",
-    "timestamp": 1767193888.163594
-  },
-  {
     "id": "https://www.ixbt.com/news/2025/12/31/1350-geforce-rtx-5090.html",
     "timestamp": 1767204959.165581
   },
@@ -126,5 +122,9 @@
   {
     "id": "https://www.ixbt.com/news/2026/01/07/aa-ostation-v8-pro.html",
     "timestamp": 1767788589.391599
+  },
+  {
+    "id": "https://3dnews.ru/1134786",
+    "timestamp": 1767798890.087713
   }
 ]

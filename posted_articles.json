@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://www.ixbt.com/news/2025/12/31/1350-geforce-rtx-5090.html",
-    "timestamp": 1767204959.165581
-  },
-  {
     "id": "https://www.ixbt.com/news/2025/12/31/nvidia-tsmc-h200.html",
     "timestamp": 1767248327.390886
   },
@@ -126,5 +122,9 @@
   {
     "id": "https://3dnews.ru/1134786",
     "timestamp": 1767798890.087713
+  },
+  {
+    "id": "https://www.ixbt.com/news/2026/01/07/geforce-rtx-60.html",
+    "timestamp": 1767809893.399707
   }
 ]

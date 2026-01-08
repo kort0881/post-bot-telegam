@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://www.ixbt.com/news/2026/01/01/geely-monjaro-stanet-roskoshju-v-rossii-vnov-povysili-utilsbor.html",
-    "timestamp": 1767280285.37617
-  },
-  {
     "id": "https://www.ixbt.com/news/2026/01/01/tsmc-1-4.html",
     "timestamp": 1767291381.009487
   },
@@ -126,5 +122,9 @@
   {
     "id": "https://www.ixbt.com/news/2026/01/08/a-class-mercedes-benz.html",
     "timestamp": 1767874983.521365
+  },
+  {
+    "id": "https://www.ixbt.com/news/2026/01/08/mast-upgrade-950.html",
+    "timestamp": 1767885346.751158
   }
 ]

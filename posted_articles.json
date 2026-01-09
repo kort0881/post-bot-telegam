@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://servernews.ru/1045050/",
-    "timestamp": 1767334730.130656
-  },
-  {
-    "id": "https://www.ixbt.com/news/2026/01/02/samsung-130-micro-rgb.html",
-    "timestamp": 1767356413.799978
-  },
-  {
     "id": "https://servernews.ru/1055771/",
     "timestamp": 1767366708.14174
   },
@@ -130,5 +122,9 @@
   {
     "id": "https://www.ixbt.com/news/2026/01/09/tab-17-pro-max-iphone-17-pro-max.html",
     "timestamp": 1767939515.239332
+  },
+  {
+    "id": "https://www.ixbt.com/news/2026/01/09/asus-bios-asus-x870-b850-64-rom-wi-fi.html",
+    "timestamp": 1767961343.284554
   }
 ]

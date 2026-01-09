@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://servernews.ru/1056763/",
-    "timestamp": 1767377778.232788
-  },
-  {
     "id": "https://servernews.ru/1062357/",
     "timestamp": 1767421031.998194
   },
@@ -126,5 +122,9 @@
   {
     "id": "https://www.ixbt.com/news/2026/01/09/honor-71-50.html",
     "timestamp": 1767971575.313927
+  },
+  {
+    "id": "https://servernews.ru/1055771/",
+    "timestamp": 1767982681.433213
   }
 ]

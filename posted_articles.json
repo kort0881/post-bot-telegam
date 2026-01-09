@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://servernews.ru/1055771/",
-    "timestamp": 1767366708.14174
-  },
-  {
     "id": "https://servernews.ru/1056763/",
     "timestamp": 1767377778.232788
   },
@@ -126,5 +122,9 @@
   {
     "id": "https://www.ixbt.com/news/2026/01/09/asus-bios-asus-x870-b850-64-rom-wi-fi.html",
     "timestamp": 1767961343.284554
+  },
+  {
+    "id": "https://www.ixbt.com/news/2026/01/09/honor-71-50.html",
+    "timestamp": 1767971575.313927
   }
 ]

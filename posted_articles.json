@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://www.ixbt.com/news/2026/01/01/tsmc-1-4.html",
-    "timestamp": 1767291381.009487
-  },
-  {
     "id": "https://servernews.ru/1045050/",
     "timestamp": 1767334730.130656
   },
@@ -130,5 +126,9 @@
   {
     "id": "https://www.ixbt.com/news/2026/01/08/kosmicheskie-operatory-stolknulis-s-fragmentirovannym-regulirovaniem-kiberbezopasnosti.html",
     "timestamp": 1767896147.450444
+  },
+  {
+    "id": "https://www.ixbt.com/news/2026/01/09/tab-17-pro-max-iphone-17-pro-max.html",
+    "timestamp": 1767939515.239332
   }
 ]

@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://habr.com/ru/companies/technokratos/articles/973358/?utm_campaign=973358&utm_source=habrahabr&utm_medium=rss",
-    "timestamp": 1767442753.349435
-  },
-  {
     "id": "https://www.ixbt.com/news/2026/01/04/geforce-rtx-5060-intel-intel-arc-b770.html",
     "timestamp": 1767516696.197084
   },
@@ -130,5 +126,9 @@
   {
     "id": "https://servernews.ru/1062357/",
     "timestamp": 1768047564.768024
+  },
+  {
+    "id": "https://www.ixbt.com/news/2026/01/10/lenovo-apu-ryzen-ai-400-am5-ryzen-9000g.html",
+    "timestamp": 1768057825.680078
   }
 ]

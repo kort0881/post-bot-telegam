@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://3dnews.ru/1134741",
-    "timestamp": 1767529166.96551
-  },
-  {
-    "id": "https://servernews.ru/1074481/",
-    "timestamp": 1767530299.061015
-  },
-  {
     "id": "https://servernews.ru/1097348/",
     "timestamp": 1767539421.369272
   },
@@ -138,5 +130,9 @@
   {
     "id": "https://www.ixbt.com/news/2026/01/11/windows-11-copilot.html",
     "timestamp": 1768134007.400583
+  },
+  {
+    "id": "https://servernews.ru/1074481/",
+    "timestamp": 1768144288.449506
   }
 ]

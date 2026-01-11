@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://www.ixbt.com/news/2026/01/04/geforce-rtx-5060-intel-intel-arc-b770.html",
-    "timestamp": 1767516696.197084
-  },
-  {
     "id": "https://3dnews.ru/1134741",
     "timestamp": 1767529166.96551
   },
@@ -138,5 +134,9 @@
   {
     "id": "https://www.ixbt.com/news/2026/01/11/jac-t9-2025-39-ram-16.html",
     "timestamp": 1768112215.894561
+  },
+  {
+    "id": "https://www.ixbt.com/news/2026/01/11/windows-11-copilot.html",
+    "timestamp": 1768134007.400583
   }
 ]

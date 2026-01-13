@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://servernews.ru/1112405/",
-    "timestamp": 1767637125.107333
-  },
-  {
     "id": "https://servernews.ru/1115378/",
     "timestamp": 1767680322.676816
   },
@@ -134,5 +130,9 @@
   {
     "id": "https://servernews.ru/1111538/",
     "timestamp": 1768241926.800211
+  },
+  {
+    "id": "https://www.ixbt.com/news/2026/01/13/falcon-9-spacex-starlink-25.html",
+    "timestamp": 1768285185.442821
   }
 ]

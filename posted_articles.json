@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://www.ixbt.com/news/2026/01/07/aa-ostation-v8-pro.html",
-    "timestamp": 1767788589.391599
-  },
-  {
-    "id": "https://3dnews.ru/1134786",
-    "timestamp": 1767798890.087713
-  },
-  {
     "id": "https://www.ixbt.com/news/2026/01/07/geforce-rtx-60.html",
     "timestamp": 1767809893.399707
   },
@@ -134,5 +126,9 @@
   {
     "id": "https://servernews.ru/1112405/",
     "timestamp": 1768393353.541737
+  },
+  {
+    "id": "https://servernews.ru/1133180/",
+    "timestamp": 1768403816.041659
   }
 ]

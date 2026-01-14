@@ -42,6 +42,15 @@ POSTED_FILE = "posted_articles.json"
 RETENTION_DAYS = 7
 LAST_TYPE_FILE = "last_post_type.json"
 
+REACTIONS_TEXT = (
+    "Если формат зашел — жми 👍\n"
+    "Не согласен — выбери 😡\n"
+    "Хочешь продолжение — поставь 🔥\n"
+    "Конфиг рабочий? жми 🟢, лагает — тыкай 🔴\n"
+    "Протокол топ? ставь 🚀, если фейл — жми 💥\n"
+    "Юзаешь? отмечай 😎, если нет — выбирай 🤔"
+)
+
 # ============ СТИЛИ ПОСТОВ ============
 
 POST_STYLES = [
@@ -296,7 +305,6 @@ def ensure_complete_sentence(text: str) -> str:
     # Если знаков нет — добавляем точку
     return text + '.'
 
-
 def trim_core_text_to_limit(core_text: str, max_core_length: int) -> str:
     """
     Обрезает основной текст поста по предложениям, чтобы уложиться в лимит.
@@ -335,33 +343,33 @@ def trim_core_text_to_limit(core_text: str, max_core_length: int) -> str:
     
     return ensure_complete_sentence(result)
 
-
 def build_final_post(core_text: str, hashtags: str, link: str, max_total: int = 1024) -> str:
     """
     Собирает финальный пост, гарантируя что:
     1. Общая длина не превышает лимит
-    2. Хештеги и ссылка всегда присутствуют
+    2. Хештеги, реакции и ссылка всегда присутствуют
     3. Основной текст заканчивается завершённым предложением
     """
     source_line = f'\n\n🔗 <a href="{link}">Источник</a>'
     hashtag_line = f"\n\n{hashtags}"
+    reactions_line = f"\n\n{REACTIONS_TEXT}"
     
     # Считаем место для служебных частей
-    service_length = len(hashtag_line) + len(source_line)
+    service_length = len(hashtag_line) + len(reactions_line) + len(source_line)
     max_core_length = max_total - service_length - 10  # запас 10 символов
     
     # Обрезаем основной текст если нужно
     trimmed_core = trim_core_text_to_limit(core_text, max_core_length)
     
     # Собираем финальный пост
-    final = trimmed_core + hashtag_line + source_line
+    final = trimmed_core + hashtag_line + reactions_line + source_line
     
     # Финальная проверка
     if len(final) > max_total:
         # Аварийная обрезка — уменьшаем core ещё
         overflow = len(final) - max_total
         trimmed_core = trim_core_text_to_limit(core_text, max_core_length - overflow - 20)
-        final = trimmed_core + hashtag_line + source_line
+        final = trimmed_core + hashtag_line + reactions_line + source_line
     
     return final
 
@@ -511,7 +519,7 @@ def build_dynamic_prompt(title: str, summary: str, style: dict, structure: str) 
 {structure_instructions.get(structure, structure_instructions['straight_news'])}
 
 ТРЕБОВАНИЯ:
-• Напиши один связный абзац длиной 500–800 символов.
+• Напиши один связный абзац длиной 400–600 символов.
 • Язык: только русский.
 • Обязательно упомяни 2–3 конкретных технических приёма или механизма.
 • Последнее предложение должно быть явным выводом.
@@ -529,7 +537,6 @@ def build_dynamic_prompt(title: str, summary: str, style: dict, structure: str) 
 ВЫДАЙ ТОЛЬКО ТЕКСТ ПОСТА, без хештегов и ссылок.
 """
     return prompt
-
 
 def validate_generated_text(text: str) -> tuple[bool, str]:
     """
@@ -564,7 +571,6 @@ def validate_generated_text(text: str) -> tuple[bool, str]:
         pass
     
     return True, "OK"
-
 
 def short_summary(title: str, summary: str, link: str) -> Optional[str]:
     style = random.choice(POST_STYLES)
@@ -792,6 +798,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

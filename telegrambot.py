@@ -296,7 +296,6 @@ def ensure_complete_sentence(text: str) -> str:
     # Если знаков нет — добавляем точку
     return text + '.'
 
-
 def trim_core_text_to_limit(core_text: str, max_core_length: int) -> str:
     """
     Обрезает основной текст поста по предложениям, чтобы уложиться в лимит.
@@ -308,7 +307,6 @@ def trim_core_text_to_limit(core_text: str, max_core_length: int) -> str:
         return ensure_complete_sentence(core_text)
     
     # Разбиваем на предложения (сохраняя знаки препинания)
-    # Паттерн: разделяем после .!? но не внутри сокращений типа "т.е.", "и т.д."
     sentence_pattern = r'(?<=[.!?])\s+'
     sentences = re.split(sentence_pattern, core_text)
     
@@ -323,18 +321,14 @@ def trim_core_text_to_limit(core_text: str, max_core_length: int) -> str:
         if len(candidate) <= max_core_length:
             result = candidate
         else:
-            # Не влезает — останавливаемся
             break
     
-    # Если ничего не влезло — берём первое предложение и обрезаем жёстко
     if not result and sentences:
         result = sentences[0][:max_core_length]
-        # Обрезаем до последнего пробела, чтобы не резать слово
         if len(result) == max_core_length and ' ' in result:
             result = result.rsplit(' ', 1)[0]
     
     return ensure_complete_sentence(result)
-
 
 def build_final_post(core_text: str, hashtags: str, link: str, max_total: int = 1024) -> str:
     """
@@ -343,25 +337,21 @@ def build_final_post(core_text: str, hashtags: str, link: str, max_total: int = 
     2. Хештеги и ссылка всегда присутствуют
     3. Основной текст заканчивается завершённым предложением
     """
+    cta_line = "\n\nФормат мимо — ставь 👎. Заходит — ставь 👍. Пришёл только за мясом и конфигами — кидай 🔥."
     source_line = f'\n\n🔗 <a href="{link}">Источник</a>'
     hashtag_line = f"\n\n{hashtags}"
     
-    # Считаем место для служебных частей
-    service_length = len(hashtag_line) + len(source_line)
+    service_length = len(cta_line) + len(hashtag_line) + len(source_line)
     max_core_length = max_total - service_length - 10  # запас 10 символов
     
-    # Обрезаем основной текст если нужно
     trimmed_core = trim_core_text_to_limit(core_text, max_core_length)
     
-    # Собираем финальный пост
-    final = trimmed_core + hashtag_line + source_line
+    final = trimmed_core + cta_line + hashtag_line + source_line
     
-    # Финальная проверка
     if len(final) > max_total:
-        # Аварийная обрезка — уменьшаем core ещё
         overflow = len(final) - max_total
         trimmed_core = trim_core_text_to_limit(core_text, max_core_length - overflow - 20)
-        final = trimmed_core + hashtag_line + source_line
+        final = trimmed_core + cta_line + hashtag_line + source_line
     
     return final
 
@@ -544,23 +534,18 @@ def validate_generated_text(text: str) -> tuple[bool, str]:
     if len(text) < 100:
         return False, f"Слишком короткий текст ({len(text)} символов)"
     
-    # Проверяем завершённость
     if text[-1] not in '.!?':
         return False, "Текст не заканчивается знаком препинания"
     
-    # Проверяем на обрыв (незакрытые скобки, кавычки)
     if text.count('(') != text.count(')'):
         return False, "Незакрытые скобки"
     
     if text.count('«') != text.count('»'):
         return False, "Незакрытые кавычки"
     
-    # Проверяем что последнее предложение не слишком короткое (признак обрыва)
     sentences = re.split(r'[.!?]', text)
     sentences = [s.strip() for s in sentences if s.strip()]
     if sentences and len(sentences[-1]) < 10:
-        # Последний фрагмент слишком короткий — возможно обрыв
-        # Но это может быть и нормальным коротким выводом, так что не блокируем
         pass
     
     return True, "OK"
@@ -596,7 +581,6 @@ def short_summary(title: str, summary: str, link: str) -> Optional[str]:
             )
             core = res.choices[0].message.content.strip()
 
-            # Убираем внешние кавычки если есть
             if core.startswith('"') and core.endswith('"'):
                 core = core[1:-1]
             if core.startswith('«') and core.endswith('»'):
@@ -604,25 +588,20 @@ def short_summary(title: str, summary: str, link: str) -> Optional[str]:
             
             core = core.strip()
 
-            # Валидация
             is_valid, reason = validate_generated_text(core)
             if not is_valid:
                 print(f"  ⚠️ Попытка {attempt + 1}: {reason}")
                 if attempt < max_attempts - 1:
                     continue
-                # Пытаемся исправить
                 core = ensure_complete_sentence(core)
 
-            # Проверка на рекламность
             if is_too_promotional(core):
                 print("  ⚠️ Текст слишком рекламный по формулировкам, пропускаем")
                 return None
 
-            # Определяем тему и хештеги
             topic = detect_topic(title, summary)
             hashtags = get_hashtags(topic)
 
-            # Собираем финальный пост с гарантией корректной длины и завершённости
             final = build_final_post(core, hashtags, link, max_total=1024)
 
             print(f"  ✅ Сгенерирован пост: {len(final)} символов")
@@ -792,6 +771,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

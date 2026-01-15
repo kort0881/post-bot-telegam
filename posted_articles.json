@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://www.ixbt.com/news/2026/01/08/50-116-rgb-miniled-hisense.html",
-    "timestamp": 1767853142.38873
-  },
-  {
     "id": "https://www.ixbt.com/news/2026/01/08/a-class-mercedes-benz.html",
     "timestamp": 1767874983.521365
   },
@@ -134,5 +130,9 @@
   {
     "id": "https://servernews.ru/1128170/",
     "timestamp": 1768457924.722376
+  },
+  {
+    "id": "https://thedfirreport.com/2025/03/31/fake-zoom-ends-in-blacksuit-ransomware/",
+    "timestamp": 1768479740.039107
   }
 ]

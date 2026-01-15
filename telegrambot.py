@@ -125,6 +125,21 @@ TECH_KEYWORDS = [
     "прорыв", "инновация", "технология"
 ]
 
+# Сенсационные/скандальные события
+SENSATIONAL_KEYWORDS = [
+    # рус
+    "взлом", "взломали", "утечка", "утекли данные", "datas leak", "утечкой данных",
+    "ransomware", "выкуп", "шантаж", "зашифровал", "шифровальщик",
+    "атака", "кибератака", "ddos", "фишинг", "эксплойт", "эксплуатация уязвимости",
+    "уязвимость", "0-day", "нулевого дня", "чувствительные данные",
+    # англ/бренды
+    "breach", "leak", "data breach", "hack", "was hacked",
+    "vulnerability", "exploit", "bug bounty", "bugbounty",
+    "security incident", "security flaw",
+    "verizon", "sos режим", "sos mode",
+    "rtx 5090 leak", "nvidia leak"
+]
+
 EXCLUDE_KEYWORDS = [
     "акции", "акция", "биржа", "котировки", "индекс",
     "инвестиции", "инвестор", "инвесторы", "дивиденды",
@@ -267,92 +282,61 @@ def get_hashtags(topic: str) -> str:
         "space": "#космос #SpaceX #технологии",
         "hardware": "#железо #GPU #технологии",
         "ai": "#AI #нейросети #технологии",
-        "tech": "#технологии #новинки #гаджеты"
+        "tech": "#технологии #новинки #гаджеты",
+        "sensational": "#кибербезопасность #утечка #атака"
     }
     return hashtag_map.get(topic, "#технологии #новости")
 
-# ===== УЛУЧШЕННАЯ обрезка — только основной текст, по предложениям =====
+# ===== обрезка текста по предложениям =====
 
 def ensure_complete_sentence(text: str) -> str:
-    """Убеждаемся, что текст заканчивается на завершённое предложение."""
     text = text.strip()
     if not text:
         return text
-    
-    # Если уже заканчивается на знак препинания — ОК
     if text[-1] in '.!?':
         return text
-    
-    # Ищем последний знак завершения предложения
     last_period = text.rfind('.')
     last_exclaim = text.rfind('!')
     last_question = text.rfind('?')
-    
     last_end = max(last_period, last_exclaim, last_question)
-    
     if last_end > 0:
         return text[:last_end + 1]
-    
-    # Если знаков нет — добавляем точку
     return text + '.'
 
 def trim_core_text_to_limit(core_text: str, max_core_length: int) -> str:
-    """
-    Обрезает основной текст поста по предложениям, чтобы уложиться в лимит.
-    Гарантирует, что текст заканчивается завершённым предложением.
-    """
     core_text = core_text.strip()
-    
     if len(core_text) <= max_core_length:
         return ensure_complete_sentence(core_text)
-    
-    # Разбиваем на предложения (сохраняя знаки препинания)
     sentence_pattern = r'(?<=[.!?])\s+'
     sentences = re.split(sentence_pattern, core_text)
-    
     result = ""
     for sentence in sentences:
         sentence = sentence.strip()
         if not sentence:
             continue
-            
         candidate = (result + " " + sentence).strip() if result else sentence
-        
         if len(candidate) <= max_core_length:
             result = candidate
         else:
             break
-    
     if not result and sentences:
         result = sentences[0][:max_core_length]
         if len(result) == max_core_length and ' ' in result:
             result = result.rsplit(' ', 1)[0]
-    
     return ensure_complete_sentence(result)
 
 def build_final_post(core_text: str, hashtags: str, link: str, max_total: int = 1024) -> str:
-    """
-    Собирает финальный пост, гарантируя что:
-    1. Общая длина не превышает лимит
-    2. Хештеги и ссылка всегда присутствуют
-    3. Основной текст заканчивается завершённым предложением
-    """
     cta_line = "\n\nФормат мимо — ставь 👎. Заходит — ставь 👍. Пришёл только за мясом и конфигами — кидай 🔥."
     source_line = f'\n\n🔗 <a href="{link}">Источник</a>'
     hashtag_line = f"\n\n{hashtags}"
-    
     service_length = len(cta_line) + len(hashtag_line) + len(source_line)
-    max_core_length = max_total - service_length - 10  # запас 10 символов
-    
+    max_core_length = max_total - service_length - 10
     trimmed_core = trim_core_text_to_limit(core_text, max_core_length)
-    
     final = trimmed_core + cta_line + hashtag_line + source_line
-    
     if len(final) > max_total:
         overflow = len(final) - max_total
         trimmed_core = trim_core_text_to_limit(core_text, max_core_length - overflow - 20)
         final = trimmed_core + cta_line + hashtag_line + source_line
-    
     return final
 
 # ============ PARSERS ============
@@ -391,6 +375,7 @@ def load_rss(url: str, source: str) -> List[Dict]:
 def load_articles_from_sites() -> List[Dict]:
     articles: List[Dict] = []
 
+    # Оставляем ИИ / ML / NLP / Robotics с Хабра
     articles.extend(load_rss(
         "https://habr.com/ru/rss/hub/artificial_intelligence/all/?fl=ru",
         "Habr AI"
@@ -404,10 +389,6 @@ def load_articles_from_sites() -> List[Dict]:
         "Habr Neural"
     ))
     articles.extend(load_rss(
-        "https://habr.com/ru/rss/hub/data_science/all/?fl=ru",
-        "Habr DS"
-    ))
-    articles.extend(load_rss(
         "https://habr.com/ru/rss/hub/natural_language_processing/all/?fl=ru",
         "Habr NLP"
     ))
@@ -416,24 +397,24 @@ def load_articles_from_sites() -> List[Dict]:
         "Habr Robotics"
     ))
 
-    articles.extend(load_rss(
-        "https://all-rss.ru/export/55.xml",
-        "Overclockers Hardware"
-    ))
-    articles.extend(load_rss(
-        "https://all-rss.ru/export/57.xml",
-        "Overclockers IT"
-    ))
+    # Добавляем кибербезопасность / инциденты
+    # SecurityNews (рус)[web:24]
+    articles.extend(load_rss("https://secnews.ru/rss/", "SecurityNews"))
+
+    # 0day/кибер-агрегаторы (через 0dayfans / CyberAlerts можно будет при желании докрутить)[web:25]
+    articles.extend(load_rss("https://cyberalerts.io/rss/latest-public", "CyberAlerts"))
+
+    # Обобщённый англоязычный киберфид (OPML из GitHub — здесь выбираем, например, The DFIR Report)[web:30]
+    articles.extend(load_rss("https://thedfirreport.com/feed/", "DFIR Report"))
+
+    # Общая наука/техника, но часто пишут про утечки/атаки
     articles.extend(load_rss("https://hightech.fm/feed", "Хайтек"))
     articles.extend(load_rss("https://nplus1.ru/rss", "N+1"))
-
-    articles.extend(load_rss("https://3dnews.ru/news/rss/", "3DNews"))
-    articles.extend(load_rss("https://www.ixbt.com/export/news.rss", "iXBT"))
-    articles.extend(load_rss("https://servernews.ru/rss", "ServerNews"))
 
     return articles
 
 def filter_articles(articles: List[Dict]) -> List[Dict]:
+    sensational = []
     ai_articles = []
     tech_articles = []
 
@@ -443,9 +424,16 @@ def filter_articles(articles: List[Dict]) -> List[Dict]:
         if any(kw in text for kw in EXCLUDE_KEYWORDS):
             continue
 
+        # Сенсационные / скандальные новости
+        if any(kw in text for kw in SENSATIONAL_KEYWORDS):
+            e["post_type"] = "sensational"
+            sensational.append(e)
+            continue
+
+        # Остальное — как раньше
         source = e.get("source", "")
-        if source in ["Overclockers Hardware", "Overclockers IT", "3DNews", "iXBT", "ServerNews"]:
-            e["post_type"] = "hardware"
+        if source in ["SecurityNews", "CyberAlerts", "DFIR Report"]:
+            e["post_type"] = "security"
         else:
             e["post_type"] = "it"
 
@@ -454,10 +442,11 @@ def filter_articles(articles: List[Dict]) -> List[Dict]:
         elif any(kw in text for kw in TECH_KEYWORDS):
             tech_articles.append(e)
 
+    sensational.sort(key=lambda x: x["published_parsed"], reverse=True)
     ai_articles.sort(key=lambda x: x["published_parsed"], reverse=True)
     tech_articles.sort(key=lambda x: x["published_parsed"], reverse=True)
 
-    return ai_articles + tech_articles
+    return sensational + ai_articles + tech_articles
 
 # ============ ГЕНЕРАЦИЯ ТЕКСТА ============
 
@@ -474,21 +463,21 @@ def build_dynamic_prompt(title: str, summary: str, style: dict, structure: str) 
     structure_instructions = {
         "hook_features_conclusion": """
 Структура:
-1. КРАТКОЕ СУТЬ — что за система/исследование и в чём новизна.
-2. КАК РАБОТАЕТ — 2–3 конкретных механизма или приёма, за счёт чего достигается результат.
-3. ВЫВОД — отдельным последним предложением: чем это полезно и что это меняет.
+1. КРАТКО СУТЬ — что случилось и в чём новизна/жесть.
+2. КАК РАБОТАЕТ — 2–3 конкретных механизма или приёма (как взломали/защитились/что поменяли).
+3. ВЫВОД — отдельным последним предложением: чем это грозит или помогает обычным пользователям/разрабам.
 """,
         "problem_solution": """
 Структура:
-1. ПРОБЛЕМА — какую конкретную задачу решают (узкие места, нагрузка, надёжность и т.п.).
-2. РЕШЕНИЕ — какие подходы используются (архитектура, форматы чисел, работа с памятью, алгоритмы и т.п.).
-3. ЭФФЕКТ — отдельным последним предложением: что это даёт пользователям/разработчикам/инфраструктуре.
+1. ПРОБЛЕМА — какую конкретную дыру или риск нашли.
+2. РЕШЕНИЕ — какие технические меры, патчи, костыли или хаки используют.
+3. ЭФФЕКТ — отдельным последним предложением: что это меняет и за чем теперь стоит следить.
 """,
         "straight_news": """
 Структура:
-1. ФАКТ — что представили/исследовали без рекламы.
+1. ФАКТ — что произошло без рекламы (утечка, атака, новый баг, новый инструмент).
 2. ТЕХДЕТАЛИ — 2–3 ключевых технических особенности или приёма.
-3. КОНТЕКСТ — отдельным последним предложением: зачем это и в каких сценариях особенно полезно.
+3. КОНТЕКСТ — отдельным последним предложением: почему это важно и кто может пострадать/выиграть.
 """
     }
 
@@ -504,15 +493,15 @@ def build_dynamic_prompt(title: str, summary: str, style: dict, structure: str) 
 • Напиши один связный абзац длиной 500–800 символов.
 • Язык: только русский.
 • Обязательно упомяни 2–3 конкретных технических приёма или механизма.
-• Последнее предложение должно быть явным выводом.
+• Последнее предложение должно быть явным выводом или вопросом к читателю.
 • Текст ОБЯЗАН заканчиваться точкой, восклицательным или вопросительным знаком.
 • 0–2 эмодзи, только по делу.
 • Нельзя писать общие фразы без пояснения «как именно».
-• Пиши по фактам из новости.
+• Пиши по фактам из новости, без выдумки и без рекламного тона.
 
 ЗАПРЕЩЕНО:
 • Рекламные формулировки без технического объяснения.
-• Клише: «позволяет сосредоточиться на своих задачах», «делает бизнес устойчивее».
+• Клише: «позволяет сосредоточиться на своих задачах», «делает бизнес устойчивее» и т.п.
 • Продажный тон, призывы попробовать или купить.
 • Обрывать текст на середине предложения.
 
@@ -522,32 +511,21 @@ def build_dynamic_prompt(title: str, summary: str, style: dict, structure: str) 
 
 
 def validate_generated_text(text: str) -> tuple[bool, str]:
-    """
-    Проверяет сгенерированный текст на корректность.
-    Возвращает (is_valid, reason).
-    """
     text = text.strip()
-    
     if not text:
         return False, "Пустой текст"
-    
     if len(text) < 100:
         return False, f"Слишком короткий текст ({len(text)} символов)"
-    
     if text[-1] not in '.!?':
         return False, "Текст не заканчивается знаком препинания"
-    
     if text.count('(') != text.count(')'):
         return False, "Незакрытые скобки"
-    
     if text.count('«') != text.count('»'):
         return False, "Незакрытые кавычки"
-    
     sentences = re.split(r'[.!?]', text)
     sentences = [s.strip() for s in sentences if s.strip()]
     if sentences and len(sentences[-1]) < 10:
         pass
-    
     return True, "OK"
 
 
@@ -599,9 +577,13 @@ def short_summary(title: str, summary: str, link: str) -> Optional[str]:
                 print("  ⚠️ Текст слишком рекламный по формулировкам, пропускаем")
                 return None
 
-            topic = detect_topic(title, summary)
-            hashtags = get_hashtags(topic)
+            topic_raw = detect_topic(title, summary)
+            if any(kw in (title + " " + summary).lower() for kw in SENSATIONAL_KEYWORDS):
+                topic = "sensational"
+            else:
+                topic = topic_raw
 
+            hashtags = get_hashtags(topic)
             final = build_final_post(core, hashtags, link, max_total=1024)
 
             print(f"  ✅ Сгенерирован пост: {len(final)} символов")
@@ -705,21 +687,24 @@ async def autopost():
     posted_count = 0
     max_posts = 1
 
-    hardware_candidates = [c for c in candidates if c.get("post_type") == "hardware"]
+    # Разделяем по типам
+    sensational_candidates = [c for c in candidates if c.get("post_type") == "sensational"]
+    security_candidates = [c for c in candidates if c.get("post_type") == "security"]
     it_candidates = [c for c in candidates if c.get("post_type") == "it"]
 
     def pick_next_article() -> Optional[Dict]:
         nonlocal last_type
-        if last_type == "hardware":
-            if it_candidates:
-                return it_candidates.pop(0)
-            elif hardware_candidates:
-                return hardware_candidates.pop(0)
-        else:
-            if hardware_candidates:
-                return hardware_candidates.pop(0)
-            elif it_candidates:
-                return it_candidates.pop(0)
+        # Приоритет: сначала сенсации, затем security, затем обычное it
+        if last_type != "sensational" and sensational_candidates:
+            return sensational_candidates.pop(0)
+        if last_type != "security" and security_candidates:
+            return security_candidates.pop(0)
+        if it_candidates:
+            return it_candidates.pop(0)
+        if security_candidates:
+            return security_candidates.pop(0)
+        if sensational_candidates:
+            return sensational_candidates.pop(0)
         return None
 
     while posted_count < max_posts:
@@ -749,7 +734,7 @@ async def autopost():
 
             save_posted(art["id"])
             posted_count += 1
-            last_type = art.get("post_type")
+            last_type = art.get("post_type", "it")
             save_last_post_type(last_type)
             print(f"✅ Опубликовано: {art['source']} (type={last_type})")
 
@@ -771,6 +756,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

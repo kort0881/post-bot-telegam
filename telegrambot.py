@@ -4,7 +4,7 @@ import asyncio
 import random
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 
 import requests
@@ -41,6 +41,10 @@ HEADERS = {
 POSTED_FILE = "posted_articles.json"
 RETENTION_DAYS = 7
 LAST_TYPE_FILE = "last_post_type.json"
+LAST_SECURITY_FILE = "last_security_post.json"
+
+# свежесть новости (в днях)
+MAX_ARTICLE_AGE_DAYS = 3
 
 # ============ СТИЛИ ПОСТОВ ============
 
@@ -127,12 +131,10 @@ TECH_KEYWORDS = [
 
 # Сенсационные/скандальные события
 SENSATIONAL_KEYWORDS = [
-    # рус
     "взлом", "взломали", "утечка", "утекли данные", "datas leak", "утечкой данных",
     "ransomware", "выкуп", "шантаж", "зашифровал", "шифровальщик",
     "атака", "кибератака", "ddos", "фишинг", "эксплойт", "эксплуатация уязвимости",
     "уязвимость", "0-day", "нулевого дня", "чувствительные данные",
-    # англ/бренды
     "breach", "leak", "data breach", "hack", "was hacked",
     "vulnerability", "exploit", "bug bounty", "bugbounty",
     "security incident", "security flaw",
@@ -141,6 +143,7 @@ SENSATIONAL_KEYWORDS = [
 ]
 
 EXCLUDE_KEYWORDS = [
+    # финансы/рынок/политика/спорт/кино/крипта/суды — как раньше
     "акции", "акция", "биржа", "котировки", "индекс",
     "инвестиции", "инвестор", "инвесторы", "дивиденды",
     "ipo", "капитализация", "рыночная стоимость",
@@ -251,6 +254,23 @@ def save_last_post_type(post_type: str) -> None:
     except Exception:
         pass
 
+def load_last_security_ts() -> Optional[float]:
+    if not os.path.exists(LAST_SECURITY_FILE):
+        return None
+    try:
+        with open(LAST_SECURITY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("ts")
+    except Exception:
+        return None
+
+def save_last_security_ts() -> None:
+    try:
+        with open(LAST_SECURITY_FILE, "w", encoding="utf-8") as f:
+            json.dump({"ts": datetime.now().timestamp()}, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
 # ============ HELPERS ============
 
 def clean_text(text: str) -> str:
@@ -352,10 +372,25 @@ def load_rss(url: str, source: str) -> List[Dict]:
         print(f"❌ Ошибка загрузки RSS {source}: {e}")
         return articles
 
-    for entry in feed.entries[:30]:
+    now = datetime.now()
+    max_age = timedelta(days=MAX_ARTICLE_AGE_DAYS)
+
+    for entry in feed.entries[:50]:
         link = entry.get("link", "")
         if not link or link in posted_articles:
             continue
+
+        # дата из RSS
+        pub_dt = now
+        if hasattr(entry, "published_parsed") and entry.published_parsed:
+            pub_dt = datetime(*entry.published_parsed[:6])
+        elif hasattr(entry, "updated_parsed") and entry.updated_parsed:
+            pub_dt = datetime(*entry.updated_parsed[:6])
+
+        # только свежие новости
+        if now - pub_dt > max_age:
+            continue
+
         articles.append({
             "id": link,
             "title": clean_text(entry.get("title") or ""),
@@ -364,18 +399,18 @@ def load_rss(url: str, source: str) -> List[Dict]:
             )[:700],
             "link": link,
             "source": source,
-            "published_parsed": datetime.now()
+            "published_parsed": pub_dt
         })
 
     if articles:
-        print(f"✅ {source}: {len(articles)} статей")
+        print(f"✅ {source}: {len(articles)} свежих статей")
 
     return articles
 
 def load_articles_from_sites() -> List[Dict]:
     articles: List[Dict] = []
 
-    # Оставляем ИИ / ML / NLP / Robotics с Хабра
+    # ИИ / ML / NLP / Robotics с Хабра
     articles.extend(load_rss(
         "https://habr.com/ru/rss/hub/artificial_intelligence/all/?fl=ru",
         "Habr AI"
@@ -397,26 +432,20 @@ def load_articles_from_sites() -> List[Dict]:
         "Habr Robotics"
     ))
 
-    # Добавляем кибербезопасность / инциденты
-    # SecurityNews (рус)[web:24]
+    # Киберновости (как источник громких историй, но не каждый день)[web:25][web:56][web:59]
     articles.extend(load_rss("https://secnews.ru/rss/", "SecurityNews"))
-
-    # 0day/кибер-агрегаторы (через 0dayfans / CyberAlerts можно будет при желании докрутить)[web:25]
     articles.extend(load_rss("https://cyberalerts.io/rss/latest-public", "CyberAlerts"))
 
-    # Обобщённый англоязычный киберфид (OPML из GitHub — здесь выбираем, например, The DFIR Report)[web:30]
-    articles.extend(load_rss("https://thedfirreport.com/feed/", "DFIR Report"))
-
-    # Общая наука/техника, но часто пишут про утечки/атаки
-    articles.extend(load_rss("https://hightech.fm/feed", "Хайтек"))
-    articles.extend(load_rss("https://nplus1.ru/rss", "N+1"))
+    # Громкие tech/AI новости в целом[web:52][web:60]
+    articles.extend(load_rss("https://www.reuters.com/technology/artificial-intelligence/rss", "Reuters AI"))
+    articles.extend(load_rss("https://futurism.com/categories/ai-artificial-intelligence/feed", "Futurism AI"))
 
     return articles
 
 def filter_articles(articles: List[Dict]) -> List[Dict]:
     sensational = []
-    ai_articles = []
-    tech_articles = []
+    security = []
+    general = []
 
     for e in articles:
         text = f"{e['title']} {e['summary']}".lower()
@@ -424,29 +453,27 @@ def filter_articles(articles: List[Dict]) -> List[Dict]:
         if any(kw in text for kw in EXCLUDE_KEYWORDS):
             continue
 
-        # Сенсационные / скандальные новости
-        if any(kw in text for kw in SENSATIONAL_KEYWORDS):
-            e["post_type"] = "sensational"
-            sensational.append(e)
-            continue
-
-        # Остальное — как раньше
         source = e.get("source", "")
-        if source in ["SecurityNews", "CyberAlerts", "DFIR Report"]:
-            e["post_type"] = "security"
-        else:
-            e["post_type"] = "it"
 
-        if any(kw in text for kw in AI_KEYWORDS):
-            ai_articles.append(e)
-        elif any(kw in text for kw in TECH_KEYWORDS):
-            tech_articles.append(e)
+        is_security_source = source in ["SecurityNews", "CyberAlerts"]
+        is_sensational = any(kw in text for kw in SENSATIONAL_KEYWORDS)
+
+        if is_sensational:
+            e["post_type"] = "sensational"
+            if is_security_source:
+                security.append(e)
+            else:
+                sensational.append(e)
+        else:
+            e["post_type"] = "security" if is_security_source else "it"
+            general.append(e)
 
     sensational.sort(key=lambda x: x["published_parsed"], reverse=True)
-    ai_articles.sort(key=lambda x: x["published_parsed"], reverse=True)
-    tech_articles.sort(key=lambda x: x["published_parsed"], reverse=True)
+    security.sort(key=lambda x: x["published_parsed"], reverse=True)
+    general.sort(key=lambda x: x["published_parsed"], reverse=True)
 
-    return sensational + ai_articles + tech_articles
+    # Возвращаем: громкие не‑security, потом громкие security (но дальше ограничим частотой), потом остальные
+    return sensational + security + general
 
 # ============ ГЕНЕРАЦИЯ ТЕКСТА ============
 
@@ -464,18 +491,18 @@ def build_dynamic_prompt(title: str, summary: str, style: dict, structure: str) 
         "hook_features_conclusion": """
 Структура:
 1. КРАТКО СУТЬ — что случилось и в чём новизна/жесть.
-2. КАК РАБОТАЕТ — 2–3 конкретных механизма или приёма (как взломали/защитились/что поменяли).
+2. КАК РАБОТАЕТ — 2–3 конкретных механизма или приёма (как это реализовано/сломали/починили).
 3. ВЫВОД — отдельным последним предложением: чем это грозит или помогает обычным пользователям/разрабам.
 """,
         "problem_solution": """
 Структура:
-1. ПРОБЛЕМА — какую конкретную дыру или риск нашли.
-2. РЕШЕНИЕ — какие технические меры, патчи, костыли или хаки используют.
+1. ПРОБЛЕМА — какую конкретную дыру, риск или боль закрывают.
+2. РЕШЕНИЕ — какие технические меры, архитектура или хаки используют.
 3. ЭФФЕКТ — отдельным последним предложением: что это меняет и за чем теперь стоит следить.
 """,
         "straight_news": """
 Структура:
-1. ФАКТ — что произошло без рекламы (утечка, атака, новый баг, новый инструмент).
+1. ФАКТ — что произошло без рекламы (запуск, фейл, баг, утечка, релиз).
 2. ТЕХДЕТАЛИ — 2–3 ключевых технических особенности или приёма.
 3. КОНТЕКСТ — отдельным последним предложением: почему это важно и кто может пострадать/выиграть.
 """
@@ -490,19 +517,17 @@ def build_dynamic_prompt(title: str, summary: str, style: dict, structure: str) 
 {structure_instructions.get(structure, structure_instructions['straight_news'])}
 
 ТРЕБОВАНИЯ:
-• Напиши один связный абзац длиной 500–800 символов.
+• Один связный абзац 500–800 символов.
 • Язык: только русский.
-• Обязательно упомяни 2–3 конкретных технических приёма или механизма.
-• Последнее предложение должно быть явным выводом или вопросом к читателю.
-• Текст ОБЯЗАН заканчиваться точкой, восклицательным или вопросительным знаком.
-• 0–2 эмодзи, только по делу.
-• Нельзя писать общие фразы без пояснения «как именно».
-• Пиши по фактам из новости, без выдумки и без рекламного тона.
+• Упомяни 2–3 конкретных технических приёма или механизма.
+• Последнее предложение — вывод или вопрос к читателю.
+• Текст ОБЯЗАН заканчиваться . ! или ?.
+• 0–2 эмодзи по делу.
+• Без выдумки и рекламного тона.
 
 ЗАПРЕЩЕНО:
-• Рекламные формулировки без технического объяснения.
-• Клише: «позволяет сосредоточиться на своих задачах», «делает бизнес устойчивее» и т.п.
-• Продажный тон, призывы попробовать или купить.
+• Рекламные формулировки и клише типа «делает бизнес устойчивее».
+• Продажный тон, призывы купить/попробовать.
 • Обрывать текст на середине предложения.
 
 ВЫДАЙ ТОЛЬКО ТЕКСТ ПОСТА, без хештегов и ссылок.
@@ -522,10 +547,6 @@ def validate_generated_text(text: str) -> tuple[bool, str]:
         return False, "Незакрытые скобки"
     if text.count('«') != text.count('»'):
         return False, "Незакрытые кавычки"
-    sentences = re.split(r'[.!?]', text)
-    sentences = [s.strip() for s in sentences if s.strip()]
-    if sentences and len(sentences[-1]) < 10:
-        pass
     return True, "OK"
 
 
@@ -549,7 +570,7 @@ def short_summary(title: str, summary: str, link: str) -> Optional[str]:
                         "content": (
                             "Ты — автор новостного Telegram-канала про ИИ и технологии. "
                             "Пишешь по фактам, с упором на механизмы и подходы, без рекламного тона. "
-                            "ВАЖНО: всегда заканчивай текст полным предложением с точкой, восклицательным или вопросительным знаком."
+                            "ВСЕГДА заканчивай текст полным предложением с точкой, восклицательным или вопросительным знаком."
                         )
                     },
                     {"role": "user", "content": prompt}
@@ -674,7 +695,7 @@ async def autopost():
     candidates = filter_articles(articles)
 
     if not candidates:
-        print("❌ Нет подходящих новостей про ИИ/технологии.")
+        print("❌ Нет подходящих свежих новостей.")
         return
 
     ai_count = sum(1 for a in candidates if any(
@@ -684,27 +705,34 @@ async def autopost():
     print(f"📊 Найдено: {len(candidates)} статей ({ai_count} про ИИ)")
 
     last_type = load_last_post_type()
+    last_security_ts = load_last_security_ts()
+    now_ts = datetime.now().timestamp()
+    security_allowed = (
+        last_security_ts is None or (now_ts - last_security_ts) >= 7 * 86400
+    )
+
     posted_count = 0
     max_posts = 1
 
     # Разделяем по типам
-    sensational_candidates = [c for c in candidates if c.get("post_type") == "sensational"]
-    security_candidates = [c for c in candidates if c.get("post_type") == "security"]
-    it_candidates = [c for c in candidates if c.get("post_type") == "it"]
+    sensational_candidates = [c for c in candidates if c.get("post_type") == "sensational" and c.get("source") not in ["SecurityNews", "CyberAlerts"]]
+    security_candidates = [c for c in candidates if c.get("source") in ["SecurityNews", "CyberAlerts"]]
+    other_candidates = [c for c in candidates if c not in sensational_candidates and c not in security_candidates]
 
     def pick_next_article() -> Optional[Dict]:
         nonlocal last_type
-        # Приоритет: сначала сенсации, затем security, затем обычное it
-        if last_type != "sensational" and sensational_candidates:
-            return sensational_candidates.pop(0)
-        if last_type != "security" and security_candidates:
-            return security_candidates.pop(0)
-        if it_candidates:
-            return it_candidates.pop(0)
-        if security_candidates:
-            return security_candidates.pop(0)
+        # 1) Громкие не‑security новости — всегда приоритет
         if sensational_candidates:
             return sensational_candidates.pop(0)
+
+        # 2) Security — только если прошла неделя
+        if security_allowed and security_candidates:
+            return security_candidates.pop(0)
+
+        # 3) Остальные интересные ИИ/техно‑новости
+        if other_candidates:
+            return other_candidates.pop(0)
+
         return None
 
     while posted_count < max_posts:
@@ -712,7 +740,7 @@ async def autopost():
         if not art:
             break
 
-        print(f"\n🔍 Обработка: {art['title'][:60]}... [{art['source']}] (type={art.get('post_type')})")
+        print(f"\n🔍 Обработка: {art['title'][:60]}... [{art['source']}]")
 
         post_text = short_summary(art["title"], art["summary"], art["link"])
 
@@ -734,6 +762,10 @@ async def autopost():
 
             save_posted(art["id"])
             posted_count += 1
+
+            if art.get("source") in ["SecurityNews", "CyberAlerts"]:
+                save_last_security_ts()
+
             last_type = art.get("post_type", "it")
             save_last_post_type(last_type)
             print(f"✅ Опубликовано: {art['source']} (type={last_type})")
@@ -756,6 +788,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

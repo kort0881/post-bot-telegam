@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://www.ixbt.com/news/2026/01/08/a-class-mercedes-benz.html",
-    "timestamp": 1767874983.521365
-  },
-  {
     "id": "https://www.ixbt.com/news/2026/01/08/mast-upgrade-950.html",
     "timestamp": 1767885346.751158
   },
@@ -134,5 +130,9 @@
   {
     "id": "https://thedfirreport.com/2025/03/31/fake-zoom-ends-in-blacksuit-ransomware/",
     "timestamp": 1768479740.039107
+  },
+  {
+    "id": "https://thedfirreport.com/2025/04/28/navigating-through-the-fog/",
+    "timestamp": 1768490122.995974
   }
 ]

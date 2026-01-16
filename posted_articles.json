@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://www.ixbt.com/news/2026/01/09/asus-bios-asus-x870-b850-64-rom-wi-fi.html",
-    "timestamp": 1767961343.284554
-  },
-  {
-    "id": "https://www.ixbt.com/news/2026/01/09/honor-71-50.html",
-    "timestamp": 1767971575.313927
-  },
-  {
     "id": "https://servernews.ru/1055771/",
     "timestamp": 1767982681.433213
   },
@@ -134,5 +126,9 @@
   {
     "id": "https://habr.com/ru/articles/985856/?utm_campaign=985856&utm_source=habrahabr&utm_medium=rss",
     "timestamp": 1768566125.463934
+  },
+  {
+    "id": "https://habr.com/ru/articles/985450/?utm_campaign=985450&utm_source=habrahabr&utm_medium=rss",
+    "timestamp": 1768576447.477067
   }
 ]

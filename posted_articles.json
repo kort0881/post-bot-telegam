@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://servernews.ru/1056763/",
-    "timestamp": 1768025779.636828
-  },
-  {
     "id": "https://servernews.ru/1062357/",
     "timestamp": 1768047564.768024
   },
@@ -134,5 +130,9 @@
   {
     "id": "https://habr.com/ru/articles/984186/?utm_campaign=984186&utm_source=habrahabr&utm_medium=rss",
     "timestamp": 1768630624.673302
+  },
+  {
+    "id": "https://futurism.com/artificial-intelligence/matthew-mcconaughey-ai-copyright",
+    "timestamp": 1768652334.137931
   }
 ]

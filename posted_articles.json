@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://servernews.ru/1062357/",
-    "timestamp": 1768047564.768024
-  },
-  {
     "id": "https://www.ixbt.com/news/2026/01/10/lenovo-apu-ryzen-ai-400-am5-ryzen-9000g.html",
     "timestamp": 1768057825.680078
   },
@@ -134,5 +130,9 @@
   {
     "id": "https://futurism.com/artificial-intelligence/matthew-mcconaughey-ai-copyright",
     "timestamp": 1768652334.137931
+  },
+  {
+    "id": "https://futurism.com/artificial-intelligence/ai-data-centers-electric-grid-meltdown",
+    "timestamp": 1768662680.933649
   }
 ]

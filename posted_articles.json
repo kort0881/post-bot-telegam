@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://www.ixbt.com/news/2026/01/10/lenovo-apu-ryzen-ai-400-am5-ryzen-9000g.html",
-    "timestamp": 1768057825.680078
-  },
-  {
     "id": "https://www.ixbt.com/news/2026/01/10/geforce-rtx-5060-ti-ssd.html",
     "timestamp": 1768069029.016105
   },
@@ -134,5 +130,9 @@
   {
     "id": "https://futurism.com/artificial-intelligence/ai-data-centers-electric-grid-meltdown",
     "timestamp": 1768662680.933649
+  },
+  {
+    "id": "https://futurism.com/artificial-intelligence/ai-schools-kids-study",
+    "timestamp": 1768673720.60045
   }
 ]

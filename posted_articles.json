@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://www.ixbt.com/news/2026/01/10/geforce-rtx-5060-ti-ssd.html",
-    "timestamp": 1768069029.016105
-  },
-  {
     "id": "https://www.ixbt.com/news/2026/01/11/jac-t9-2025-39-ram-16.html",
     "timestamp": 1768112215.894561
   },
@@ -134,5 +130,9 @@
   {
     "id": "https://futurism.com/artificial-intelligence/ai-schools-kids-study",
     "timestamp": 1768673720.60045
+  },
+  {
+    "id": "https://habr.com/ru/articles/986180/?utm_campaign=986180&utm_source=habrahabr&utm_medium=rss",
+    "timestamp": 1768717265.249465
   }
 ]

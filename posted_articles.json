@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://servernews.ru/1111538/",
-    "timestamp": 1768241926.800211
-  },
-  {
-    "id": "https://www.ixbt.com/news/2026/01/13/falcon-9-spacex-starlink-25.html",
-    "timestamp": 1768285185.442821
-  },
-  {
     "id": "https://servernews.ru/1119821/",
     "timestamp": 1768307066.216778
   },
@@ -134,5 +126,9 @@
   {
     "id": "https://habr.com/ru/articles/986722/?utm_campaign=986722&utm_source=habrahabr&utm_medium=rss",
     "timestamp": 1768846640.971158
+  },
+  {
+    "id": "https://habr.com/ru/articles/986804/?utm_campaign=986804&utm_source=habrahabr&utm_medium=rss",
+    "timestamp": 1768890240.501733
   }
 ]

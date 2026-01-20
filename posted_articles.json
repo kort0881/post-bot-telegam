@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://servernews.ru/1119821/",
-    "timestamp": 1768307066.216778
-  },
-  {
-    "id": "https://www.ixbt.com/news/2026/01/13/exynos-2600-samsung-galaxy-s26-cpu-gpu-gpu-snapdragon-8-elite-gen-5.html",
-    "timestamp": 1768317463.139849
-  },
-  {
     "id": "https://www.ixbt.com/news/2026/01/13/sobstvennyj-servernyj-processor-apple-budet-gotov-uzhe-v-jetom-godu.html",
     "timestamp": 1768328622.910221
   },
@@ -134,5 +126,9 @@
   {
     "id": "https://futurism.com/artificial-intelligence/experts-concerned-ai-progress-wall",
     "timestamp": 1768911863.099259
+  },
+  {
+    "id": "https://habr.com/ru/articles/987076/?utm_campaign=987076&utm_source=habrahabr&utm_medium=rss",
+    "timestamp": 1768922419.653054
   }
 ]

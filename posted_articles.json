@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://servernews.ru/1112405/",
-    "timestamp": 1768393353.541737
-  },
-  {
     "id": "https://servernews.ru/1133180/",
     "timestamp": 1768403816.041659
   },
@@ -130,5 +126,9 @@
   {
     "id": "https://habr.com/ru/articles/987250/?utm_campaign=987250&utm_source=habrahabr&utm_medium=rss",
     "timestamp": 1768976425.504586
+  },
+  {
+    "id": "https://habr.com/ru/articles/987440/?utm_campaign=987440&utm_source=habrahabr&utm_medium=rss",
+    "timestamp": 1768998246.503846
   }
 ]

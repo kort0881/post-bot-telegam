@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://www.ixbt.com/news/2026/01/13/sobstvennyj-servernyj-processor-apple-budet-gotov-uzhe-v-jetom-godu.html",
-    "timestamp": 1768328622.910221
-  },
-  {
-    "id": "https://servernews.ru/1098188/",
-    "timestamp": 1768371544.988689
-  },
-  {
     "id": "https://servernews.ru/1112405/",
     "timestamp": 1768393353.541737
   },
@@ -134,5 +126,9 @@
   {
     "id": "https://habr.com/ru/articles/986828/?utm_campaign=986828&utm_source=habrahabr&utm_medium=rss",
     "timestamp": 1768933239.837018
+  },
+  {
+    "id": "https://habr.com/ru/articles/987250/?utm_campaign=987250&utm_source=habrahabr&utm_medium=rss",
+    "timestamp": 1768976425.504586
   }
 ]

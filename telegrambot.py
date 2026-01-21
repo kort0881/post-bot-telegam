@@ -40,11 +40,22 @@ HEADERS = {
 
 POSTED_FILE = "posted_articles.json"
 RETENTION_DAYS = 7
-LAST_TYPE_FILE = "last_post_type.json"
+LAST_CATEGORY_FILE = "last_category.json"
 LAST_SECURITY_FILE = "last_security_post.json"
 
-# свежесть новости (в днях)
 MAX_ARTICLE_AGE_DAYS = 3
+
+# ============ КАТЕГОРИИ ИСТОЧНИКОВ ============
+
+SOURCE_CATEGORIES = {
+    "ai": ["Habr AI", "Habr ML", "Habr Neural", "Habr NLP", "Reuters AI", "Futurism AI"],
+    "tech_ru": ["CNews", "ComNews", "3DNews", "iXBT", "Habr News"],
+    "robotics": ["Habr Robotics"],
+    "security": ["SecurityNews", "CyberAlerts"],
+}
+
+# Порядок чередования категорий
+CATEGORY_ROTATION = ["ai", "tech_ru", "ai", "robotics", "ai", "tech_ru", "security"]
 
 # ============ СТИЛИ ПОСТОВ ============
 
@@ -125,25 +136,29 @@ TECH_KEYWORDS = [
     "виртуальная реальность", "дополненная реальность",
     "vr", "ar", "meta quest", "apple vision",
     "электромобиль", "tesla", "электрокар", "батарея",
-    "аккумулятор",
-    "прорыв", "инновация", "технология"
+    "аккумулятор", "прорыв", "инновация", "технология",
+    # Российский IT/телеком
+    "госкорпорация", "микроэлектроника", "полупроводники",
+    "импортозамещение", "отечественный процессор", "байкал", "эльбрус",
+    "сотовый оператор", "мтс", "билайн", "мегафон", "теле2", "ростелеком",
+    "тариф", "безлимит", "роуминг", "5g", "lte",
+    "роскомнадзор", "блокировка", "vpn", "замедление",
+    "яндекс", "сбер", "vk", "mail.ru", "ozon", "wildberries",
+    "цод", "дата-центр", "облако", "saas",
+    "триллион", "миллиард рублей", "госфинансирование",
 ]
 
-# Сенсационные/скандальные события
 SENSATIONAL_KEYWORDS = [
-    "взлом", "взломали", "утечка", "утекли данные", "datas leak", "утечкой данных",
+    "взлом", "взломали", "утечка", "утекли данные", "data leak", "утечкой данных",
     "ransomware", "выкуп", "шантаж", "зашифровал", "шифровальщик",
     "атака", "кибератака", "ddos", "фишинг", "эксплойт", "эксплуатация уязвимости",
     "уязвимость", "0-day", "нулевого дня", "чувствительные данные",
     "breach", "leak", "data breach", "hack", "was hacked",
     "vulnerability", "exploit", "bug bounty", "bugbounty",
     "security incident", "security flaw",
-    "verizon", "sos режим", "sos mode",
-    "rtx 5090 leak", "nvidia leak"
 ]
 
 EXCLUDE_KEYWORDS = [
-    # финансы/рынок/политика/спорт/кино/крипта/суды — как раньше
     "акции", "акция", "биржа", "котировки", "индекс",
     "инвестиции", "инвестор", "инвесторы", "дивиденды",
     "ipo", "капитализация", "рыночная стоимость",
@@ -237,22 +252,30 @@ def save_posted(article_id: str) -> None:
     posted_articles[article_id] = datetime.now().timestamp()
     save_posted_articles()
 
-def load_last_post_type() -> Optional[str]:
-    if not os.path.exists(LAST_TYPE_FILE):
-        return None
-    try:
-        with open(LAST_TYPE_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data.get("type")
-    except Exception:
-        return None
+# ============ CATEGORY ROTATION ============
 
-def save_last_post_type(post_type: str) -> None:
+def load_last_category() -> Dict:
+    if not os.path.exists(LAST_CATEGORY_FILE):
+        return {"category": None, "index": 0}
     try:
-        with open(LAST_TYPE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"type": post_type}, f, ensure_ascii=False, indent=2)
+        with open(LAST_CATEGORY_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"category": None, "index": 0}
+
+def save_last_category(category: str, index: int) -> None:
+    try:
+        with open(LAST_CATEGORY_FILE, "w", encoding="utf-8") as f:
+            json.dump({"category": category, "index": index}, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+
+def get_next_category() -> str:
+    """Получить следующую категорию по ротации"""
+    data = load_last_category()
+    last_index = data.get("index", 0)
+    next_index = (last_index + 1) % len(CATEGORY_ROTATION)
+    return CATEGORY_ROTATION[next_index], next_index
 
 def load_last_security_ts() -> Optional[float]:
     if not os.path.exists(LAST_SECURITY_FILE):
@@ -276,6 +299,13 @@ def save_last_security_ts() -> None:
 def clean_text(text: str) -> str:
     return " ".join(text.replace("\n", " ").replace("\r", " ").split())
 
+def get_article_category(source: str) -> str:
+    """Определить категорию статьи по источнику"""
+    for category, sources in SOURCE_CATEGORIES.items():
+        if source in sources:
+            return category
+    return "tech_ru"  # default
+
 def detect_topic(title: str, summary: str) -> str:
     text = f"{title} {summary}".lower()
 
@@ -291,6 +321,10 @@ def detect_topic(title: str, summary: str) -> str:
         return "hardware"
     elif any(kw in text for kw in ["нейросет", "neural", "ии", "ai", "искусственный интеллект"]):
         return "ai"
+    elif any(kw in text for kw in ["оператор", "тариф", "телеком", "ростелеком", "мтс", "билайн"]):
+        return "telecom"
+    elif any(kw in text for kw in ["госкорпорация", "импортозамещение", "микроэлектроника"]):
+        return "ru_tech"
     else:
         return "tech"
 
@@ -298,16 +332,16 @@ def get_hashtags(topic: str) -> str:
     hashtag_map = {
         "llm": "#ChatGPT #LLM #нейросети",
         "image_gen": "#AI #генерация #нейросети",
-        "robotics": "#роботы #технологии #безопасность",
+        "robotics": "#роботы #технологии #будущее",
         "space": "#космос #SpaceX #технологии",
         "hardware": "#железо #GPU #технологии",
         "ai": "#AI #нейросети #технологии",
         "tech": "#технологии #новинки #гаджеты",
-        "sensational": "#кибербезопасность #утечка #атака"
+        "telecom": "#телеком #связь #операторы",
+        "ru_tech": "#импортозамещение #технологии #Россия",
+        "sensational": "#кибербезопасность #утечка #взлом"
     }
     return hashtag_map.get(topic, "#технологии #новости")
-
-# ===== обрезка текста по предложениям =====
 
 def ensure_complete_sentence(text: str) -> str:
     text = text.strip()
@@ -380,14 +414,12 @@ def load_rss(url: str, source: str) -> List[Dict]:
         if not link or link in posted_articles:
             continue
 
-        # дата из RSS
         pub_dt = now
         if hasattr(entry, "published_parsed") and entry.published_parsed:
             pub_dt = datetime(*entry.published_parsed[:6])
         elif hasattr(entry, "updated_parsed") and entry.updated_parsed:
             pub_dt = datetime(*entry.updated_parsed[:6])
 
-        # только свежие новости
         if now - pub_dt > max_age:
             continue
 
@@ -399,7 +431,8 @@ def load_rss(url: str, source: str) -> List[Dict]:
             )[:700],
             "link": link,
             "source": source,
-            "published_parsed": pub_dt
+            "published_parsed": pub_dt,
+            "category": get_article_category(source)
         })
 
     if articles:
@@ -410,7 +443,7 @@ def load_rss(url: str, source: str) -> List[Dict]:
 def load_articles_from_sites() -> List[Dict]:
     articles: List[Dict] = []
 
-    # ИИ / ML / NLP / Robotics с Хабра
+    # AI / ML / NLP с Хабра
     articles.extend(load_rss(
         "https://habr.com/ru/rss/hub/artificial_intelligence/all/?fl=ru",
         "Habr AI"
@@ -432,20 +465,43 @@ def load_articles_from_sites() -> List[Dict]:
         "Habr Robotics"
     ))
 
-    # Киберновости (как источник громких историй, но не каждый день)[web:25][web:56][web:59]
+    # Хабр новости
+    articles.extend(load_rss(
+        "https://habr.com/ru/rss/news/?fl=ru",
+        "Habr News"
+    ))
+
+    # Российские IT/телеком
+    articles.extend(load_rss("https://www.cnews.ru/inc/rss/news.xml", "CNews"))
+    articles.extend(load_rss("https://3dnews.ru/news/rss/", "3DNews"))
+    articles.extend(load_rss("https://www.ixbt.com/export/news.rss", "iXBT"))
+    articles.extend(load_rss("https://www.comnews.ru/rss", "ComNews"))
+
+    # Кибербезопасность
     articles.extend(load_rss("https://secnews.ru/rss/", "SecurityNews"))
     articles.extend(load_rss("https://cyberalerts.io/rss/latest-public", "CyberAlerts"))
 
-    # Громкие tech/AI новости в целом[web:52][web:60]
-    articles.extend(load_rss("https://www.reuters.com/technology/artificial-intelligence/rss", "Reuters AI"))
-    articles.extend(load_rss("https://futurism.com/categories/ai-artificial-intelligence/feed", "Futurism AI"))
+    # Зарубежные AI
+    articles.extend(load_rss(
+        "https://www.reuters.com/technology/artificial-intelligence/rss",
+        "Reuters AI"
+    ))
+    articles.extend(load_rss(
+        "https://futurism.com/categories/ai-artificial-intelligence/feed",
+        "Futurism AI"
+    ))
 
     return articles
 
-def filter_articles(articles: List[Dict]) -> List[Dict]:
-    sensational = []
-    security = []
-    general = []
+def filter_articles(articles: List[Dict]) -> Dict[str, List[Dict]]:
+    """Фильтрует и группирует статьи по категориям"""
+    categorized = {
+        "ai": [],
+        "tech_ru": [],
+        "robotics": [],
+        "security": [],
+        "sensational": []
+    }
 
     for e in articles:
         text = f"{e['title']} {e['summary']}".lower()
@@ -453,27 +509,30 @@ def filter_articles(articles: List[Dict]) -> List[Dict]:
         if any(kw in text for kw in EXCLUDE_KEYWORDS):
             continue
 
-        source = e.get("source", "")
-
-        is_security_source = source in ["SecurityNews", "CyberAlerts"]
+        # Проверка на сенсационные новости (приоритет)
         is_sensational = any(kw in text for kw in SENSATIONAL_KEYWORDS)
-
+        
         if is_sensational:
-            e["post_type"] = "sensational"
-            if is_security_source:
-                security.append(e)
-            else:
-                sensational.append(e)
+            categorized["sensational"].append(e)
+            continue
+
+        category = e.get("category", "tech_ru")
+        
+        # Дополнительная проверка по ключевым словам
+        if any(kw in text for kw in AI_KEYWORDS):
+            category = "ai"
+        
+        if category in categorized:
+            categorized[category].append(e)
         else:
-            e["post_type"] = "security" if is_security_source else "it"
-            general.append(e)
+            categorized["tech_ru"].append(e)
 
-    sensational.sort(key=lambda x: x["published_parsed"], reverse=True)
-    security.sort(key=lambda x: x["published_parsed"], reverse=True)
-    general.sort(key=lambda x: x["published_parsed"], reverse=True)
+    # Сортируем каждую категорию по дате
+    for cat in categorized:
+        categorized[cat].sort(key=lambda x: x["published_parsed"], reverse=True)
+        print(f"📂 {cat}: {len(categorized[cat])} статей")
 
-    # Возвращаем: громкие не‑security, потом громкие security (но дальше ограничим частотой), потом остальные
-    return sensational + security + general
+    return categorized
 
 # ============ ГЕНЕРАЦИЯ ТЕКСТА ============
 
@@ -692,88 +751,94 @@ async def autopost():
     clean_old_posts()
     print("🔄 Загрузка статей...")
     articles = load_articles_from_sites()
-    candidates = filter_articles(articles)
+    categorized = filter_articles(articles)
 
-    if not candidates:
+    total = sum(len(v) for v in categorized.values())
+    if total == 0:
         print("❌ Нет подходящих свежих новостей.")
         return
 
-    ai_count = sum(1 for a in candidates if any(
-        kw in f"{a['title']} {a['summary']}".lower()
-        for kw in AI_KEYWORDS
-    ))
-    print(f"📊 Найдено: {len(candidates)} статей ({ai_count} про ИИ)")
+    print(f"📊 Всего статей после фильтрации: {total}")
 
-    last_type = load_last_post_type()
+    # Проверяем сенсационные новости — они идут вне очереди
     last_security_ts = load_last_security_ts()
     now_ts = datetime.now().timestamp()
-    security_allowed = (
-        last_security_ts is None or (now_ts - last_security_ts) >= 7 * 86400
-    )
+    security_cooldown = 7 * 86400  # неделя
 
     posted_count = 0
     max_posts = 1
 
-    # Разделяем по типам
-    sensational_candidates = [c for c in candidates if c.get("post_type") == "sensational" and c.get("source") not in ["SecurityNews", "CyberAlerts"]]
-    security_candidates = [c for c in candidates if c.get("source") in ["SecurityNews", "CyberAlerts"]]
-    other_candidates = [c for c in candidates if c not in sensational_candidates and c not in security_candidates]
+    # 1) Сначала проверяем сенсационные (вне ротации)
+    if categorized["sensational"]:
+        art = categorized["sensational"][0]
+        is_security_source = art.get("source") in ["SecurityNews", "CyberAlerts"]
+        
+        # Security новости — только раз в неделю
+        if is_security_source and last_security_ts and (now_ts - last_security_ts) < security_cooldown:
+            print(f"⏳ Security новость пропущена (cooldown)")
+        else:
+            print(f"\n🚨 СЕНСАЦИЯ: {art['title'][:60]}... [{art['source']}]")
+            
+            post_text = short_summary(art["title"], art["summary"], art["link"])
+            if post_text:
+                img = generate_image(art["title"])
+                try:
+                    if img:
+                        await bot.send_photo(CHANNEL_ID, photo=FSInputFile(img), caption=post_text)
+                    else:
+                        await bot.send_message(CHANNEL_ID, text=post_text)
+                    
+                    save_posted(art["id"])
+                    posted_count += 1
+                    
+                    if is_security_source:
+                        save_last_security_ts()
+                    
+                    print(f"✅ Опубликована сенсация: {art['source']}")
+                except Exception as e:
+                    print(f"❌ Ошибка отправки: {e}")
+                finally:
+                    cleanup_image(img)
 
-    def pick_next_article() -> Optional[Dict]:
-        nonlocal last_type
-        # 1) Громкие не‑security новости — всегда приоритет
-        if sensational_candidates:
-            return sensational_candidates.pop(0)
+    # 2) Если сенсаций нет или не опубликовали — работаем по ротации
+    if posted_count == 0:
+        next_category, next_index = get_next_category()
+        print(f"\n🔄 Ротация: следующая категория — {next_category}")
 
-        # 2) Security — только если прошла неделя
-        if security_allowed and security_candidates:
-            return security_candidates.pop(0)
+        # Ищем статью в нужной категории
+        candidates = categorized.get(next_category, [])
+        
+        # Если в категории пусто — ищем в других
+        if not candidates:
+            print(f"  ⚠️ Категория {next_category} пуста, ищем альтернативу...")
+            for fallback_cat in ["ai", "tech_ru", "robotics"]:
+                if categorized.get(fallback_cat):
+                    candidates = categorized[fallback_cat]
+                    next_category = fallback_cat
+                    print(f"  ↪️ Используем {fallback_cat}")
+                    break
 
-        # 3) Остальные интересные ИИ/техно‑новости
-        if other_candidates:
-            return other_candidates.pop(0)
+        if candidates:
+            art = candidates[0]
+            print(f"\n🔍 Обработка: {art['title'][:60]}... [{art['source']}]")
 
-        return None
+            post_text = short_summary(art["title"], art["summary"], art["link"])
+            if post_text:
+                img = generate_image(art["title"])
+                try:
+                    if img:
+                        await bot.send_photo(CHANNEL_ID, photo=FSInputFile(img), caption=post_text)
+                    else:
+                        await bot.send_message(CHANNEL_ID, text=post_text)
 
-    while posted_count < max_posts:
-        art = pick_next_article()
-        if not art:
-            break
-
-        print(f"\n🔍 Обработка: {art['title'][:60]}... [{art['source']}]")
-
-        post_text = short_summary(art["title"], art["summary"], art["link"])
-
-        if not post_text:
-            print("  ⚠️ Не удалось сгенерировать текст, пробуем следующую")
-            continue
-
-        img = generate_image(art["title"])
-
-        try:
-            if img:
-                await bot.send_photo(
-                    CHANNEL_ID,
-                    photo=FSInputFile(img),
-                    caption=post_text
-                )
-            else:
-                await bot.send_message(CHANNEL_ID, text=post_text)
-
-            save_posted(art["id"])
-            posted_count += 1
-
-            if art.get("source") in ["SecurityNews", "CyberAlerts"]:
-                save_last_security_ts()
-
-            last_type = art.get("post_type", "it")
-            save_last_post_type(last_type)
-            print(f"✅ Опубликовано: {art['source']} (type={last_type})")
-
-        except Exception as e:
-            print(f"❌ Ошибка отправки в Telegram: {e}")
-        finally:
-            cleanup_image(img)
+                    save_posted(art["id"])
+                    save_last_category(next_category, next_index)
+                    posted_count += 1
+                    print(f"✅ Опубликовано [{next_category}]: {art['source']}")
+                except Exception as e:
+                    print(f"❌ Ошибка отправки: {e}")
+                finally:
+                    cleanup_image(img)
 
     if posted_count == 0:
         print("⚠️ Не удалось опубликовать ни одного поста")
@@ -788,6 +853,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

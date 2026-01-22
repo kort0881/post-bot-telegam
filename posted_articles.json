@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://thedfirreport.com/2025/04/28/navigating-through-the-fog/",
-    "timestamp": 1768490122.995974
-  },
-  {
     "id": "https://futurism.com/artificial-intelligence/meta-ai-glasses-desert-aliens",
     "timestamp": 1768501358.423053
   },
@@ -126,5 +122,9 @@
   {
     "id": "https://www.cnews.ru/news/line/2026-01-22_infowatch_atakuyushchie_rossijskuyu",
     "timestamp": 1769084655.056398
+  },
+  {
+    "id": "https://3dnews.ru/1135685",
+    "timestamp": 1769095189.591081
   }
 ]

@@ -4,6 +4,7 @@ import asyncio
 import random
 import re
 import time
+import hashlib
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 
@@ -39,7 +40,8 @@ HEADERS = {
 }
 
 POSTED_FILE = "posted_articles.json"
-RETENTION_DAYS = 7
+FAILED_FILE = "failed_attempts.json"
+RETENTION_DAYS = 30  # Увеличено с 7 до 30 дней
 LAST_CATEGORY_FILE = "last_category.json"
 LAST_SECURITY_FILE = "last_security_post.json"
 
@@ -187,34 +189,92 @@ def is_source_promotional(title: str, summary: str) -> bool:
 
 # ============ STATE ============
 
-posted_articles: Dict[str, Optional[float]] = {}
+posted_articles: Dict[str, Dict] = {}
+failed_attempts: Dict[str, int] = {}
 
+# ============ НОВЫЕ ФУНКЦИИ ДЛЯ ДЕДУПЛИКАЦИИ ============
+
+def get_content_hash(title: str, summary: str) -> str:
+    """Создает хеш на основе содержимого, а не URL"""
+    content = f"{title.lower().strip()} {summary.lower().strip()}"
+    # Убираем пунктуацию для лучшего сравнения
+    content = re.sub(r'[^\w\s]', '', content)
+    return hashlib.md5(content.encode('utf-8')).hexdigest()
+
+def is_already_posted(link: str, title: str, summary: str) -> bool:
+    """Проверяет дубликаты по URL И содержимому"""
+    # Проверка по URL
+    if link in posted_articles:
+        return True
+    
+    # Проверка по содержимому
+    content_hash = get_content_hash(title, summary)
+    for info in posted_articles.values():
+        if info.get("content_hash") == content_hash:
+            return True
+    
+    return False
+
+# Загрузка данных
 if os.path.exists(POSTED_FILE):
     with open(POSTED_FILE, "r", encoding="utf-8") as f:
         try:
             posted_data = json.load(f)
-            posted_articles = {item["id"]: item.get("timestamp") for item in posted_data}
+            posted_articles = {
+                item["id"]: {
+                    "timestamp": item.get("timestamp"),
+                    "content_hash": item.get("content_hash", "")
+                } 
+                for item in posted_data
+            }
         except Exception:
             posted_articles = {}
 
+if os.path.exists(FAILED_FILE):
+    with open(FAILED_FILE, "r", encoding="utf-8") as f:
+        try:
+            failed_attempts = json.load(f)
+        except Exception:
+            failed_attempts = {}
+
 def save_posted_articles() -> None:
-    data = [{"id": id_str, "timestamp": ts} for id_str, ts in posted_articles.items()]
+    data = [
+        {
+            "id": id_str, 
+            "timestamp": info["timestamp"],
+            "content_hash": info["content_hash"]
+        } 
+        for id_str, info in posted_articles.items()
+    ]
     with open(POSTED_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+def save_failed_attempts() -> None:
+    with open(FAILED_FILE, "w", encoding="utf-8") as f:
+        json.dump(failed_attempts, f, ensure_ascii=False, indent=2)
 
 def clean_old_posts() -> None:
     global posted_articles
     now = datetime.now().timestamp()
     cutoff = now - (RETENTION_DAYS * 86400)
     posted_articles = {
-        id_str: ts for id_str, ts in posted_articles.items()
-        if ts is None or ts > cutoff
+        id_str: info for id_str, info in posted_articles.items()
+        if info.get("timestamp") is None or info.get("timestamp") > cutoff
     }
     save_posted_articles()
 
-def save_posted(article_id: str) -> None:
-    posted_articles[article_id] = datetime.now().timestamp()
+def save_posted(article_id: str, title: str, summary: str) -> None:
+    """Сохраняет статью с хешем содержимого"""
+    posted_articles[article_id] = {
+        "timestamp": datetime.now().timestamp(),
+        "content_hash": get_content_hash(title, summary)
+    }
     save_posted_articles()
+
+def mark_as_failed(article_id: str) -> None:
+    """Помечает статью как неудачную, чтобы не пробовать снова"""
+    failed_attempts[article_id] = failed_attempts.get(article_id, 0) + 1
+    save_failed_attempts()
 
 # ============ CATEGORY ROTATION ============
 
@@ -386,7 +446,18 @@ def load_rss(url: str, source: str) -> List[Dict]:
 
     for entry in feed.entries[:50]:
         link = entry.get("link", "")
-        if not link or link in posted_articles:
+        title = clean_text(entry.get("title") or "")
+        summary = clean_text(entry.get("summary") or entry.get("description") or "")[:1000]
+        
+        if not link:
+            continue
+        
+        # Проверка на дубликаты по URL и содержимому
+        if is_already_posted(link, title, summary):
+            continue
+        
+        # Проверка на неудачные попытки
+        if link in failed_attempts and failed_attempts[link] >= 3:
             continue
 
         pub_dt = now
@@ -400,8 +471,8 @@ def load_rss(url: str, source: str) -> List[Dict]:
 
         articles.append({
             "id": link,
-            "title": clean_text(entry.get("title") or ""),
-            "summary": clean_text(entry.get("summary") or entry.get("description") or "")[:1000],
+            "title": title,
+            "summary": summary,
             "link": link,
             "source": source,
             "published_parsed": pub_dt,
@@ -532,6 +603,7 @@ def build_prompt(title: str, summary: str, style: dict, structure: str) -> str:
 • Добавь интересные детали
 • Закончи выводом или вопросом
 • Текст ДОЛЖЕН заканчиваться на . или ! или ?
+• Будь максимально оригинальным в изложении
 
 ЗАПРЕЩЕНО:
 • Любые призывы к покупке, заказу, скачиванию
@@ -539,6 +611,7 @@ def build_prompt(title: str, summary: str, style: dict, structure: str) -> str:
 • Цены и стоимость
 • Рекламный тон
 • Ссылки и хештеги
+• Повторение фраз и структур
 
 Напиши ТОЛЬКО текст поста:
 """
@@ -561,14 +634,17 @@ def generate_post_text(title: str, summary: str, link: str) -> Optional[str]:
                         "role": "system",
                         "content": (
                             "Ты — автор Telegram-канала о технологиях. "
-                            "Пишешь информативные посты без рекламы. "
-                            "Всегда заканчиваешь текст полным предложением."
+                            "Пишешь информативные, оригинальные посты без рекламы. "
+                            "Всегда заканчиваешь текст полным предложением. "
+                            "Каждый пост должен быть уникальным и не похожим на предыдущие."
                         )
                     },
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
+                temperature=0.9,  # Увеличено для большего разнообразия
                 max_tokens=700,
+                frequency_penalty=0.3,  # Штраф за частые повторения
+                presence_penalty=0.6,   # Штраф за любые повторения
             )
             
             text = response.choices[0].message.content.strip()
@@ -685,6 +761,7 @@ async def autopost():
         post_text = generate_post_text(art["title"], art["summary"], art["link"])
         if not post_text:
             print("  ⏭️ Пропускаем, пробуем следующую...")
+            mark_as_failed(art["id"])
             continue
         
         img = generate_image(art["title"])
@@ -695,7 +772,7 @@ async def autopost():
             else:
                 await bot.send_message(CHANNEL_ID, text=post_text)
             
-            save_posted(art["id"])
+            save_posted(art["id"], art["title"], art["summary"])
             if is_security:
                 save_last_security_ts()
             
@@ -705,6 +782,7 @@ async def autopost():
             
         except Exception as e:
             print(f"❌ Ошибка: {e}")
+            mark_as_failed(art["id"])
         finally:
             cleanup_image(img)
 
@@ -730,6 +808,7 @@ async def autopost():
             post_text = generate_post_text(art["title"], art["summary"], art["link"])
             if not post_text:
                 print("  ⏭️ Пропускаем, пробуем следующую...")
+                mark_as_failed(art["id"])
                 continue
             
             img = generate_image(art["title"])
@@ -740,7 +819,7 @@ async def autopost():
                 else:
                     await bot.send_message(CHANNEL_ID, text=post_text)
                 
-                save_posted(art["id"])
+                save_posted(art["id"], art["title"], art["summary"])
                 save_last_category(next_cat, next_idx)
                 
                 print(f"✅ Опубликовано!")
@@ -749,6 +828,7 @@ async def autopost():
                 
             except Exception as e:
                 print(f"❌ Ошибка: {e}")
+                mark_as_failed(art["id"])
             finally:
                 cleanup_image(img)
 
@@ -765,6 +845,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

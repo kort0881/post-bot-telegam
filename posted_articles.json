@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://thedfirreport.com/2025/03/31/fake-zoom-ends-in-blacksuit-ransomware/",
-    "timestamp": 1768479740.039107
-  },
-  {
     "id": "https://thedfirreport.com/2025/04/28/navigating-through-the-fog/",
     "timestamp": 1768490122.995974
   },
@@ -126,5 +122,9 @@
   {
     "id": "https://habr.com/ru/news/987616/?utm_source=habrahabr&utm_medium=rss&utm_campaign=987616",
     "timestamp": 1769062769.238716
+  },
+  {
+    "id": "https://www.cnews.ru/news/line/2026-01-22_infowatch_atakuyushchie_rossijskuyu",
+    "timestamp": 1769084655.056398
   }
 ]

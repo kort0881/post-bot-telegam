@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://servernews.ru/1128170/",
-    "timestamp": 1768457924.722376
-  },
-  {
     "id": "https://thedfirreport.com/2025/03/31/fake-zoom-ends-in-blacksuit-ransomware/",
     "timestamp": 1768479740.039107
   },
@@ -126,5 +122,9 @@
   {
     "id": "https://habr.com/ru/articles/987518/?utm_campaign=987518&utm_source=habrahabr&utm_medium=rss",
     "timestamp": 1769008794.961522
+  },
+  {
+    "id": "https://habr.com/ru/news/987616/?utm_source=habrahabr&utm_medium=rss&utm_campaign=987616",
+    "timestamp": 1769062769.238716
   }
 ]

@@ -18,17 +18,15 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # === НАСТРОЙКА COPILOT SDK ===
-      - name: Set up Node.js (for Copilot CLI)
+      # Настройка Node.js для установки Copilot CLI
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      # Установка Copilot CLI (нужен для SDK)
       - name: Install Copilot CLI
-        run: |
-          npm install -g @github/copilot-cli
-          # Или @github/copilot, если CLI переименовали, но в SDK обычно этот
-      # =============================
+        run: npm install -g @github/copilot-cli
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -45,10 +43,9 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-          # Включаем SDK
+          # Включаем SDK и передаем ваш токен
           USE_COPILOT_SDK: "true"
-          # Токен для SDK (нужен PAT с правами Copilot)
-          GH_TOKEN: ${{ secrets.GH_COPILOT_TOKEN }} 
+          GH_TOKEN: ${{ secrets.GH_COPILOT_TOKEN }}
         run: python telegrambot.py
 
       - name: Commit state
@@ -57,6 +54,7 @@ jobs:
           git config --local user.name "GitHub Action"
           git add cache_tech/
           git diff --quiet && git diff --staged --quiet || (git commit -m "Update state [skip ci]" && git push)
+
 
 
 

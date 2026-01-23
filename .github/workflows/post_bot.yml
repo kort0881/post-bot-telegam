@@ -2,11 +2,12 @@ name: Telegram AI Tech Bot
 
 on:
   schedule:
+    # Запуск в 6, 9, 12, 15, 18 часов (UTC)
     - cron: '0 6,9,12,15,18 * * *'
-  workflow_dispatch:
+  workflow_dispatch: # Кнопка для ручного запуска
 
 permissions:
-  contents: write
+  contents: write # Нужно для сохранения истории (чтобы не было дублей)
 
 jobs:
   post_news:
@@ -18,30 +19,25 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Убрали проблемный блок с Node.js и npm install @github/copilot-cli
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
 
       - name: Install dependencies
-        # Добавили continue-on-error, чтобы если SDK не найдется в pip, бот не упал
-        continue-on-error: true
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt || echo "⚠️ Не удалось установить все зависимости (возможно нет SDK)"
+          pip install -r requirements.txt
 
       - name: Run AI Bot
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-          # Оставляем включенным, код сам разберется, есть SDK или нет
-          USE_COPILOT_SDK: "true"
-          GH_TOKEN: ${{ secrets.GH_COPILOT_TOKEN }}
         run: python telegrambot.py
 
+      # Этот шаг сохраняет файл cache_tech/state_ai_final.json обратно в GitHub,
+      # чтобы бот помнил, что он уже запостил.
       - name: Commit state
         run: |
           git config --local user.email "action@github.com"

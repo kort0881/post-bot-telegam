@@ -20,7 +20,6 @@ from openai import OpenAI
 
 # ============ COPILOT SDK SETUP ============
 try:
-    # Пытаемся импортировать SDK, как в первом репозитории
     from github_copilot_sdk import CopilotClient
     COPILOT_SDK_AVAILABLE = True
     print("✅ GitHub Copilot SDK найден")
@@ -33,7 +32,7 @@ except ImportError:
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
-# Включаем SDK, если он доступен и разрешен в настройках
+# Включаем SDK только если он доступен и разрешен
 USE_COPILOT_SDK = os.getenv("USE_COPILOT_SDK", "false").lower() == "true" and COPILOT_SDK_AVAILABLE
 
 if not all([OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, CHANNEL_ID]):
@@ -88,7 +87,7 @@ RSS_SOURCES = [
 
 CATEGORY_ROTATION = ["ai", "tech_ru", "ai", "robotics", "ai", "tech_ru", "security"]
 
-# ============ СТИЛИ ПОСТОВ (AI/TECH) ============
+# ============ СТИЛИ ПОСТОВ ============
 
 POST_STYLES = [
     {
@@ -111,7 +110,7 @@ POST_STYLES = [
     }
 ]
 
-# ============ КЛЮЧЕВЫЕ СЛОВА ============
+# ============ КЛЮЧЕВЫЕ СЛОВА И ФИЛЬТРЫ ============
 
 AI_KEYWORDS = [
     "нейросет", "ии", "ai", "gpt", "gemini", "claude", "llama",
@@ -161,7 +160,7 @@ class State:
             try:
                 with open(STATE_FILE, "r", encoding="utf-8") as f:
                     loaded = json.load(f)
-                    if "posted_ids" in loaded: # Миграция
+                    if "posted_ids" in loaded: # Миграция со старого формата
                         self.data["url_hashes"] = {k: v.get("ts", 0) for k, v in loaded["posted_ids"].items()}
                     else:
                         self.data.update(loaded)
@@ -191,7 +190,7 @@ class State:
         ts = datetime.now().timestamp()
         self.data["content_hashes"][self.calculate_content_hash(title, summary)] = ts
         self.data["url_hashes"][self.calculate_url_hash(url)] = ts
-        self.save() # Сохраняем сразу
+        self.save()
     
     def cleanup_old(self):
         cutoff = datetime.now().timestamp() - (RETENTION_DAYS * 86400)
@@ -208,7 +207,7 @@ class State:
 
 state = State()
 
-# ============ PARSING ============
+# ============ HELPERS ============
 
 def clean_text(text: str) -> str:
     if not text: return ""
@@ -253,6 +252,22 @@ def build_final_post(text: str, link: str, topic: str) -> str:
         
     return text + cta + "\n\n" + hashtags + source
 
+def is_source_promotional(title: str, summary: str) -> bool:
+    text = f"{title} {summary}".lower()
+    for pattern in SOURCE_PROMO_PATTERNS:
+        if re.search(pattern, text):
+            return True
+    return False
+
+def is_excluded(title: str, summary: str) -> bool:
+    text = f"{title} {summary}".lower()
+    for kw in EXCLUDE_KEYWORDS:
+        if kw in text:
+            return True
+    return False
+
+# ============ PARSING ============
+
 def fetch_full_article(url: str) -> Optional[str]:
     try:
         resp = requests.get(url, headers=HEADERS, timeout=15)
@@ -291,7 +306,7 @@ def load_rss(source: Dict) -> List[Dict]:
         if now - pub_date > timedelta(days=MAX_ARTICLE_AGE_DAYS): continue
         
         # === ФИЛЬТРЫ ===
-        if any(kw in f"{title} {summary}".lower() for kw in EXCLUDE_KEYWORDS): continue
+        if is_excluded(title, summary): continue
         if is_source_promotional(title, summary): continue
         
         articles.append({
@@ -331,7 +346,6 @@ async def generate_post_with_copilot_sdk(article: Dict, style: Dict) -> Optional
 - Не обрывай текст
 - Используй не более 3 эмодзи: {style['emojis']}
 """
-        # Создаем сессию через SDK
         session = copilot_client.create_session(
             system="Ты — лучший техно-блогер Telegram.",
             temperature=0.7,
@@ -425,11 +439,14 @@ async def autopost():
         elif art["category"] in cats: cats[art["category"]].append(art)
         else: cats["tech_ru"].append(art)
 
-    # Выбор
+    # Выбор кандидата
     target = "sensational" if cats["sensational"] else state.get_next_category()
     candidates = cats.get(target, []) or cats["ai"] or cats["tech_ru"]
     
-    if not candidates: return
+    if not candidates: 
+        print("❌ Нет подходящих статей после фильтрации")
+        return
+        
     candidates.sort(key=lambda x: x["published"], reverse=True)
 
     for article in candidates[:5]:
@@ -438,7 +455,6 @@ async def autopost():
         
         style = random.choice(POST_STYLES)
         
-        # Пробуем SDK, если не вышло -> OpenAI
         post_text = None
         if USE_COPILOT_SDK:
             post_text = await generate_post_with_copilot_sdk(article, style)
@@ -467,6 +483,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

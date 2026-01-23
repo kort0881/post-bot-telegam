@@ -1,25 +1,34 @@
-name: Telegram Post Bot
+name: Telegram AI Tech Bot
 
 on:
   schedule:
-    - cron: '0 6,12,15,18 * * *'  # 09:00, 15:00, 18:00, 21:00 по Москве (UTC+3)
+    - cron: '0 6,9,12,15,18 * * *'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  post:
+  post_news:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
     steps:
       - uses: actions/checkout@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Show current time
+      # === НАСТРОЙКА COPILOT SDK ===
+      - name: Set up Node.js (for Copilot CLI)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Copilot CLI
         run: |
-          echo "UTC Time: $(date -u '+%Y-%m-%d %H:%M:%S')"
-          echo "MSK Time: $(TZ='Europe/Moscow' date '+%Y-%m-%d %H:%M:%S')"
+          npm install -g @github/copilot-cli
+          # Или @github/copilot, если CLI переименовали, но в SDK обычно этот
+      # =============================
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -31,20 +40,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run bot
+      - name: Run AI Bot
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+          # Включаем SDK
+          USE_COPILOT_SDK: "true"
+          # Токен для SDK (нужен PAT с правами Copilot)
+          GH_TOKEN: ${{ secrets.GH_COPILOT_TOKEN }} 
         run: python telegrambot.py
-      
-      - name: Commit posted articles
+
+      - name: Commit state
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add posted_articles.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "Update posted articles [skip ci]"
-          git push
+          git add cache_tech/
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update state [skip ci]" && git push)
 
 
 

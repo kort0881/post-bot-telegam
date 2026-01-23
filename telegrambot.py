@@ -26,7 +26,8 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
 if not all([OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, CHANNEL_ID]):
-    print("⚠️ ПРЕДУПРЕЖДЕНИЕ: Не все переменные окружения заданы!")
+    # Если запуск локальный без ENV, можно не падать сразу, но в Actions это важно
+    print("⚠️ ВНИМАНИЕ: Не найдены ключи доступа!")
 
 bot = Bot(
     token=TELEGRAM_BOT_TOKEN,
@@ -39,7 +40,7 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
-CACHE_DIR = os.getenv("CACHE_DIR", "cache_tech")
+CACHE_DIR = "cache_tech"
 os.makedirs(CACHE_DIR, exist_ok=True)
 STATE_FILE = os.path.join(CACHE_DIR, "state_ai_final.json")
 
@@ -117,25 +118,27 @@ def clean_text(text: str) -> str:
 def force_complete_sentence(text: str) -> str:
     if not text: return ""
     if text[-1] in ".!?": return text
+    
+    # Ищем последнюю точку или знак препинания
     cut_pos = max(text.rfind('.'), text.rfind('!'), text.rfind('?'))
-    if cut_pos > len(text) * 0.7:
-        return text[:cut_pos+1]
-    return text.strip() + "."
+    
+    # Если обрезать приходится слишком много (больше 30% текста теряется), лучше просто добавить точку
+    if cut_pos < len(text) * 0.7:
+        return text.strip() + "."
+        
+    return text[:cut_pos+1]
 
 def build_final_post(text: str, link: str) -> str:
-    # 1. Экранируем текст (чтобы не ломался HTML телеграма)
     text = html.escape(text)
     text = force_complete_sentence(text)
     
-    # 2. Формируем подпись
     cta = "\n\n🔥 — круто | 👾 — жутко"
-    # ВОТ ТУТ МЕНЯЕМ НА "Источник"
+    # Ссылка-источник
     source = f'\n🔗 <a href="{link}">Источник</a>'
     tags = "\n\n#AI #Tech #Нейросети"
     
     full_len = len(text) + len(cta) + len(source) + len(tags)
     
-    # Если не влезает - обрезаем
     if full_len > TELEGRAM_CAPTION_LIMIT:
         available = TELEGRAM_CAPTION_LIMIT - len(cta) - len(source) - len(tags) - 50
         text = text[:available] + "..."
@@ -172,12 +175,12 @@ def load_rss(source: Dict) -> List[Dict]:
         if not title or not link: continue
         if state.is_duplicate(title, link): continue
         
-        # Фильтры стоп-слов
-        bad_words = ["взлом", "хакер", "мошенни", "цб рф", "курс валют"]
+        # Фильтры
+        bad_words = ["взлом", "хакер", "мошенни", "цб рф", "курс валют", "дивиденд"]
         if any(w in (title + summary).lower() for w in bad_words): continue
 
         if source["category"] == "tech_ru":
-            ai_words = ["ai", "ии", "gpt", "нейросет", "nvidia"]
+            ai_words = ["ai", "ии", "gpt", "нейросет", "nvidia", "робот", "машинн"]
             if not any(w in (title + summary).lower() for w in ai_words): continue
 
         pub_date = now
@@ -206,8 +209,8 @@ async def generate_post(article: Dict) -> Optional[str]:
     
     Задача:
     1. Напиши краткий пост (макс 700 символов).
-    2. Стиль: энергичный, для гиков.
-    3. Без Markdown заголовков.
+    2. Стиль: энергичный, для гиков, без "воды".
+    3. Без Markdown жирного шрифта (**), просто текст.
     4. Язык: Русский.
     """
     
@@ -226,9 +229,6 @@ async def generate_post(article: Dict) -> Optional[str]:
 # ============ ГЕНЕРАЦИЯ КАРТИНОК ============
 
 def generate_image(title: str) -> Optional[str]:
-    """
-    Генерирует картинку через Pollinations.
-    """
     # Чистим заголовок от спецсимволов для URL
     clean_title = re.sub(r'[^a-zA-Z0-9]', ' ', title)[:50]
     prompt = f"futuristic ai concept art {clean_title} cyberpunk neon glowing 8k render"
@@ -240,13 +240,12 @@ def generate_image(title: str) -> Optional[str]:
     try:
         resp = requests.get(url, timeout=30)
         
-        # Проверяем, что вернулась картинка, а не текст ошибки
         if resp.status_code == 200 and len(resp.content) > 10000:
             fname = f"img_{int(time.time())}.jpg"
             with open(fname, "wb") as f: f.write(resp.content)
             return fname
         else:
-            print("   ⚠️ Картинка не сгенерировалась или файл слишком мал.")
+            print("   ⚠️ Картинка не сгенерировалась.")
     except Exception as e:
         print(f"   ❌ Ошибка загрузки картинки: {e}")
     

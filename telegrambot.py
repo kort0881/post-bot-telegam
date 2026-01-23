@@ -6,7 +6,7 @@ import re
 import time
 import hashlib
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 
 import requests
 import feedparser
@@ -18,20 +18,23 @@ from aiogram.enums import ParseMode
 from aiogram.types import FSInputFile
 from openai import OpenAI
 
-# Попытка импортировать Copilot SDK
+# ============ COPILOT SDK SETUP ============
 try:
+    # Пытаемся импортировать SDK, как в первом репозитории
     from github_copilot_sdk import CopilotClient
     COPILOT_SDK_AVAILABLE = True
+    print("✅ GitHub Copilot SDK найден")
 except ImportError:
     COPILOT_SDK_AVAILABLE = False
-    print("⚠️ GitHub Copilot SDK не установлен, используется стандартный OpenAI API")
+    print("⚠️ GitHub Copilot SDK не найден (работаем через OpenAI API)")
 
 # ============ CONFIG ============
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
-USE_COPILOT_SDK = os.getenv("USE_COPILOT_SDK", "false").lower() == "true"
+# Включаем SDK, если он доступен и разрешен в настройках
+USE_COPILOT_SDK = os.getenv("USE_COPILOT_SDK", "false").lower() == "true" and COPILOT_SDK_AVAILABLE
 
 if not all([OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, CHANNEL_ID]):
     raise ValueError("❌ Не все ENV переменные установлены!")
@@ -42,14 +45,15 @@ bot = Bot(
 )
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Инициализация Copilot SDK
+# Инициализация Copilot Client
 copilot_client = None
-if COPILOT_SDK_AVAILABLE and USE_COPILOT_SDK:
+if USE_COPILOT_SDK:
     try:
         copilot_client = CopilotClient()
-        print("✅ GitHub Copilot SDK инициализирован")
+        print("🤖 Copilot Client инициализирован")
     except Exception as e:
-        print(f"⚠️ Не удалось инициализировать Copilot SDK: {e}")
+        print(f"❌ Ошибка инициализации Copilot: {e}")
+        USE_COPILOT_SDK = False
 
 HEADERS = {
     "User-Agent": (
@@ -60,14 +64,13 @@ HEADERS = {
 
 CACHE_DIR = os.getenv("CACHE_DIR", "cache_tech")
 os.makedirs(CACHE_DIR, exist_ok=True)
-STATE_FILE = os.path.join(CACHE_DIR, "state_v2.json") # Новая версия файла состояния
-FAILED_FILE = os.path.join(CACHE_DIR, "failed_attempts.json")
+STATE_FILE = os.path.join(CACHE_DIR, "state_v2.json")
 
-RETENTION_DAYS = 60 # Храним историю 2 месяца, чтобы наверняка не повторять
-MAX_ARTICLE_AGE_DAYS = 2 # Берем только совсем свежие новости (было 3)
+RETENTION_DAYS = 60
+MAX_ARTICLE_AGE_DAYS = 2
 TELEGRAM_CAPTION_LIMIT = 1024
 
-# ============ КАТЕГОРИИ ИСТОЧНИКОВ ============
+# ============ ИСТОЧНИКИ ============
 
 RSS_SOURCES = [
     {"name": "Habr AI", "url": "https://habr.com/ru/rss/hub/artificial_intelligence/all/?fl=ru", "category": "ai"},
@@ -81,35 +84,34 @@ RSS_SOURCES = [
     {"name": "ComNews", "url": "https://www.comnews.ru/rss", "category": "tech_ru"},
     {"name": "Habr Robotics", "url": "https://habr.com/ru/rss/hub/robotics/all/?fl=ru", "category": "robotics"},
     {"name": "SecurityNews", "url": "https://secnews.ru/rss/", "category": "security"},
-    {"name": "CyberAlerts", "url": "https://cyberalerts.io/rss/latest-public", "category": "security"},
 ]
 
 CATEGORY_ROTATION = ["ai", "tech_ru", "ai", "robotics", "ai", "tech_ru", "security"]
 
-# ============ СТИЛИ ПОСТОВ ============
+# ============ СТИЛИ ПОСТОВ (AI/TECH) ============
 
 POST_STYLES = [
     {
         "name": "восторженный_гик",
-        "intro": "Ты — техно-гик. Расскажи о новинке с энтузиазмом.",
-        "tone": "Живой, энергичный",
+        "intro": "Ты — техно-энтузиаст. Рассказываешь о новинке с драйвом.",
+        "tone": "Энергичный, живой",
         "emojis": "🔥🚀💡🤖✨"
     },
     {
         "name": "футурист",
-        "intro": "Ты — футуролог. Объясни, как это изменит будущее.",
+        "intro": "Ты — футуролог. Объясняешь, как это изменит мир.",
         "tone": "Вдохновляющий",
         "emojis": "🌟🔮🚀🌍✨"
     },
     {
-        "name": "скептик",
-        "intro": "Ты — опытный разработчик. Разбери суть без маркетинговой шелухи.",
-        "tone": "Спокойный, по фактам",
-        "emojis": "🧐⚙️📱📊"
+        "name": "практик",
+        "intro": "Ты — IT-специалист. Объясняешь суть четко и по делу.",
+        "tone": "Деловой, конкретный",
+        "emojis": "⚙️✅📱💻"
     }
 ]
 
-# ============ ФИЛЬТРЫ ============
+# ============ КЛЮЧЕВЫЕ СЛОВА ============
 
 AI_KEYWORDS = [
     "нейросет", "ии", "ai", "gpt", "gemini", "claude", "llama",
@@ -142,30 +144,15 @@ SOURCE_PROMO_PATTERNS = [
     r"предзаказ", r"старт продаж", r"где купить"
 ]
 
-def is_source_promotional(title: str, summary: str) -> bool:
-    text = f"{title} {summary}".lower()
-    for pattern in SOURCE_PROMO_PATTERNS:
-        if re.search(pattern, text):
-            return True
-    return False
-
-def is_excluded(title: str, summary: str) -> Tuple[bool, str]:
-    text = f"{title} {summary}".lower()
-    for kw in EXCLUDE_KEYWORDS:
-        if kw in text:
-            return True, f"excluded: {kw}"
-    return False, ""
-
-# ============ УЛУЧШЕННОЕ СОСТОЯНИЕ (ПУЛЕНЕПРОБИВАЕМОЕ) ============
+# ============ STATE MANAGEMENT ============
 
 class State:
     def __init__(self):
         self.data = {
-            "content_hashes": {}, # Хеш (Заголовок+Текст) -> timestamp
-            "url_hashes": {},     # Хеш (URL) -> timestamp
+            "content_hashes": {}, 
+            "url_hashes": {},     
             "source_index": 0,
-            "last_run": None,
-            "failed_attempts": {}
+            "last_run": None
         }
         self._load()
     
@@ -174,14 +161,11 @@ class State:
             try:
                 with open(STATE_FILE, "r", encoding="utf-8") as f:
                     loaded = json.load(f)
-                    # Миграция со старого формата если нужно
-                    if "posted_ids" in loaded:
-                        self.data["url_hashes"] = {k: v["ts"] for k, v in loaded["posted_ids"].items()}
+                    if "posted_ids" in loaded: # Миграция
+                        self.data["url_hashes"] = {k: v.get("ts", 0) for k, v in loaded["posted_ids"].items()}
                     else:
                         self.data.update(loaded)
-                print(f"📂 Загружена история: {len(self.data['content_hashes'])} записей")
-            except Exception as e:
-                print(f"⚠️ Ошибка загрузки состояния: {e}")
+            except: pass
     
     def save(self):
         self.data["last_run"] = datetime.now().isoformat()
@@ -189,43 +173,28 @@ class State:
             with open(STATE_FILE, "w", encoding="utf-8") as f:
                 json.dump(self.data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"❌ КРИТИЧЕСКАЯ ОШИБКА СОХРАНЕНИЯ: {e}")
+            print(f"❌ Ошибка сохранения state: {e}")
     
-    # Генерация хеша только из СМЫСЛА (Заголовок + Текст без знаков препинания)
     def calculate_content_hash(self, title: str, summary: str) -> str:
-        # Убираем все кроме букв и цифр, приводим к нижнему регистру
-        clean_string = re.sub(r'[^\w]', '', f"{title}{summary}").lower()
-        return hashlib.sha256(clean_string.encode()).hexdigest()
+        clean = re.sub(r'[^\w]', '', f"{title}{summary}").lower()
+        return hashlib.sha256(clean.encode()).hexdigest()
 
     def calculate_url_hash(self, url: str) -> str:
         return hashlib.sha256(url.encode()).hexdigest()
 
     def is_duplicate(self, title: str, summary: str, url: str) -> bool:
-        content_h = self.calculate_content_hash(title, summary)
-        url_h = self.calculate_url_hash(url)
-        
-        if content_h in self.data["content_hashes"]:
-            # print(f"  🔒 Дубликат по контенту: {title[:30]}")
-            return True
-            
-        if url_h in self.data["url_hashes"]:
-            # print(f"  🔒 Дубликат по ссылке: {title[:30]}")
-            return True
-            
+        if self.calculate_content_hash(title, summary) in self.data["content_hashes"]: return True
+        if self.calculate_url_hash(url) in self.data["url_hashes"]: return True
         return False
     
     def mark_posted(self, title: str, summary: str, url: str):
-        now_ts = datetime.now().timestamp()
-        content_h = self.calculate_content_hash(title, summary)
-        url_h = self.calculate_url_hash(url)
-        
-        self.data["content_hashes"][content_h] = now_ts
-        self.data["url_hashes"][url_h] = now_ts
-        self.save() # Сохраняем НЕМЕДЛЕННО
+        ts = datetime.now().timestamp()
+        self.data["content_hashes"][self.calculate_content_hash(title, summary)] = ts
+        self.data["url_hashes"][self.calculate_url_hash(url)] = ts
+        self.save() # Сохраняем сразу
     
     def cleanup_old(self):
         cutoff = datetime.now().timestamp() - (RETENTION_DAYS * 86400)
-        # Чистим оба словаря
         self.data["content_hashes"] = {k: v for k, v in self.data["content_hashes"].items() if v > cutoff}
         self.data["url_hashes"] = {k: v for k, v in self.data["url_hashes"].items() if v > cutoff}
         self.save()
@@ -239,7 +208,7 @@ class State:
 
 state = State()
 
-# ============ PARSING & PROCESSING ============
+# ============ PARSING ============
 
 def clean_text(text: str) -> str:
     if not text: return ""
@@ -260,14 +229,14 @@ def detect_topic(title: str, summary: str) -> str:
     return "tech"
 
 def get_hashtags(topic: str) -> str:
-    hashtag_map = {
+    mapping = {
         "ai": "#AI #нейросети #технологии",
         "robotics": "#роботы #технологии #будущее",
         "space": "#космос #технологии",
         "tech": "#технологии #новинки #гаджеты",
         "sensational": "#кибербезопасность #взлом #утечка"
     }
-    return hashtag_map.get(topic, "#технологии")
+    return mapping.get(topic, "#технологии")
 
 def build_final_post(text: str, link: str, topic: str) -> str:
     text = apply_social_disclaimer(text)
@@ -284,18 +253,15 @@ def build_final_post(text: str, link: str, topic: str) -> str:
         
     return text + cta + "\n\n" + hashtags + source
 
-# ============ RSS LOAD ============
-
 def fetch_full_article(url: str) -> Optional[str]:
     try:
         resp = requests.get(url, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
         soup = BeautifulSoup(resp.text, 'html.parser')
         for tag in soup(['script', 'style', 'nav', 'header', 'footer']): tag.decompose()
         content = soup.find('div', class_=re.compile(r'article|content|post|entry'))
         if content: return content.get_text(separator='\n', strip=True)[:4000]
-        return None
-    except: return None
+    except: pass
+    return None
 
 def load_rss(source: Dict) -> List[Dict]:
     articles = []
@@ -306,7 +272,6 @@ def load_rss(source: Dict) -> List[Dict]:
     
     if not feed.entries: return []
     now = datetime.now()
-    max_age = timedelta(days=MAX_ARTICLE_AGE_DAYS)
     
     for entry in feed.entries[:30]:
         title = clean_text(entry.get("title", ""))
@@ -315,22 +280,18 @@ def load_rss(source: Dict) -> List[Dict]:
 
         if not title or not link: continue
         
-        # === КРИТИЧЕСКАЯ ПРОВЕРКА ДУБЛИКАТОВ ===
-        if state.is_duplicate(title, summary, link):
-            continue
+        # === ПРОВЕРКА ДУБЛИКАТОВ ===
+        if state.is_duplicate(title, summary, link): continue
             
-        # Проверка даты
         pub_date = now
         if hasattr(entry, "published_parsed") and entry.published_parsed:
             try: pub_date = datetime(*entry.published_parsed[:6])
             except: pass
         
-        if now - pub_date > max_age:
-            continue
+        if now - pub_date > timedelta(days=MAX_ARTICLE_AGE_DAYS): continue
         
-        # Фильтры
-        excluded, _ = is_excluded(title, summary)
-        if excluded: continue
+        # === ФИЛЬТРЫ ===
+        if any(kw in f"{title} {summary}".lower() for kw in EXCLUDE_KEYWORDS): continue
         if is_source_promotional(title, summary): continue
         
         articles.append({
@@ -341,111 +302,94 @@ def load_rss(source: Dict) -> List[Dict]:
             "category": source["category"],
             "published": pub_date
         })
-    
     return articles
 
 # ============ GENERATION ============
 
 async def generate_post_with_copilot_sdk(article: Dict, style: Dict) -> Optional[str]:
+    """Генерация через SDK (если доступен)"""
     if not copilot_client: return None
     try:
         full_text = fetch_full_article(article["link"])
-        content = full_text[:3000] if full_text else article["summary"]
+        content = full_text[:3500] if full_text else article["summary"]
         
         prompt = f"""
 {style['intro']}
-Тональность: {style['tone']}
+Тон: {style['tone']}
 
-НОВОСТЬ:
-Заголовок: {article['title']}
-Содержание: {content}
+ЗАГОЛОВОК: {article['title']}
+ТЕКСТ: {content}
 
-СТРУКТУРА:
-1. ЗАХВАТ — интригующее начало
-2. СУТЬ — что произошло и детали
-3. ВЫВОД — почему это важно
+ЗАДАЧА:
+Напиши пост для Telegram (600-800 знаков).
+1. ЗАХВАТ ВНИМАНИЯ (без кликбейта)
+2. СУТЬ НОВОСТИ (факты)
+3. ПОЛЬЗА/ВЫВОД (почему это важно)
 
-ОБЯЗАТЕЛЬНО:
-- Пиши СВОИМИ словами, не копируй исходный текст
-- Закончи полным предложением
-- Максимум 3 эмодзи: {style['emojis']}
+ЗАПРЕТЫ:
+- Никакой рекламы и призывов купить
+- Не обрывай текст
+- Используй не более 3 эмодзи: {style['emojis']}
 """
+        # Создаем сессию через SDK
         session = copilot_client.create_session(
-            system="Ты — автор Telegram-канала о технологиях.",
-            temperature=0.8, # Повышаем креативность
-            max_tokens=800
+            system="Ты — лучший техно-блогер Telegram.",
+            temperature=0.7,
+            max_tokens=900
         )
         response = await session.send_message(prompt)
         text = response.text.strip().strip('"')
         
-        if len(text) < 150: return None
+        if len(text) < 100: return None
         return build_final_post(text, article["link"], detect_topic(article["title"], article["summary"]))
-    except: return None
+    except Exception as e:
+        print(f"⚠️ Ошибка SDK: {e}")
+        return None
 
-def generate_post(article: Dict) -> Optional[str]:
-    style = random.choice(POST_STYLES)
-    
-    if copilot_client and USE_COPILOT_SDK:
-        print("  🤖 SDK...")
-        res = asyncio.run(generate_post_with_copilot_sdk(article, style))
-        if res: return res
-    
+def generate_post_openai(article: Dict, style: Dict) -> Optional[str]:
+    """Генерация через обычный OpenAI (Fallback)"""
     full_text = fetch_full_article(article["link"])
-    content = full_text[:3000] if full_text else article["summary"]
+    content = full_text[:3500] if full_text else article["summary"]
     
     prompt = f"""
 {style['intro']}
-Тональность: {style['tone']}
+Тон: {style['tone']}
 
-НОВОСТЬ:
-Заголовок: {article['title']}
-Содержание: {content}
+ЗАГОЛОВОК: {article['title']}
+ТЕКСТ: {content}
 
 ЗАДАЧА:
-Напиши УНИКАЛЬНЫЙ пост об этом событии.
-Не пересказывай сухо, а сделай интересный обзор.
+Напиши пост для Telegram (600-800 знаков).
+Структура: Заголовок-Хук -> Факты -> Вывод.
 
-ТРЕБОВАНИЯ:
-• Объём 600-800 символов
-• Не более 3 эмодзи: {style['emojis']}
-• Закончи мысль
-• Без рекламы
+ЗАПРЕТЫ:
+- Не используй слово "шокирующий"
+- Не рекламируй
+- Используй эмодзи: {style['emojis']}
 """
-    
     try:
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "Ты — креативный автор техно-блога."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.85, # Высокая температура для уникальности
-            max_tokens=800,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.8,
+            max_tokens=900
         )
         text = response.choices[0].message.content.strip().strip('"')
-        if len(text) < 150: return None
+        if len(text) < 100: return None
         return build_final_post(text, article["link"], detect_topic(article["title"], article["summary"]))
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Ошибка OpenAI: {e}")
         return None
 
 # ============ IMAGE ============
 
 def generate_image(title: str) -> Optional[str]:
-    styles = [
-        "cyberpunk style illustration",
-        "futuristic 3d render, neon lighting",
-        "minimalist tech art, blue and violet",
-        "isometric technology concept"
-    ]
-    style = random.choice(styles)
-    clean_title = re.sub(r'["\'\n]', ' ', title)[:50]
-    prompt = f"{style}, {clean_title}, high quality, 4k, no text"
-    
-    url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}?seed={random.randint(0, 10**7)}&width=1024&height=1024&nologo=true"
+    styles = ["cyberpunk", "futuristic 3d render", "neon tech", "isometric ai"]
+    prompt = f"{random.choice(styles)}, {re.sub(r'[^a-zA-Z]', ' ', title)[:50]}, 4k, no text"
+    url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}?seed={random.randint(0,10**7)}&width=1024&height=1024&nologo=true"
     
     try:
-        resp = requests.get(url, timeout=60, headers=HEADERS)
+        resp = requests.get(url, timeout=40, headers=HEADERS)
         if resp.status_code == 200 and len(resp.content) > 10000:
             fname = f"img_{int(time.time())}.jpg"
             with open(fname, "wb") as f: f.write(resp.content)
@@ -460,64 +404,57 @@ def cleanup_image(path):
 
 async def autopost():
     state.cleanup_old()
-    print("🧠 Загрузка новостей...")
+    print("🧠 [TechBot] Старт...")
     
+    if USE_COPILOT_SDK: print("🤖 Режим: Copilot SDK")
+    else: print("🔧 Режим: OpenAI Fallback")
+
     all_articles = []
     for source in RSS_SOURCES:
         all_articles.extend(load_rss(source))
     
     if not all_articles:
-        print("❌ Нет новых (не опубликованных ранее) статей")
+        print("❌ Нет новых статей")
         return
 
-    # Фильтрация по категориям
-    categorized = {"sensational": [], "ai": [], "robotics": [], "tech_ru": [], "security": []}
-    
+    # Категоризация
+    cats = {"sensational": [], "ai": [], "robotics": [], "tech_ru": [], "security": []}
     for art in all_articles:
         topic = detect_topic(art["title"], art["summary"])
-        if topic == "sensational": categorized["sensational"].append(art)
-        elif art["category"] in categorized: categorized[art["category"]].append(art)
-        else: categorized["tech_ru"].append(art)
+        if topic == "sensational": cats["sensational"].append(art)
+        elif art["category"] in cats: cats[art["category"]].append(art)
+        else: cats["tech_ru"].append(art)
 
-    # Выбор кандидата
-    target_category = "sensational" if categorized["sensational"] else state.get_next_category()
-    candidates = categorized.get(target_category, [])
+    # Выбор
+    target = "sensational" if cats["sensational"] else state.get_next_category()
+    candidates = cats.get(target, []) or cats["ai"] or cats["tech_ru"]
     
-    if not candidates:
-        for cat in ["ai", "tech_ru"]:
-            if categorized[cat]: candidates = categorized[cat]; break
-            
-    if not candidates:
-        print("❌ Нет подходящих статей после фильтрации")
-        return
-
-    # Сортировка свежих вперед
+    if not candidates: return
     candidates.sort(key=lambda x: x["published"], reverse=True)
 
-    print(f"🔄 Выбрана категория: {target_category} (Доступно: {len(candidates)})")
-
-    for article in candidates[:5]: # Пробуем первые 5
+    for article in candidates[:5]:
         print(f"\n📰 {article['title'][:50]}...")
+        if state.is_duplicate(article["title"], article["summary"], article["link"]): continue
         
-        # ПОВТОРНАЯ ПРОВЕРКА ДУБЛИКАТОВ ПЕРЕД ГЕНЕРАЦИЕЙ
-        if state.is_duplicate(article["title"], article["summary"], article["link"]):
-            print("  🔒 Найден дубликат в базе (race condition check)")
-            continue
-
-        post_text = generate_post(article)
+        style = random.choice(POST_STYLES)
+        
+        # Пробуем SDK, если не вышло -> OpenAI
+        post_text = None
+        if USE_COPILOT_SDK:
+            post_text = await generate_post_with_copilot_sdk(article, style)
+        
+        if not post_text:
+            post_text = generate_post_openai(article, style)
+            
         if not post_text: continue
         
         img = generate_image(article["title"])
-        
         try:
-            if img:
-                await bot.send_photo(CHANNEL_ID, photo=FSInputFile(img), caption=post_text)
-            else:
-                await bot.send_message(CHANNEL_ID, text=post_text)
-                
-            # ВАЖНО: Маркируем как опубликованное СРАЗУ
+            if img: await bot.send_photo(CHANNEL_ID, photo=FSInputFile(img), caption=post_text)
+            else: await bot.send_message(CHANNEL_ID, text=post_text)
+            
             state.mark_posted(article["title"], article["summary"], article["link"])
-            print("✅ Опубликовано!")
+            print("✅ Успех!")
             cleanup_image(img)
             return
         except Exception as e:
@@ -530,6 +467,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

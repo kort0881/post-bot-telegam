@@ -26,14 +26,12 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
 if not all([OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, CHANNEL_ID]):
-    # Если запуск локальный без ENV, можно не падать сразу, но в Actions это важно
-    print("⚠️ ВНИМАНИЕ: Не найдены ключи доступа!")
+    print("⚠️ WARNING: Keys not found!")
 
 bot = Bot(
     token=TELEGRAM_BOT_TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
 )
-
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 HEADERS = {
@@ -42,7 +40,7 @@ HEADERS = {
 
 CACHE_DIR = "cache_tech"
 os.makedirs(CACHE_DIR, exist_ok=True)
-STATE_FILE = os.path.join(CACHE_DIR, "state_ai_final.json")
+STATE_FILE = os.path.join(CACHE_DIR, "state_ai_full.json")
 
 RETENTION_DAYS = 60
 MAX_ARTICLE_AGE_DAYS = 2
@@ -56,11 +54,44 @@ RSS_SOURCES = [
     {"name": "OpenAI Blog", "url": "https://openai.com/blog/rss.xml", "category": "ai"},
     {"name": "TechCrunch AI", "url": "https://techcrunch.com/category/artificial-intelligence/feed/", "category": "ai"},
     {"name": "The Verge AI", "url": "https://www.theverge.com/rss/artificial-intelligence/index.xml", "category": "ai"},
+    # Общие техно-сайты (будем жестко фильтровать)
     {"name": "3DNews", "url": "https://3dnews.ru/news/rss/", "category": "tech_ru"},
     {"name": "iXBT", "url": "https://www.ixbt.com/export/news.rss", "category": "tech_ru"},
 ]
 
 CATEGORY_ROTATION = ["ai", "ai", "tech_ru", "ai"]
+
+# ============ ФИЛЬТРЫ (СТОП-СЛОВА) ============
+
+# Если эти слова есть в заголовке или тексте — СКИПАЕМ
+BLOCK_KEYWORDS = [
+    # Финансы и скука
+    "акции", "дивиденд", "квартальный отчет", "отчетность", "прибыль", 
+    "выручка", "цб рф", "курс валют", "инфляци", "сбер", "газпром", 
+    "назначен", "уволен", "директор",
+    
+    # Спорт и развлечения (не по теме)
+    "футбол", "хоккей", "матч", "спорт", "фильм", "сериал", "кино", 
+    "актер", "звезд", "шоу", "евровидение",
+    
+    # Реклама и продажи
+    "скидк", "распродаж", "выгодн", "покупай", "цена", "цены", 
+    "магазин", "маркетплейс", "wildberries", "ozon",
+    
+    # Политика и криминал
+    "выборы", "политик", "депутат", "закон", "суд", "арест", 
+    "убийств", "мвд", "фсб", "теракт",
+    
+    # Не профильное IT (безопасность оставим для второго бота)
+    "ddos", "фишинг", "хакер", "взлом"
+]
+
+# Обязательные слова для категории "tech_ru"
+AI_KEYWORDS = [
+    "нейросет", "ии", "ai", "gpt", "llm", "diffusion", "genai", 
+    "nvidia", "робот", "deepmind", "openai", "sam altman", "маск",
+    "алгоритм", "machine learning", "интеллект"
+]
 
 # ============ УТИЛИТЫ ============
 
@@ -118,14 +149,9 @@ def clean_text(text: str) -> str:
 def force_complete_sentence(text: str) -> str:
     if not text: return ""
     if text[-1] in ".!?": return text
-    
-    # Ищем последнюю точку или знак препинания
     cut_pos = max(text.rfind('.'), text.rfind('!'), text.rfind('?'))
-    
-    # Если обрезать приходится слишком много (больше 30% текста теряется), лучше просто добавить точку
     if cut_pos < len(text) * 0.7:
         return text.strip() + "."
-        
     return text[:cut_pos+1]
 
 def build_final_post(text: str, link: str) -> str:
@@ -133,9 +159,8 @@ def build_final_post(text: str, link: str) -> str:
     text = force_complete_sentence(text)
     
     cta = "\n\n🔥 — круто | 👾 — жутко"
-    # Ссылка-источник
     source = f'\n🔗 <a href="{link}">Источник</a>'
-    tags = "\n\n#AI #Tech #Нейросети"
+    tags = "\n\n#AI #Tech #Нейросети #Будущее"
     
     full_len = len(text) + len(cta) + len(source) + len(tags)
     
@@ -152,7 +177,6 @@ def fetch_full_article(url: str) -> Optional[str]:
         resp = requests.get(url, headers=HEADERS, timeout=15)
         soup = BeautifulSoup(resp.text, 'html.parser')
         for tag in soup(['script', 'style', 'nav', 'header', 'footer']): tag.decompose()
-        
         content = soup.find('div', class_=re.compile(r'article|post|content'))
         if content: return clean_text(content.get_text())[:3000]
     except: pass
@@ -175,13 +199,16 @@ def load_rss(source: Dict) -> List[Dict]:
         if not title or not link: continue
         if state.is_duplicate(title, link): continue
         
-        # Фильтры
-        bad_words = ["взлом", "хакер", "мошенни", "цб рф", "курс валют", "дивиденд"]
-        if any(w in (title + summary).lower() for w in bad_words): continue
+        full_text_check = (title + " " + summary).lower()
 
+        # 1. Проверка на СТОП-СЛОВА (Футбол, Акции и т.д.)
+        if any(bad in full_text_check for bad in BLOCK_KEYWORDS): 
+            continue
+
+        # 2. Если источник общий (Tech_Ru), ищем обязательные AI слова
         if source["category"] == "tech_ru":
-            ai_words = ["ai", "ии", "gpt", "нейросет", "nvidia", "робот", "машинн"]
-            if not any(w in (title + summary).lower() for w in ai_words): continue
+            if not any(good in full_text_check for good in AI_KEYWORDS):
+                continue
 
         pub_date = now
         if hasattr(entry, "published_parsed") and entry.published_parsed:
@@ -196,29 +223,35 @@ def load_rss(source: Dict) -> List[Dict]:
         })
     return articles
 
-# ============ AI ГЕНЕРАЦИЯ ============
+# ============ AI ГЕНЕРАЦИЯ (ХАЙП СТИЛЬ) ============
 
 async def generate_post(article: Dict) -> Optional[str]:
     full_text = fetch_full_article(article["link"])
     content = full_text if full_text else article["summary"]
     
     prompt = f"""
-    Ты редактор Telegram канала про AI.
+    Ты — популярный техно-блогер.
+    Твоя задача: Написать пост на основе новости, который вызовет ВОСТОРГ.
+    
     Новость: {article['title']}
     Текст: {content[:2000]}
-    
-    Задача:
-    1. Напиши краткий пост (макс 700 символов).
-    2. Стиль: энергичный, для гиков, без "воды".
-    3. Без Markdown жирного шрифта (**), просто текст.
-    4. Язык: Русский.
+
+    ПРИМЕР СТИЛЯ:
+    "🚀 Внимание, гики! SpaceX на пороге крупнейшего IPO... это просто космос! 🔥 Такое событие станет катализатором... Оставайтесь с нами!"
+
+    ТРЕБОВАНИЯ:
+    1. Вступление: Яркое, с эмодзи (🚀, ⚡️), обращение к гикам.
+    2. Суть: Сильные глаголы ("взорвал", "потряс"). Без воды.
+    3. Финал: Вдохновляющий вывод + призыв.
+    4. Объем: до 700 знаков.
+    5. Язык: Русский.
     """
     
     try:
         resp = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
+            temperature=0.7 
         )
         raw_text = resp.choices[0].message.content.strip().replace("**", "")
         return build_final_post(raw_text, article["link"])
@@ -226,10 +259,9 @@ async def generate_post(article: Dict) -> Optional[str]:
         print(f"❌ OpenAI Error: {e}")
         return None
 
-# ============ ГЕНЕРАЦИЯ КАРТИНОК ============
+# ============ КАРТИНКИ ============
 
 def generate_image(title: str) -> Optional[str]:
-    # Чистим заголовок от спецсимволов для URL
     clean_title = re.sub(r'[^a-zA-Z0-9]', ' ', title)[:50]
     prompt = f"futuristic ai concept art {clean_title} cyberpunk neon glowing 8k render"
     
@@ -244,8 +276,6 @@ def generate_image(title: str) -> Optional[str]:
             fname = f"img_{int(time.time())}.jpg"
             with open(fname, "wb") as f: f.write(resp.content)
             return fname
-        else:
-            print("   ⚠️ Картинка не сгенерировалась.")
     except Exception as e:
         print(f"   ❌ Ошибка загрузки картинки: {e}")
     
@@ -260,7 +290,7 @@ def cleanup_image(path):
 
 async def autopost():
     state.cleanup_old()
-    print("\n🚀 [AI Bot] Старт поиска новостей...")
+    print("\n🚀 [AI Hype Bot] Старт...")
     
     all_articles = []
     target_cat = state.get_next_category()
@@ -278,12 +308,11 @@ async def autopost():
             all_articles.extend(load_rss(source))
 
     if not all_articles:
-        print("💤 Вообще нет новостей.")
+        print("💤 Нет подходящих новостей.")
         return
 
     all_articles.sort(key=lambda x: x["published"], reverse=True)
     
-    # Берем топ-1 новость
     for article in all_articles[:5]:
         print(f"\n📝 Обработка: {article['title']}")
         
@@ -294,16 +323,14 @@ async def autopost():
         
         try:
             if img_path:
-                print("   📸 Отправка с фото...")
                 await bot.send_photo(CHANNEL_ID, photo=FSInputFile(img_path), caption=post_text)
             else:
-                print("   📤 Отправка текста...")
                 await bot.send_message(CHANNEL_ID, text=post_text, disable_web_page_preview=False)
             
             state.mark_posted(article["title"], article["link"])
             print("✅ УСПЕХ!")
             cleanup_image(img_path)
-            return # Стоп после 1 поста
+            return 
             
         except Exception as e:
             print(f"❌ Ошибка отправки TG: {e}")
@@ -315,7 +342,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
 
 
 

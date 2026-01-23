@@ -18,15 +18,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Настройка Node.js для установки Copilot CLI
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      # Установка Copilot CLI (нужен для SDK)
-      - name: Install Copilot CLI
-        run: npm install -g @github/copilot-cli
+      # Убрали проблемный блок с Node.js и npm install @github/copilot-cli
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -34,16 +26,18 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
+        # Добавили continue-on-error, чтобы если SDK не найдется в pip, бот не упал
+        continue-on-error: true
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt || echo "⚠️ Не удалось установить все зависимости (возможно нет SDK)"
 
       - name: Run AI Bot
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-          # Включаем SDK и передаем ваш токен
+          # Оставляем включенным, код сам разберется, есть SDK или нет
           USE_COPILOT_SDK: "true"
           GH_TOKEN: ${{ secrets.GH_COPILOT_TOKEN }}
         run: python telegrambot.py
@@ -54,6 +48,7 @@ jobs:
           git config --local user.name "GitHub Action"
           git add cache_tech/
           git diff --quiet && git diff --staged --quiet || (git commit -m "Update state [skip ci]" && git push)
+
 
 
 

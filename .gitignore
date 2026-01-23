@@ -1,8 +1,0 @@
-*.pyc
-__pycache__/
-.env
-*.jpg
-cache_ai_news/
-.DS_Store
-venv/
-env/

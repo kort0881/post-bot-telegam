@@ -2,12 +2,15 @@ name: Telegram AI Tech Bot
 
 on:
   schedule:
-    # Запуск в 6, 9, 12, 15, 18 часов (UTC)
-    - cron: '0 6,9,12,15,18 * * *'
-  workflow_dispatch: # Кнопка для ручного запуска
+    # 06:00 UTC = 09:00 МСК
+    # 12:00 UTC = 15:00 МСК
+    # 15:00 UTC = 18:00 МСК
+    # 18:00 UTC = 21:00 МСК
+    - cron: '0 6,12,15,18 * * *'
+  workflow_dispatch:
 
 permissions:
-  contents: write # Нужно для сохранения истории (чтобы не было дублей)
+  contents: write
 
 jobs:
   post_news:
@@ -36,14 +39,13 @@ jobs:
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
         run: python telegrambot.py
 
-      # Этот шаг сохраняет файл cache_tech/state_ai_final.json обратно в GitHub,
-      # чтобы бот помнил, что он уже запостил.
+      # ВАЖНО: сохраняем файлы posted_articles.json и last_post_type.json
       - name: Commit state
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add cache_tech/
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update state [skip ci]" && git push)
+          git add posted_articles.json last_post_type.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update bot state [skip ci]" && git push)
 
 
 

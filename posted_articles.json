@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://futurism.com/artificial-intelligence/ai-data-centers-electric-grid-meltdown",
-    "timestamp": 1768662680.933649
-  },
-  {
-    "id": "https://futurism.com/artificial-intelligence/ai-schools-kids-study",
-    "timestamp": 1768673720.60045
-  },
-  {
     "id": "https://habr.com/ru/articles/986180/?utm_campaign=986180&utm_source=habrahabr&utm_medium=rss",
     "timestamp": 1768717265.249465
   },
@@ -122,5 +114,9 @@
   {
     "id": "https://www.ixbt.com/news/2026/01/24/zotac-geforce-rtx-5080-geforce-rtx-5090.html",
     "timestamp": 1769267438.758835
+  },
+  {
+    "id": "https://nplus1.ru/news/2026/01/23/depressive-generative",
+    "timestamp": 1769278540.335134
   }
 ]

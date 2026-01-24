@@ -20,10 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://futurism.com/artificial-intelligence/matthew-mcconaughey-ai-copyright",
-    "timestamp": 1768652334.137931
-  },
-  {
     "id": "https://futurism.com/artificial-intelligence/ai-data-centers-electric-grid-meltdown",
     "timestamp": 1768662680.933649
   },
@@ -118,5 +114,9 @@
   {
     "id": "https://www.ixbt.com/news/2026/01/24/na-jetoj-rakete-amerikancy-poletjat-k-lune-jekipazh-orion-gotovy-jevakuirovat-za-minuty-jeto-proverili-v-hode.html",
     "timestamp": 1769251376.428222
+  },
+  {
+    "id": "https://hightech.fm/2026/01/22/telegram-rus-list",
+    "timestamp": 1769257181.516598
   }
 ]

@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://futurism.com/artificial-intelligence/ai-generated-dead",
-    "timestamp": 1768749205.851028
-  },
-  {
-    "id": "https://habr.com/ru/companies/cloud_ru/articles/985610/?utm_campaign=985610&utm_source=habrahabr&utm_medium=rss",
-    "timestamp": 1768760096.172746
-  },
-  {
     "id": "https://habr.com/ru/articles/983276/?utm_campaign=983276&utm_source=habrahabr&utm_medium=rss",
     "timestamp": 1768803814.230892
   },
@@ -122,5 +114,9 @@
   {
     "id": "https://www.ixbt.com/news/2026/01/25/nvidia-turing-rtx-2080-ti-titan-rtx-24-900.html",
     "timestamp": 1769353854.535006
+  },
+  {
+    "id": "https://nplus1.ru/news/2026/01/23/social-networking-during-upper-paleolithic",
+    "timestamp": 1769364939.133234
   }
 ]

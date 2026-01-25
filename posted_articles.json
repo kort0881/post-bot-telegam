@@ -20,14 +20,6 @@
     "timestamp": null
   },
   {
-    "id": "https://habr.com/ru/articles/986180/?utm_campaign=986180&utm_source=habrahabr&utm_medium=rss",
-    "timestamp": 1768717265.249465
-  },
-  {
-    "id": "https://habr.com/ru/articles/986282/?utm_campaign=986282&utm_source=habrahabr&utm_medium=rss",
-    "timestamp": 1768738773.715912
-  },
-  {
     "id": "https://futurism.com/artificial-intelligence/ai-generated-dead",
     "timestamp": 1768749205.851028
   },
@@ -122,5 +114,9 @@
   {
     "id": "https://www.ixbt.com/news/2026/01/25/tomas-jedison-mog-sozdat-grafen-eshjo-v-xix-veke--uchjonye-vosproizveli-jeksperiment-s-lampochkoj.html",
     "timestamp": 1769321849.713469
+  },
+  {
+    "id": "https://hightech.fm/2026/01/24/gdz",
+    "timestamp": 1769343649.709761
   }
 ]

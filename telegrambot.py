@@ -40,10 +40,9 @@ HEADERS = {
 
 POSTED_FILE = "posted_articles.json"
 RETENTION_DAYS = 7
-LAST_TYPE_FILE = "last_post_type.json"
 TELEGRAM_CAPTION_LIMIT = 1024
 
-# ============ КЛЮЧЕВЫЕ СЛОВА ============
+# ============ КЛЮЧЕВЫЕ СЛОВА (ТОЛЬКО AI) ============
 
 AI_KEYWORDS = [
     "нейросеть", "нейросети", "нейронная сеть", "ии", "искусственный интеллект",
@@ -67,24 +66,7 @@ AI_KEYWORDS = [
     "обучение с подкреплением", "rlhf", "промпт", "prompt"
 ]
 
-TECH_KEYWORDS = [
-    "представил", "анонсировал", "выпустил", "релиз", "запустил",
-    "новинка", "дебют", "презентация", "показал", "unveiled",
-    "смартфон", "ноутбук", "гаджет", "девайс", "устройство",
-    "носимая электроника", "умные часы", "наушники",
-    "робот", "робототехника", "дрон", "беспилотник", "автопилот",
-    "автономный", "boston dynamics", "tesla bot",
-    "квантовый", "квантовый компьютер", "процессор", "чип",
-    "gpu", "видеокарта", "nvidia", "amd", "intel", "apple m",
-    "spacex", "starship", "космос", "ракета", "спутник",
-    "starlink", "nasa", "роскосмос",
-    "виртуальная реальность", "дополненная реальность",
-    "vr", "ar", "meta quest", "apple vision",
-    "электромобиль", "tesla", "электрокар", "батарея",
-    "аккумулятор",
-    "прорыв", "инновация", "технология"
-]
-
+# СТОП-СЛОВА (Чтобы не постил про финансы и политику)
 EXCLUDE_KEYWORDS = [
     "акции", "акция", "биржа", "котировки", "индекс",
     "инвестиции", "инвестор", "инвесторы", "дивиденды",
@@ -143,6 +125,7 @@ def is_too_promotional(text: str) -> bool:
     low = text.lower()
     if any(p in low for p in BAD_PHRASES):
         return True
+    # Если слишком много "обеспечивает" без конкретики
     if ("обеспечивает" in low or "позволяет" in low or "предлагает решение" in low) and \
        not any(k in low for k in ["за счёт", "за счет", "используя", "через", "например", "в том числе", "фильтрации", "анализ трафика", "rate limiting", "балансировщик"]):
         return True
@@ -179,23 +162,6 @@ def save_posted(article_id: str) -> None:
     posted_articles[article_id] = datetime.now().timestamp()
     save_posted_articles()
 
-def load_last_post_type() -> Optional[str]:
-    if not os.path.exists(LAST_TYPE_FILE):
-        return None
-    try:
-        with open(LAST_TYPE_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data.get("type")
-    except Exception:
-        return None
-
-def save_last_post_type(post_type: str) -> None:
-    try:
-        with open(LAST_TYPE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"type": post_type}, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
 # ============ HELPERS ============
 
 def clean_text(text: str) -> str:
@@ -217,19 +183,18 @@ def detect_topic(title: str, summary: str) -> str:
     elif any(kw in text for kw in ["нейросет", "neural", "ии", "ai", "искусственный интеллект"]):
         return "ai"
     else:
-        return "tech"
+        return "ai"
 
 def get_hashtags(topic: str) -> str:
     hashtag_map = {
         "llm": "#ChatGPT #LLM #нейросети",
         "image_gen": "#AI #генерация #нейросети",
-        "robotics": "#роботы #технологии #безопасность",
+        "robotics": "#роботы #AI #технологии",
         "space": "#космос #SpaceX #технологии",
         "hardware": "#железо #GPU #технологии",
         "ai": "#AI #нейросети #технологии",
-        "tech": "#технологии #новинки #гаджеты"
     }
-    return hashtag_map.get(topic, "#технологии #новости")
+    return hashtag_map.get(topic, "#AI #нейросети #технологии")
 
 def ensure_complete_sentence(text: str) -> str:
     text = text.strip()
@@ -274,10 +239,6 @@ def build_final_post(core_text: str, hashtags: str, link: str, max_total: int = 
     trimmed_core = trim_core_text_to_limit(core_text, max_core_length)
     
     final = trimmed_core + cta_line + hashtag_line + source_line
-    if len(final) > max_total:
-        overflow = len(final) - max_total
-        trimmed_core = trim_core_text_to_limit(core_text, max_core_length - overflow - 20)
-        final = trimmed_core + cta_line + hashtag_line + source_line
     return final
 
 # ============ PARSERS ============
@@ -316,7 +277,7 @@ def load_articles_from_sites() -> List[Dict]:
     articles.extend(load_rss("https://habr.com/ru/rss/hub/machine_learning/all/?fl=ru", "Habr ML"))
     articles.extend(load_rss("https://habr.com/ru/rss/hub/neural_networks/all/?fl=ru", "Habr Neural"))
     
-    # TECH
+    # TECH (Будет отфильтровано ниже, если нет слов про AI)
     articles.extend(load_rss("https://3dnews.ru/news/rss/", "3DNews"))
     articles.extend(load_rss("https://www.ixbt.com/export/news.rss", "iXBT"))
     articles.extend(load_rss("https://nplus1.ru/rss", "N+1"))
@@ -325,31 +286,22 @@ def load_articles_from_sites() -> List[Dict]:
     return articles
 
 def filter_articles(articles: List[Dict]) -> List[Dict]:
-    ai_articles = []
-    tech_articles = []
+    valid_articles = []
 
     for e in articles:
         text = f"{e['title']} {e['summary']}".lower()
 
-        # ФИЛЬТРАЦИЯ ПО СТОП-СЛОВАМ (БИРЖА, ПОЛИТИКА, СПОРТ)
+        # 1. Сначала проверяем СТОП-СЛОВА
         if any(kw in text for kw in EXCLUDE_KEYWORDS):
             continue
 
-        source = e.get("source", "")
-        if source in ["3DNews", "iXBT", "Overclockers"]:
-            e["post_type"] = "hardware"
-        else:
-            e["post_type"] = "it"
-
+        # 2. Теперь СТРОГАЯ проверка: есть ли в тексте ключевые слова AI?
+        # Если нет - новость не берем, даже если она с хайтек сайта.
         if any(kw in text for kw in AI_KEYWORDS):
-            ai_articles.append(e)
-        elif any(kw in text for kw in TECH_KEYWORDS):
-            tech_articles.append(e)
+            valid_articles.append(e)
 
-    ai_articles.sort(key=lambda x: x["published_parsed"], reverse=True)
-    tech_articles.sort(key=lambda x: x["published_parsed"], reverse=True)
-
-    return ai_articles + tech_articles
+    valid_articles.sort(key=lambda x: x["published_parsed"], reverse=True)
+    return valid_articles
 
 # ============ ГЕНЕРАЦИЯ ТЕКСТА ============
 
@@ -357,50 +309,47 @@ def build_dynamic_prompt(title: str, summary: str) -> str:
     news_text = f"Заголовок: {title}\n\nТекст: {summary}"
 
     prompt = f"""
-Ты — современный техно-блогер.
-Твоя задача: Написать короткий, ёмкий и интересный пост о новости.
+Ты — дружелюбный автор канала "Доступ к интернету" (про нейросети и ИИ).
+Твоя задача: Написать подробный и увлекательный пост.
 
 НОВОСТЬ:
 {news_text}
 
-ТРЕБОВАНИЯ:
-1. ВСТУПЛЕНИЕ: Дружелюбное, но без лишней фамильярности. Например: "Всем привет!", "Новости из мира IT", "Интересное за сегодня".
-2. СТИЛЬ: Информативный, легкий, доступный. Пиши для людей, интересующихся технологиями, но не обязательно программистов.
-   - Избегай сложных канцеляризмов.
-   - Избегай заезженных шуток про "восстание машин" или "Skynet".
-   - Фокус на пользе: что это дает пользователю или индустрии?
-3. ЗАПРЕТЫ:
-   - Никаких продажных фраз ("покупайте", "лучшее решение").
-   - Не используй фразы типа "Йоу", "Газ", "Кринж" (держи баланс адекватности).
-4. СТРУКТУРА:
-   - Приветствие/Хук.
-   - Суть новости (что случилось, как работает).
-   - Краткий вывод или перспектива.
-5. ОБЪЕМ: до 800 знаков.
+ТРЕБОВАНИЯ К ТЕКСТУ:
+1. НАЧАЛО: Обязательно начни с фразы "Всем привет! 👋" или "Привет, друзья! ✌️".
+2. СТИЛЬ: 
+   - Пиши живым языком, как будто рассказываешь другу.
+   - Не используй сухой "новостной" стиль. 
+   - Не используй рекламный стиль ("уникальное решение", "спешите видеть").
+   - Избегай сложных причастий, пиши просто.
+3. СОДЕРЖАНИЕ:
+   - Объясни суть: что именно произошло?
+   - Как это работает? (добавь технических деталей, если они есть, но объясни их просто).
+   - Зачем это нужно? (польза для обычного человека или индустрии).
+4. ОБЪЕМ: Напиши примерно 1000-1200 знаков. Пост не должен быть коротким огрызком.
+
+ЗАПРЕТЫ:
+- Не используй слова: "революционный", "беспрецедентный", "покупайте", "подписывайтесь".
+- Не шути про восстание машин и Skynet.
 """
     return prompt
 
-def validate_generated_text(text: str) -> tuple[bool, str]:
-    text = text.strip()
-    if not text: return False, "Пустой текст"
-    if len(text) < 50: return False, "Слишком короткий"
-    return True, "OK"
-
 def short_summary(title: str, summary: str, link: str) -> Optional[str]:
     prompt = build_dynamic_prompt(title, summary)
-    print(f"  📝 Генерирую пост (Balanced Tech Style)...")
+    print(f"  📝 Генерирую пост (Friendly AI Vibe)...")
 
     try:
         res = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.6, # Чуть строже для качества
-            max_tokens=700,
+            temperature=0.7, 
+            max_tokens=1000, # Даем модели место развернуться
         )
         core = res.choices[0].message.content.strip()
 
         if core.startswith('"') and core.endswith('"'): core = core[1:-1]
         
+        # Финальная проверка на рекламу
         if is_too_promotional(core):
             print("  ⚠️ Текст слишком рекламный, пропускаем.")
             return None
@@ -414,25 +363,25 @@ def short_summary(title: str, summary: str, link: str) -> Optional[str]:
         print(f"❌ OpenAI ошибка: {e}")
         return None
 
-# ============ ГЕНЕРАЦИЯ КАРТИНОК ============
+# ============ ГЕНЕРАЦИЯ КАРТИНОК (БЕЗ КИБЕРПАНКА) ============
 
 def generate_image(title: str, max_retries: int = 2) -> Optional[str]:
-    # Список разных стилей для разнообразия, чтобы не было "киберпанка" везде
+    # Список светлых, чистых стилей (БЕЗ неона и киберпанка)
     styles = [
-        "minimalist technology illustration, flat design, vector art, clean background",
-        "high quality editorial photography, technology, depth of field, 4k",
-        "isometric 3d render, soft lighting, modern technology, 3d blender style",
-        "abstract modern technology background, geometric shapes, data visualization",
-        "futuristic realism, cinematic lighting, detailed texture, 8k render"
+        "minimalist technology illustration, clean lines, white background, vector art, blue and white colors",
+        "high tech laboratory, bright lighting, futuristic white robot arm, photorealistic, 4k",
+        "abstract neural network visualization, connecting dots, blue and purple gradient, clean background",
+        "isometric 3d icon of artificial intelligence, glass texture, soft studio lighting, blender render",
+        "modern software interface concept, holograms, data visualization, bright modern office background"
     ]
     
-    # Выбираем случайный стиль для каждого поста
     current_style = random.choice(styles)
     
     for attempt in range(max_retries):
         seed = random.randint(0, 10**7)
         clean_title = re.sub(r'[^a-zA-Z0-9]', ' ', title)[:60]
-        # Собираем промпт без киберпанка
+        
+        # Промпт без слова cyberpunk
         prompt = f"{current_style}, {clean_title}"
         
         encoded = urllib.parse.quote(prompt)
@@ -460,40 +409,23 @@ async def autopost():
     clean_old_posts()
     print("🔄 Загрузка статей...")
     articles = load_articles_from_sites()
+    
+    # СТРОГИЙ ФИЛЬТР: Только AI новости
     candidates = filter_articles(articles)
 
     if not candidates:
-        print("❌ Нет подходящих новостей.")
+        print("❌ Нет подходящих новостей про AI.")
         return
 
-    print(f"📊 Найдено: {len(candidates)} статей.")
+    print(f"📊 Найдено: {len(candidates)} статей про AI.")
     
-    last_type = load_last_post_type()
-    posted_count = 0
-    max_posts = 1 
+    # Берем самую свежую новость
+    art = candidates[0]
 
-    hardware_candidates = [c for c in candidates if c.get("post_type") == "hardware"]
-    it_candidates = [c for c in candidates if c.get("post_type") == "it"]
+    print(f"\n🔍 Обработка: {art['title']}")
+    post_text = short_summary(art["title"], art["summary"], art["link"])
 
-    def pick_next_article() -> Optional[Dict]:
-        nonlocal last_type
-        if last_type == "hardware":
-            if it_candidates: return it_candidates.pop(0)
-            elif hardware_candidates: return hardware_candidates.pop(0)
-        else:
-            if hardware_candidates: return hardware_candidates.pop(0)
-            elif it_candidates: return it_candidates.pop(0)
-        return None
-
-    while posted_count < max_posts:
-        art = pick_next_article()
-        if not art: break
-
-        print(f"\n🔍 Обработка: {art['title']}")
-        post_text = short_summary(art["title"], art["summary"], art["link"])
-
-        if not post_text: continue
-
+    if post_text:
         img = generate_image(art["title"])
         
         try:
@@ -503,15 +435,14 @@ async def autopost():
                 await bot.send_message(CHANNEL_ID, text=post_text, disable_web_page_preview=False)
 
             save_posted(art["id"])
-            posted_count += 1
-            last_type = art.get("post_type")
-            save_last_post_type(last_type)
             print(f"✅ Опубликовано!")
 
         except Exception as e:
             print(f"❌ Ошибка отправки TG: {e}")
         finally:
             cleanup_image(img)
+    else:
+        print("⚠️ Не удалось сгенерировать текст (возможно, фильтр рекламы).")
 
 async def main():
     try: await autopost()

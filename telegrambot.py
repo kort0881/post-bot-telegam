@@ -14,22 +14,22 @@ from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import FSInputFile
-from openai import OpenAI
+from groq import Groq
 
 # ============ CONFIG ============
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
-if not all([OPENAI_API_KEY, TELEGRAM_BOT_TOKEN, CHANNEL_ID]):
+if not all([GROQ_API_KEY, TELEGRAM_BOT_TOKEN, CHANNEL_ID]):
     print("⚠️ WARNING: Не все ключи найдены в ENV!")
 
 bot = Bot(
     token=TELEGRAM_BOT_TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
 )
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+groq_client = Groq(api_key=GROQ_API_KEY)
 
 HEADERS = {
     "User-Agent": (
@@ -66,7 +66,7 @@ AI_KEYWORDS = [
     "обучение с подкреплением", "rlhf", "промпт", "prompt"
 ]
 
-# СТОП-СЛОВА (Чтобы не постил про финансы и политику)
+# СТОП-СЛОВА
 EXCLUDE_KEYWORDS = [
     "акции", "акция", "биржа", "котировки", "индекс",
     "инвестиции", "инвестор", "инвесторы", "дивиденды",
@@ -125,7 +125,6 @@ def is_too_promotional(text: str) -> bool:
     low = text.lower()
     if any(p in low for p in BAD_PHRASES):
         return True
-    # Если слишком много "обеспечивает" без конкретики
     if ("обеспечивает" in low or "позволяет" in low or "предлагает решение" in low) and \
        not any(k in low for k in ["за счёт", "за счет", "используя", "через", "например", "в том числе", "фильтрации", "анализ трафика", "rate limiting", "балансировщик"]):
         return True
@@ -272,38 +271,27 @@ def load_rss(url: str, source: str) -> List[Dict]:
 
 def load_articles_from_sites() -> List[Dict]:
     articles: List[Dict] = []
-    # HABR
     articles.extend(load_rss("https://habr.com/ru/rss/hub/artificial_intelligence/all/?fl=ru", "Habr AI"))
     articles.extend(load_rss("https://habr.com/ru/rss/hub/machine_learning/all/?fl=ru", "Habr ML"))
     articles.extend(load_rss("https://habr.com/ru/rss/hub/neural_networks/all/?fl=ru", "Habr Neural"))
-    
-    # TECH (Будет отфильтровано ниже, если нет слов про AI)
     articles.extend(load_rss("https://3dnews.ru/news/rss/", "3DNews"))
     articles.extend(load_rss("https://www.ixbt.com/export/news.rss", "iXBT"))
     articles.extend(load_rss("https://nplus1.ru/rss", "N+1"))
     articles.extend(load_rss("https://hightech.fm/feed", "Хайтек"))
-    
     return articles
 
 def filter_articles(articles: List[Dict]) -> List[Dict]:
     valid_articles = []
-
     for e in articles:
         text = f"{e['title']} {e['summary']}".lower()
-
-        # 1. Сначала проверяем СТОП-СЛОВА
         if any(kw in text for kw in EXCLUDE_KEYWORDS):
             continue
-
-        # 2. Теперь СТРОГАЯ проверка: есть ли в тексте ключевые слова AI?
-        # Если нет - новость не берем, даже если она с хайтек сайта.
         if any(kw in text for kw in AI_KEYWORDS):
             valid_articles.append(e)
-
     valid_articles.sort(key=lambda x: x["published_parsed"], reverse=True)
     return valid_articles
 
-# ============ ГЕНЕРАЦИЯ ТЕКСТА ============
+# ============ ГЕНЕРАЦИЯ ТЕКСТА (GROQ) ============
 
 def build_dynamic_prompt(title: str, summary: str) -> str:
     news_text = f"Заголовок: {title}\n\nТекст: {summary}"
@@ -336,20 +324,20 @@ def build_dynamic_prompt(title: str, summary: str) -> str:
 
 def short_summary(title: str, summary: str, link: str) -> Optional[str]:
     prompt = build_dynamic_prompt(title, summary)
-    print(f"  📝 Генерирую пост (Friendly AI Vibe)...")
+    print(f"  📝 Генерирую пост (Groq Llama)...")
 
     try:
-        res = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+        res = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7, 
-            max_tokens=1000, # Даем модели место развернуться
+            temperature=0.7,
+            max_tokens=1000,
         )
         core = res.choices[0].message.content.strip()
 
-        if core.startswith('"') and core.endswith('"'): core = core[1:-1]
+        if core.startswith('"') and core.endswith('"'):
+            core = core[1:-1]
         
-        # Финальная проверка на рекламу
         if is_too_promotional(core):
             print("  ⚠️ Текст слишком рекламный, пропускаем.")
             return None
@@ -360,13 +348,12 @@ def short_summary(title: str, summary: str, link: str) -> Optional[str]:
         return final
 
     except Exception as e:
-        print(f"❌ OpenAI ошибка: {e}")
+        print(f"❌ Groq ошибка: {e}")
         return None
 
-# ============ ГЕНЕРАЦИЯ КАРТИНОК (БЕЗ КИБЕРПАНКА) ============
+# ============ ГЕНЕРАЦИЯ КАРТИНОК ============
 
 def generate_image(title: str, max_retries: int = 2) -> Optional[str]:
-    # Список светлых, чистых стилей (БЕЗ неона и киберпанка)
     styles = [
         "minimalist technology illustration, clean lines, white background, vector art, blue and white colors",
         "high tech laboratory, bright lighting, futuristic white robot arm, photorealistic, 4k",
@@ -380,19 +367,17 @@ def generate_image(title: str, max_retries: int = 2) -> Optional[str]:
     for attempt in range(max_retries):
         seed = random.randint(0, 10**7)
         clean_title = re.sub(r'[^a-zA-Z0-9]', ' ', title)[:60]
-        
-        # Промпт без слова cyberpunk
         prompt = f"{current_style}, {clean_title}"
-        
         encoded = urllib.parse.quote(prompt)
         url = f"https://image.pollinations.ai/prompt/{encoded}?seed={seed}&width=1024&height=1024&nologo=true"
         
         try:
-            print(f"  🎨 Генерация картинки (стиль: {current_style[:20]})...")
+            print(f"  🎨 Генерация картинки...")
             resp = requests.get(url, timeout=40, headers=HEADERS)
             if resp.status_code == 200 and len(resp.content) > 10000:
                 fname = f"img_{seed}.jpg"
-                with open(fname, "wb") as f: f.write(resp.content)
+                with open(fname, "wb") as f:
+                    f.write(resp.content)
                 return fname
         except Exception as e:
             print(f"  ⚠️ Ошибка картинки: {e}")
@@ -400,8 +385,10 @@ def generate_image(title: str, max_retries: int = 2) -> Optional[str]:
 
 def cleanup_image(filepath: Optional[str]) -> None:
     if filepath and os.path.exists(filepath):
-        try: os.remove(filepath)
-        except: pass
+        try:
+            os.remove(filepath)
+        except:
+            pass
 
 # ============ АВТОПОСТ ============
 
@@ -409,8 +396,6 @@ async def autopost():
     clean_old_posts()
     print("🔄 Загрузка статей...")
     articles = load_articles_from_sites()
-    
-    # СТРОГИЙ ФИЛЬТР: Только AI новости
     candidates = filter_articles(articles)
 
     if not candidates:
@@ -418,8 +403,6 @@ async def autopost():
         return
 
     print(f"📊 Найдено: {len(candidates)} статей про AI.")
-    
-    # Берем самую свежую новость
     art = candidates[0]
 
     print(f"\n🔍 Обработка: {art['title']}")
@@ -442,11 +425,13 @@ async def autopost():
         finally:
             cleanup_image(img)
     else:
-        print("⚠️ Не удалось сгенерировать текст (возможно, фильтр рекламы).")
+        print("⚠️ Не удалось сгенерировать текст.")
 
 async def main():
-    try: await autopost()
-    finally: await bot.session.close()
+    try:
+        await autopost()
+    finally:
+        await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())

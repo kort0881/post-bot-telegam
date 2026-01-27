@@ -34,12 +34,11 @@ jobs:
 
       - name: Run AI Bot
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
         run: python telegrambot.py
 
-      # ВАЖНО: сохраняем файлы posted_articles.json и last_post_type.json
       - name: Commit state
         run: |
           git config --local user.email "action@github.com"

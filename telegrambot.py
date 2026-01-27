@@ -3,9 +3,10 @@ import json
 import asyncio
 import random
 import re
-import time
+import hashlib
 from datetime import datetime
 from typing import List, Dict, Optional
+from urllib.parse import urlparse, parse_qs
 
 import requests
 import feedparser
@@ -39,10 +40,10 @@ HEADERS = {
 }
 
 POSTED_FILE = "posted_articles.json"
-RETENTION_DAYS = 7
+RETENTION_DAYS = 30
 TELEGRAM_CAPTION_LIMIT = 1024
 
-# ============ КЛЮЧЕВЫЕ СЛОВА (ТОЛЬКО AI) ============
+# ============ КЛЮЧЕВЫЕ СЛОВА ============
 
 AI_KEYWORDS = [
     "нейросеть", "нейросети", "нейронная сеть", "ии", "искусственный интеллект",
@@ -66,7 +67,6 @@ AI_KEYWORDS = [
     "обучение с подкреплением", "rlhf", "промпт", "prompt"
 ]
 
-# СТОП-СЛОВА
 EXCLUDE_KEYWORDS = [
     "акции", "акция", "биржа", "котировки", "индекс",
     "инвестиции", "инвестор", "инвесторы", "дивиденды",
@@ -102,23 +102,14 @@ EXCLUDE_KEYWORDS = [
     "иск", "антимонопольный"
 ]
 
-# ============ АНТИРЕКЛАМНЫЙ ФИЛЬТР ============
-
 BAD_PHRASES = [
-    "предлагает решение",
-    "предлагает уникальное решение",
-    "обеспечивает высококачественную защиту",
-    "обеспечивает надёжную защиту",
-    "обеспечивает защиту",
-    "позволяет сосредоточиться на своих задачах",
-    "позволяет не думать об угрозах",
-    "делает бизнес устойчивее",
-    "позволяет бизнесу работать устойчивее",
-    "значительно упрощает",
-    "кардинально упрощает",
-    "комплексное решение для",
-    "идеальное решение для",
-    "помогает бизнесу эффективнее работать",
+    "предлагает решение", "предлагает уникальное решение",
+    "обеспечивает высококачественную защиту", "обеспечивает надёжную защиту",
+    "обеспечивает защиту", "позволяет сосредоточиться на своих задачах",
+    "позволяет не думать об угрозах", "делает бизнес устойчивее",
+    "позволяет бизнесу работать устойчивее", "значительно упрощает",
+    "кардинально упрощает", "комплексное решение для",
+    "идеальное решение для", "помогает бизнесу эффективнее работать",
 ]
 
 def is_too_promotional(text: str) -> bool:
@@ -126,40 +117,202 @@ def is_too_promotional(text: str) -> bool:
     if any(p in low for p in BAD_PHRASES):
         return True
     if ("обеспечивает" in low or "позволяет" in low or "предлагает решение" in low) and \
-       not any(k in low for k in ["за счёт", "за счет", "используя", "через", "например", "в том числе", "фильтрации", "анализ трафика", "rate limiting", "балансировщик"]):
+       not any(k in low for k in ["за счёт", "за счет", "используя", "через", "например", 
+                                   "в том числе", "фильтрации", "анализ трафика", 
+                                   "rate limiting", "балансировщик"]):
         return True
     return False
 
-# ============ STATE ============
 
-posted_articles: Dict[str, Optional[float]] = {}
+# ============ URL NORMALIZATION ============
 
-if os.path.exists(POSTED_FILE):
-    with open(POSTED_FILE, "r", encoding="utf-8") as f:
+def normalize_url(url: str) -> str:
+    """
+    Нормализует URL для сравнения.
+    Убирает utm-метки, протокол, www, trailing slashes.
+    """
+    if not url:
+        return ""
+    
+    try:
+        # Парсим URL
+        parsed = urlparse(url)
+        
+        # Базовый путь без параметров
+        path = parsed.path.rstrip("/")
+        
+        # Убираем www из домена
+        domain = parsed.netloc.lower().replace("www.", "")
+        
+        # Собираем нормализованный URL
+        normalized = f"{domain}{path}"
+        
+        return normalized
+    except Exception:
+        # Fallback: простая очистка
+        url = url.replace("https://", "").replace("http://", "")
+        url = url.replace("www.", "")
+        url = url.split("?")[0].split("#")[0]
+        return url.rstrip("/").lower()
+
+
+def extract_article_id(url: str) -> str:
+    """
+    Извлекает уникальный ID статьи из URL.
+    Для Habr: номер статьи
+    Для 3DNews: номер новости
+    Для остальных: нормализованный URL
+    """
+    normalized = normalize_url(url)
+    
+    # Habr: извлекаем номер статьи
+    # habr.com/ru/articles/987076 -> 987076
+    # habr.com/ru/news/987076 -> 987076
+    # habr.com/ru/companies/xxx/articles/987076 -> 987076
+    habr_match = re.search(r'habr\.com/.+?/(\d{5,7})', normalized)
+    if habr_match:
+        return f"habr_{habr_match.group(1)}"
+    
+    # 3DNews: извлекаем номер
+    # 3dnews.ru/1135685 -> 1135685
+    dnews_match = re.search(r'3dnews\.ru/(\d+)', normalized)
+    if dnews_match:
+        return f"3dnews_{dnews_match.group(1)}"
+    
+    # iXBT: путь к новости
+    # ixbt.com/news/2026/01/24/xxx.html
+    if 'ixbt.com' in normalized:
+        return f"ixbt_{hashlib.md5(normalized.encode()).hexdigest()[:12]}"
+    
+    # Остальные: хеш от нормализованного URL
+    return hashlib.md5(normalized.encode()).hexdigest()[:16]
+
+
+# ============ POSTED ARTICLES MANAGER ============
+
+class PostedManager:
+    def __init__(self, filepath: str):
+        self.filepath = filepath
+        self.posted_ids: set = set()  # Нормализованные ID
+        self.posted_urls: set = set()  # Нормализованные URL (для обратной совместимости)
+        self.data: list = []  # Сырые данные для сохранения
+        self._load()
+    
+    def _load(self):
+        """Загружает и индексирует данные"""
+        print(f"\n{'='*50}")
+        print(f"📂 Загрузка истории: {self.filepath}")
+        
+        if not os.path.exists(self.filepath):
+            print("   ⚠️ Файл не найден, создаём новый")
+            self._save()
+            return
+        
         try:
-            posted_data = json.load(f)
-            posted_articles = {item["id"]: item.get("timestamp") for item in posted_data}
-        except Exception:
-            posted_articles = {}
+            with open(self.filepath, "r", encoding="utf-8") as f:
+                self.data = json.load(f)
+            
+            if not isinstance(self.data, list):
+                print("   ⚠️ Неверный формат, сбрасываем")
+                self.data = []
+                return
+            
+            # Индексируем все записи
+            for item in self.data:
+                if isinstance(item, dict) and "id" in item:
+                    url = item["id"]
+                    # Добавляем нормализованный URL
+                    self.posted_urls.add(normalize_url(url))
+                    # Добавляем ID статьи
+                    self.posted_ids.add(extract_article_id(url))
+            
+            print(f"   ✅ Загружено: {len(self.data)} записей")
+            print(f"   📊 Уникальных ID: {len(self.posted_ids)}")
+            
+        except json.JSONDecodeError as e:
+            print(f"   ❌ Ошибка JSON: {e}")
+            self.data = []
+        except Exception as e:
+            print(f"   ❌ Ошибка: {e}")
+            self.data = []
+    
+    def _save(self):
+        """Сохраняет данные"""
+        try:
+            with open(self.filepath, "w", encoding="utf-8") as f:
+                json.dump(self.data, f, ensure_ascii=False, indent=2)
+            print(f"💾 Сохранено: {len(self.data)} записей")
+        except Exception as e:
+            print(f"❌ Ошибка сохранения: {e}")
+    
+    def is_posted(self, url: str) -> bool:
+        """Проверяет, была ли статья опубликована"""
+        # Проверка 1: по ID статьи
+        article_id = extract_article_id(url)
+        if article_id in self.posted_ids:
+            return True
+        
+        # Проверка 2: по нормализованному URL
+        normalized = normalize_url(url)
+        if normalized in self.posted_urls:
+            return True
+        
+        return False
+    
+    def add(self, url: str, title: str = ""):
+        """Добавляет статью в историю"""
+        article_id = extract_article_id(url)
+        normalized = normalize_url(url)
+        
+        # Добавляем в индексы
+        self.posted_ids.add(article_id)
+        self.posted_urls.add(normalized)
+        
+        # Добавляем в данные
+        self.data.append({
+            "id": url,
+            "article_id": article_id,
+            "title": title[:100] if title else "",
+            "timestamp": datetime.now().timestamp()
+        })
+        
+        self._save()
+        print(f"   📝 Добавлено: {article_id}")
+    
+    def cleanup(self, days: int = 30):
+        """Удаляет старые записи"""
+        if not self.data:
+            return
+        
+        cutoff = datetime.now().timestamp() - (days * 86400)
+        old_count = len(self.data)
+        
+        # Фильтруем
+        self.data = [
+            item for item in self.data
+            if item.get("timestamp") is None or item.get("timestamp", 0) > cutoff
+        ]
+        
+        removed = old_count - len(self.data)
+        if removed > 0:
+            # Перестраиваем индексы
+            self.posted_ids.clear()
+            self.posted_urls.clear()
+            for item in self.data:
+                if "id" in item:
+                    self.posted_urls.add(normalize_url(item["id"]))
+                    self.posted_ids.add(extract_article_id(item["id"]))
+            
+            self._save()
+            print(f"🧹 Очищено: {removed} старых записей")
+    
+    def count(self) -> int:
+        return len(self.data)
 
-def save_posted_articles() -> None:
-    data = [{"id": id_str, "timestamp": ts} for id_str, ts in posted_articles.items()]
-    with open(POSTED_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
 
-def clean_old_posts() -> None:
-    global posted_articles
-    now = datetime.now().timestamp()
-    cutoff = now - (RETENTION_DAYS * 86400)
-    posted_articles = {
-        id_str: ts for id_str, ts in posted_articles.items()
-        if ts is None or ts > cutoff
-    }
-    save_posted_articles()
+# Создаём менеджер
+posted = PostedManager(POSTED_FILE)
 
-def save_posted(article_id: str) -> None:
-    posted_articles[article_id] = datetime.now().timestamp()
-    save_posted_articles()
 
 # ============ HELPERS ============
 
@@ -168,7 +321,6 @@ def clean_text(text: str) -> str:
 
 def detect_topic(title: str, summary: str) -> str:
     text = f"{title} {summary}".lower()
-
     if any(kw in text for kw in ["gpt", "chatgpt", "claude", "llm", "языковая модель"]):
         return "llm"
     elif any(kw in text for kw in ["midjourney", "dall-e", "stable diffusion", "генерация изображ"]):
@@ -179,8 +331,6 @@ def detect_topic(title: str, summary: str) -> str:
         return "space"
     elif any(kw in text for kw in ["nvidia", "gpu", "процессор", "чип"]):
         return "hardware"
-    elif any(kw in text for kw in ["нейросет", "neural", "ии", "ai", "искусственный интеллект"]):
-        return "ai"
     else:
         return "ai"
 
@@ -197,34 +347,37 @@ def get_hashtags(topic: str) -> str:
 
 def ensure_complete_sentence(text: str) -> str:
     text = text.strip()
-    if not text: return text
-    if text[-1] in '.!?': return text
-    last_period = text.rfind('.')
-    last_exclaim = text.rfind('!')
-    last_question = text.rfind('?')
-    last_end = max(last_period, last_exclaim, last_question)
-    if last_end > 0: return text[:last_end + 1]
+    if not text:
+        return text
+    if text[-1] in '.!?':
+        return text
+    last_end = max(text.rfind('.'), text.rfind('!'), text.rfind('?'))
+    if last_end > 0:
+        return text[:last_end + 1]
     return text + '.'
 
 def trim_core_text_to_limit(core_text: str, max_core_length: int) -> str:
     core_text = core_text.strip()
     if len(core_text) <= max_core_length:
         return ensure_complete_sentence(core_text)
-    sentence_pattern = r'(?<=[.!?])\s+'
-    sentences = re.split(sentence_pattern, core_text)
+    
+    sentences = re.split(r'(?<=[.!?])\s+', core_text)
     result = ""
     for sentence in sentences:
         sentence = sentence.strip()
-        if not sentence: continue
+        if not sentence:
+            continue
         candidate = (result + " " + sentence).strip() if result else sentence
         if len(candidate) <= max_core_length:
             result = candidate
         else:
             break
+    
     if not result and sentences:
         result = sentences[0][:max_core_length]
-        if len(result) == max_core_length and ' ' in result:
+        if ' ' in result:
             result = result.rsplit(' ', 1)[0]
+    
     return ensure_complete_sentence(result)
 
 def build_final_post(core_text: str, hashtags: str, link: str, max_total: int = 1024) -> str:
@@ -236,9 +389,8 @@ def build_final_post(core_text: str, hashtags: str, link: str, max_total: int = 
     max_core_length = max_total - service_length - 10
     
     trimmed_core = trim_core_text_to_limit(core_text, max_core_length)
-    
-    final = trimmed_core + cta_line + hashtag_line + source_line
-    return final
+    return trimmed_core + cta_line + hashtag_line + source_line
+
 
 # ============ PARSERS ============
 
@@ -247,29 +399,42 @@ def load_rss(url: str, source: str) -> List[Dict]:
     try:
         feed = feedparser.parse(url)
         if feed.bozo and not feed.entries:
-            print(f"⚠️ RSS недоступен: {source}")
+            print(f"   ⚠️ RSS недоступен: {source}")
             return articles
     except Exception as e:
-        print(f"❌ Ошибка загрузки RSS {source}: {e}")
+        print(f"   ❌ Ошибка RSS {source}: {e}")
         return articles
 
+    new_count = 0
+    skip_count = 0
+    
     for entry in feed.entries[:30]:
         link = entry.get("link", "")
-        if not link or link in posted_articles:
+        if not link:
             continue
+        
+        title = clean_text(entry.get("title") or "")
+        
+        # ПРОВЕРКА ДУБЛИКАТА
+        if posted.is_posted(link):
+            skip_count += 1
+            continue
+        
+        new_count += 1
         articles.append({
             "id": link,
-            "title": clean_text(entry.get("title") or ""),
-            "summary": clean_text(
-                entry.get("summary") or entry.get("description") or ""
-            )[:700],
+            "title": title,
+            "summary": clean_text(entry.get("summary") or entry.get("description") or "")[:700],
             "link": link,
             "source": source,
             "published_parsed": datetime.now()
         })
+    
+    print(f"   📰 {source}: +{new_count} новых, ⏭️{skip_count} пропущено")
     return articles
 
 def load_articles_from_sites() -> List[Dict]:
+    print("\n🔄 Загрузка RSS лент...")
     articles: List[Dict] = []
     articles.extend(load_rss("https://habr.com/ru/rss/hub/artificial_intelligence/all/?fl=ru", "Habr AI"))
     articles.extend(load_rss("https://habr.com/ru/rss/hub/machine_learning/all/?fl=ru", "Habr ML"))
@@ -278,101 +443,97 @@ def load_articles_from_sites() -> List[Dict]:
     articles.extend(load_rss("https://www.ixbt.com/export/news.rss", "iXBT"))
     articles.extend(load_rss("https://nplus1.ru/rss", "N+1"))
     articles.extend(load_rss("https://hightech.fm/feed", "Хайтек"))
+    print(f"\n📊 Всего новых статей: {len(articles)}")
     return articles
 
 def filter_articles(articles: List[Dict]) -> List[Dict]:
-    valid_articles = []
+    valid = []
     for e in articles:
         text = f"{e['title']} {e['summary']}".lower()
         if any(kw in text for kw in EXCLUDE_KEYWORDS):
             continue
         if any(kw in text for kw in AI_KEYWORDS):
-            valid_articles.append(e)
-    valid_articles.sort(key=lambda x: x["published_parsed"], reverse=True)
-    return valid_articles
+            valid.append(e)
+    valid.sort(key=lambda x: x["published_parsed"], reverse=True)
+    print(f"🎯 После фильтрации (AI-тематика): {len(valid)}")
+    return valid
 
-# ============ ГЕНЕРАЦИЯ ТЕКСТА (GROQ) ============
+
+# ============ GROQ ============
 
 def build_dynamic_prompt(title: str, summary: str) -> str:
-    news_text = f"Заголовок: {title}\n\nТекст: {summary}"
-
-    prompt = f"""
+    return f"""
 Ты — дружелюбный автор канала "Доступ к интернету" (про нейросети и ИИ).
 Твоя задача: Написать подробный и увлекательный пост.
 
 НОВОСТЬ:
-{news_text}
+Заголовок: {title}
+
+Текст: {summary}
 
 ТРЕБОВАНИЯ К ТЕКСТУ:
 1. НАЧАЛО: Обязательно начни с фразы "Всем привет! 👋" или "Привет, друзья! ✌️".
 2. СТИЛЬ: 
    - Пиши живым языком, как будто рассказываешь другу.
    - Не используй сухой "новостной" стиль. 
-   - Не используй рекламный стиль ("уникальное решение", "спешите видеть").
+   - Не используй рекламный стиль.
    - Избегай сложных причастий, пиши просто.
 3. СОДЕРЖАНИЕ:
    - Объясни суть: что именно произошло?
-   - Как это работает? (добавь технических деталей, если они есть, но объясни их просто).
-   - Зачем это нужно? (польза для обычного человека или индустрии).
-4. ОБЪЕМ: Напиши примерно 1000-1200 знаков. Пост не должен быть коротким огрызком.
+   - Как это работает?
+   - Зачем это нужно?
+4. ОБЪЕМ: 1000-1200 знаков.
 
 ЗАПРЕТЫ:
 - Не используй слова: "революционный", "беспрецедентный", "покупайте", "подписывайтесь".
 - Не шути про восстание машин и Skynet.
 """
-    return prompt
 
 def short_summary(title: str, summary: str, link: str) -> Optional[str]:
-    prompt = build_dynamic_prompt(title, summary)
-    print(f"  📝 Генерирую пост (Groq Llama)...")
-
+    print(f"   📝 Генерация текста...")
+    
     try:
         res = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": build_dynamic_prompt(title, summary)}],
             temperature=0.7,
             max_tokens=1000,
         )
         core = res.choices[0].message.content.strip()
-
+        
         if core.startswith('"') and core.endswith('"'):
             core = core[1:-1]
         
         if is_too_promotional(core):
-            print("  ⚠️ Текст слишком рекламный, пропускаем.")
+            print("   ⚠️ Текст рекламный, пропуск")
             return None
-
+        
         topic = detect_topic(title, summary)
-        hashtags = get_hashtags(topic)
-        final = build_final_post(core, hashtags, link, max_total=TELEGRAM_CAPTION_LIMIT)
-        return final
-
+        return build_final_post(core, get_hashtags(topic), link, TELEGRAM_CAPTION_LIMIT)
+    
     except Exception as e:
-        print(f"❌ Groq ошибка: {e}")
+        print(f"   ❌ Groq ошибка: {e}")
         return None
 
-# ============ ГЕНЕРАЦИЯ КАРТИНОК ============
+
+# ============ IMAGE ============
 
 def generate_image(title: str, max_retries: int = 2) -> Optional[str]:
     styles = [
-        "minimalist technology illustration, clean lines, white background, vector art, blue and white colors",
-        "high tech laboratory, bright lighting, futuristic white robot arm, photorealistic, 4k",
-        "abstract neural network visualization, connecting dots, blue and purple gradient, clean background",
-        "isometric 3d icon of artificial intelligence, glass texture, soft studio lighting, blender render",
-        "modern software interface concept, holograms, data visualization, bright modern office background"
+        "minimalist technology illustration, clean lines, white background, vector art",
+        "abstract neural network visualization, connecting dots, blue gradient",
+        "isometric 3d icon of AI, glass texture, soft studio lighting",
     ]
-    
-    current_style = random.choice(styles)
     
     for attempt in range(max_retries):
         seed = random.randint(0, 10**7)
-        clean_title = re.sub(r'[^a-zA-Z0-9]', ' ', title)[:60]
-        prompt = f"{current_style}, {clean_title}"
+        clean_title = re.sub(r'[^a-zA-Z0-9\s]', '', title)[:50]
+        prompt = f"{random.choice(styles)}, {clean_title}"
         encoded = urllib.parse.quote(prompt)
         url = f"https://image.pollinations.ai/prompt/{encoded}?seed={seed}&width=1024&height=1024&nologo=true"
         
         try:
-            print(f"  🎨 Генерация картинки...")
+            print(f"   🎨 Генерация картинки ({attempt+1}/{max_retries})...")
             resp = requests.get(url, timeout=40, headers=HEADERS)
             if resp.status_code == 200 and len(resp.content) > 10000:
                 fname = f"img_{seed}.jpg"
@@ -380,58 +541,82 @@ def generate_image(title: str, max_retries: int = 2) -> Optional[str]:
                     f.write(resp.content)
                 return fname
         except Exception as e:
-            print(f"  ⚠️ Ошибка картинки: {e}")
+            print(f"   ⚠️ Ошибка: {e}")
+    
     return None
 
-def cleanup_image(filepath: Optional[str]) -> None:
+def cleanup_image(filepath: Optional[str]):
     if filepath and os.path.exists(filepath):
         try:
             os.remove(filepath)
         except:
             pass
 
-# ============ АВТОПОСТ ============
+
+# ============ MAIN ============
 
 async def autopost():
-    clean_old_posts()
-    print("🔄 Загрузка статей...")
+    print("\n" + "="*60)
+    print(f"🚀 СТАРТ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"📊 В истории: {posted.count()} статей")
+    print("="*60)
+    
+    # Очистка старых
+    posted.cleanup(RETENTION_DAYS)
+    
+    # Загрузка
     articles = load_articles_from_sites()
     candidates = filter_articles(articles)
-
+    
     if not candidates:
-        print("❌ Нет подходящих новостей про AI.")
+        print("\n❌ Нет подходящих новостей")
         return
-
-    print(f"📊 Найдено: {len(candidates)} статей про AI.")
+    
+    # Берём первую
     art = candidates[0]
-
-    print(f"\n🔍 Обработка: {art['title']}")
+    article_id = extract_article_id(art["link"])
+    
+    print(f"\n🎯 Выбрана статья:")
+    print(f"   ID: {article_id}")
+    print(f"   Заголовок: {art['title'][:60]}...")
+    print(f"   URL: {art['link']}")
+    
+    # Генерация
     post_text = short_summary(art["title"], art["summary"], art["link"])
-
-    if post_text:
-        img = generate_image(art["title"])
+    
+    if not post_text:
+        print("\n⚠️ Не удалось сгенерировать текст")
+        return
+    
+    img = generate_image(art["title"])
+    
+    try:
+        if img:
+            await bot.send_photo(CHANNEL_ID, photo=FSInputFile(img), caption=post_text)
+        else:
+            await bot.send_message(CHANNEL_ID, text=post_text, disable_web_page_preview=False)
         
-        try:
-            if img:
-                await bot.send_photo(CHANNEL_ID, photo=FSInputFile(img), caption=post_text)
-            else:
-                await bot.send_message(CHANNEL_ID, text=post_text, disable_web_page_preview=False)
+        # СОХРАНЯЕМ
+        posted.add(art["link"], art["title"])
+        
+        print(f"\n✅ ОПУБЛИКОВАНО!")
+        print(f"📊 Теперь в истории: {posted.count()} статей")
+        
+    except Exception as e:
+        print(f"\n❌ Ошибка Telegram: {e}")
+    finally:
+        cleanup_image(img)
 
-            save_posted(art["id"])
-            print(f"✅ Опубликовано!")
-
-        except Exception as e:
-            print(f"❌ Ошибка отправки TG: {e}")
-        finally:
-            cleanup_image(img)
-    else:
-        print("⚠️ Не удалось сгенерировать текст.")
 
 async def main():
     try:
         await autopost()
     finally:
         await bot.session.close()
+    print("\n" + "="*60)
+    print("✅ ЗАВЕРШЕНО")
+    print("="*60)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

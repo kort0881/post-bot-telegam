@@ -5,7 +5,7 @@ import random
 import re
 import hashlib
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from urllib.parse import urlparse, quote
 
@@ -60,8 +60,8 @@ HEADERS = {
 RSS_FEEDS = [
     ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch AI"),
     ("https://venturebeat.com/category/ai/feed/", "VentureBeat AI"),
-    ("https://www.technologyreview.com/feed/topic/artificial-intelligence", "MIT Tech Review"),
-    ("https://www.theverge.com/ai-artificial-intelligence/rss/index.xml", "The Verge AI"),
+    ("https://www.technologyreview.com/topic/artificial-intelligence/feed", "MIT Tech Review"),
+    ("https://www.theverge.com/rss/index.xml", "The Verge"),
     ("https://arstechnica.com/tag/artificial-intelligence/feed/", "Ars Technica AI"),
     ("https://www.wired.com/feed/tag/ai/latest/rss", "WIRED AI"),
 ]
@@ -96,7 +96,7 @@ class Article:
     summary: str
     link: str
     source: str
-    published: datetime = field(default_factory=datetime.utcnow)
+    published: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 # ====================== TOPIC & HASHTAGS ======================
 class Topic:
@@ -145,30 +145,25 @@ def article_id(url: str) -> str:
 def clean_text(text: str) -> str:
     if not text:
         return ""
-    # Удаляем HTML теги
     text = re.sub(r'<[^>]+>', '', text)
-    # Удаляем лишние пробелы
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
 
 def ai_relevance(text: str) -> float:
-    """Вычисляет релевантность текста к AI (0.0 - 1.0)"""
     lower = text.lower()
     matches = sum(1 for kw in AI_KEYWORDS if kw in lower)
-    # Нормализуем на количество ключевых слов, а не на длину текста
-    return min(matches / 3.0, 1.0)  # 3+ совпадения = 100% релевантность
+    return min(matches / 3.0, 1.0)
 
-# ====================== POSTED MANAGER (ИСПРАВЛЕНО!) ======================
+# ====================== POSTED MANAGER ======================
 class PostedManager:
     def __init__(self, file="posted_articles.json"):
         self.file = file
-        self.data = []  # Храним данные в памяти
+        self.data = []
         self.ids = set()
         self.urls = set()
         self._load()
 
     def _load(self):
-        """Загрузка из файла"""
         if not os.path.exists(self.file):
             self._save()
             return
@@ -176,7 +171,6 @@ class PostedManager:
             with open(self.file, "r", encoding="utf-8") as f:
                 self.data = json.load(f)
             
-            # Индексируем для быстрого поиска
             for item in self.data:
                 url = item.get("url", "")
                 if url:
@@ -189,7 +183,6 @@ class PostedManager:
             self.data = []
 
     def _save(self):
-        """Сохранение в файл"""
         try:
             with open(self.file, "w", encoding="utf-8") as f:
                 json.dump(self.data, f, ensure_ascii=False, indent=2)
@@ -197,29 +190,26 @@ class PostedManager:
             logger.error(f"Ошибка сохранения: {e}")
 
     def is_posted(self, url: str) -> bool:
-        """Проверка, была ли статья опубликована"""
         return article_id(url) in self.ids or normalize_url(url) in self.urls
 
     def add(self, url: str, title: str):
-        """Добавление новой статьи"""
         aid = article_id(url)
         nurl = normalize_url(url)
         
         if aid in self.ids or nurl in self.urls:
-            return  # Уже есть
+            return
         
         self.ids.add(aid)
         self.urls.add(nurl)
         self.data.append({
             "url": url,
             "title": title[:100],
-            "ts": datetime.utcnow().isoformat() + "Z"
+            "ts": datetime.now(timezone.utc).isoformat() + "Z"
         })
         self._save()
 
     def cleanup(self, days=30):
-        """Удаление старых записей"""
-        cutoff = datetime.utcnow().timestamp() - days * 86400
+        cutoff = datetime.now(timezone.utc).timestamp() - days * 86400
         old_count = len(self.data)
         
         self.data = [
@@ -229,7 +219,6 @@ class PostedManager:
         
         removed = old_count - len(self.data)
         if removed > 0:
-            # Перестраиваем индексы
             self.ids.clear()
             self.urls.clear()
             for item in self.data:
@@ -242,7 +231,6 @@ class PostedManager:
             logger.info(f"Удалено {removed} старых записей")
     
     def _parse_ts(self, ts_str: Optional[str]) -> float:
-        """Безопасный парсинг timestamp"""
         if not ts_str:
             return 0
         try:
@@ -281,15 +269,14 @@ async def fetch_feed(session: aiohttp.ClientSession, url: str, source: str, post
         if not title or len(title) < 15:
             continue
 
-        # Парсинг даты публикации
-        published = datetime.utcnow()
+        published = datetime.now(timezone.utc)
         for date_field in ["published", "updated", "created"]:
             date_str = entry.get(date_field)
             if date_str:
                 try:
                     parsed = feedparser._parse_date(date_str)
                     if parsed:
-                        published = datetime(*parsed[:6])
+                        published = datetime(*parsed[:6], tzinfo=timezone.utc)
                         break
                 except:
                     pass
@@ -330,25 +317,17 @@ def filter_articles(articles: List[Article]) -> List[Article]:
     for a in articles:
         text = f"{a.title} {a.summary}".lower()
 
-        # 1. Исключения (рекламные фразы)
         if any(phrase in text for phrase in BAD_PHRASES):
             continue
-        
-        # 2. Исключения (не-AI темы)
         if any(kw in text for kw in EXCLUDE_KEYWORDS):
             continue
-        
-        # 3. Требуем наличие AI ключевых слов
         if not any(kw in text for kw in AI_KEYWORDS):
             continue
-        
-        # 4. Проверка релевантности (минимум 2 совпадения)
-        if ai_relevance(text) < 0.5:  # Меньше 2 ключевых слов
+        if ai_relevance(text) < 0.5:
             continue
 
         candidates.append(a)
 
-    # Сортируем по дате (новые первые)
     candidates.sort(key=lambda x: x.published, reverse=True)
     logger.info(f"🎯 Прошло фильтры: {len(candidates)} статей")
     return candidates
@@ -382,7 +361,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 
     for attempt in range(3):
         try:
-            await asyncio.sleep(1)  # Rate limiting
+            await asyncio.sleep(1)
             
             resp = await asyncio.to_thread(
                 groq_client.chat.completions.create,
@@ -393,26 +372,20 @@ async def generate_summary(article: Article) -> Optional[str]:
             )
             text = resp.choices[0].message.content.strip()
 
-            # Проверка на SKIP
             if "SKIP" in text.upper()[:50]:
                 logger.info("   ⚠️ LLM отклонила тему (SKIP)")
                 return None
 
-            # Определяем тему и хештеги
             topic = Topic.detect(f"{article.title} {article.summary}")
             hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
 
-            # Собираем финальный пост
             cta = "\n\n🔥 — огонь! | 🗿 — ну такое | ⚡ — прикольно"
             source = f'\n\n🔗 <a href="{article.link}">Оригинал</a>'
             final = text + cta + "\n\n" + hashtags + source
 
-            # Обрезаем, если слишком длинный
             if len(final) > config.caption_limit:
-                # Обрезаем основной текст
                 overflow = len(final) - config.caption_limit + 50
                 text = text[:-overflow]
-                # Обрезаем до последнего предложения
                 for punct in ['.', '!', '?']:
                     last = text.rfind(punct)
                     if last > len(text) // 2:
@@ -428,28 +401,54 @@ async def generate_summary(article: Article) -> Optional[str]:
 
     return None
 
-# ====================== IMAGE ======================
+# ====================== IMAGE (С ЛОГАМИ!) ======================
 async def generate_image(title: str) -> Optional[str]:
+    logger.info("   🎨 Начинаю генерацию изображения...")
+    
     clean_title = re.sub(r'[^\w\s]', '', title)[:60]
     prompt = f"minimalist futuristic AI technology illustration, {clean_title}, dark background, neon glow, cyberpunk aesthetic, 4k quality"
     url = f"https://image.pollinations.ai/prompt/{quote(prompt)}?width=1024&height=1024&nologo=true&enhance=true&seed={random.randint(1,999999)}"
-
-    for attempt in range(2):
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as sess:
-                async with sess.get(url) as resp:
-                    if resp.status == 200:
-                        content_length = int(resp.headers.get("Content-Length", 0))
-                        if content_length > 30000:
-                            fname = f"img_{int(datetime.now().timestamp())}_{random.randint(1000,9999)}.jpg"
-                            with open(fname, "wb") as f:
-                                f.write(await resp.read())
-                            logger.info("   🖼 Изображение сгенерировано")
-                            return fname
-        except Exception as e:
-            logger.warning(f"   ⚠️ Ошибка генерации изображения: {e}")
-            await asyncio.sleep(2)
     
+    logger.info(f"   📡 URL: {url[:100]}...")
+
+    for attempt in range(3):
+        try:
+            logger.info(f"   🔄 Попытка {attempt + 1}/3...")
+            
+            timeout = aiohttp.ClientTimeout(total=45)
+            async with aiohttp.ClientSession(timeout=timeout) as sess:
+                async with sess.get(url) as resp:
+                    logger.info(f"   📊 HTTP Status: {resp.status}")
+                    
+                    if resp.status != 200:
+                        logger.warning(f"   ⚠️ Плохой статус: {resp.status}")
+                        await asyncio.sleep(3)
+                        continue
+                    
+                    content = await resp.read()
+                    size = len(content)
+                    logger.info(f"   💾 Размер: {size} байт")
+                    
+                    if size < 10000:
+                        logger.warning(f"   ⚠️ Слишком маленький файл: {size} байт")
+                        await asyncio.sleep(3)
+                        continue
+                    
+                    fname = f"img_{int(datetime.now().timestamp())}_{random.randint(1000,9999)}.jpg"
+                    with open(fname, "wb") as f:
+                        f.write(content)
+                    
+                    logger.info(f"   ✅ Изображение сохранено: {fname}")
+                    return fname
+                    
+        except asyncio.TimeoutError:
+            logger.warning(f"   ⏱️ Timeout на попытке {attempt + 1}")
+            await asyncio.sleep(5)
+        except Exception as e:
+            logger.error(f"   ❌ Ошибка генерации: {type(e).__name__}: {e}")
+            await asyncio.sleep(3)
+    
+    logger.warning("   ⚠️ Не удалось сгенерировать изображение после 3 попыток")
     return None
 
 # ====================== POST ======================
@@ -458,9 +457,12 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
     
     try:
         if img and os.path.exists(img):
+            logger.info(f"   📤 Отправка с изображением...")
             await bot.send_photo(config.channel_id, FSInputFile(img), caption=text)
             os.remove(img)
+            logger.info(f"   🗑️ Временный файл удалён")
         else:
+            logger.info(f"   📤 Отправка БЕЗ изображения (текст only)")
             await bot.send_message(config.channel_id, text, disable_web_page_preview=False)
 
         posted.add(article.link, article.title)
@@ -495,7 +497,6 @@ async def autopost():
         logger.info("❌ Нет подходящих новостей после фильтрации")
         return
 
-    # Пробуем публиковать, пока не получится
     for i, article in enumerate(candidates[:10], 1):
         logger.info(f"\n[{i}/{min(10, len(candidates))}] Попытка: {article.source}")
         
@@ -528,6 +529,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

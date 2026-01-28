@@ -10,7 +10,6 @@ from urllib.parse import urlparse
 from dataclasses import dataclass, field
 
 import aiohttp
-import requests
 import feedparser
 import urllib.parse
 from aiogram import Bot
@@ -53,7 +52,6 @@ class Config:
             channel_id=channel,
         )
 
-# Загружаем конфиг
 config = Config.from_env()
 
 bot = Bot(
@@ -64,104 +62,75 @@ groq_client = Groq(api_key=config.groq_api_key)
 
 HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
 }
 
-# ============ RSS ИСТОЧНИКИ ============
+# ============ НОВЫЕ ЗАПАДНЫЕ ИСТОЧНИКИ ============
 
 RSS_FEEDS = [
-    ("https://habr.com/ru/rss/hub/artificial_intelligence/all/?fl=ru", "Habr AI"),
-    ("https://habr.com/ru/rss/hub/machine_learning/all/?fl=ru", "Habr ML"),
-    ("https://habr.com/ru/rss/hub/neural_networks/all/?fl=ru", "Habr Neural"),
-    ("https://3dnews.ru/news/rss/", "3DNews"),
-    ("https://www.ixbt.com/export/news.rss", "iXBT"),
+    # Лучшие профильные источники по AI
+    ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch AI"),
+    ("https://venturebeat.com/category/ai/feed/", "VentureBeat AI"),
+    ("https://www.technologyreview.com/feed/topic/artificial-intelligence", "MIT Tech Review"),
+    
+    # Общие техно-гиганты (нужен строгий фильтр)
+    ("https://www.theverge.com/rss/index.xml", "The Verge"),
+    ("http://feeds.arstechnica.com/arstechnica/index", "Ars Technica"),
+    ("https://www.engadget.com/rss.xml", "Engadget"),
 ]
 
-# ============ КЛЮЧЕВЫЕ СЛОВА ============
+# ============ ОБНОВЛЕННЫЕ КЛЮЧЕВЫЕ СЛОВА (ENGLISH) ============
+# Так как исходники теперь на английском, ищем английские слова
 
 AI_KEYWORDS = [
-    # Общие термины
-    "нейросеть", "нейросети", "нейронная сеть", "нейросетевой",
-    "искусственный интеллект", "ии",
-    "neural network", "artificial intelligence",
+    # Core terms
+    "artificial intelligence", "neural network", "machine learning", "deep learning",
+    "generative ai", "llm", "large language model", "foundation model",
     
-    # Модели и продукты
-    "llm", "gpt", "chatgpt", "claude", "gemini",
-    "copilot", "mistral", "llama", "qwen", "gigachat", "yandexgpt",
-    "kandinsky", "шедеврум", "deepseek", "grok",
+    # Products & Models
+    "chatgpt", "gpt-4", "gpt-5", "claude", "gemini", "copilot", "llama", 
+    "mistral", "midjourney", "dall-e", "stable diffusion", "sora", "runway",
+    "groq", "deepseek", "qwen",
     
-    # Компании
-    "openai", "anthropic", "deepmind", "сбер ai", "яндекс ai",
-    "hugging face", "stability ai", "meta ai", "google ai",
+    # Companies (Context check required usually, but these are strong signals)
+    "openai", "anthropic", "deepmind", "hugging face", "nvidia", 
     
-    # Генерация
-    "stable diffusion", "midjourney", "dall-e", "sora", "runway",
-    "генеративный", "генерация изображений", "генерация текста",
-    "text-to-image", "text-to-video",
-    
-    # Технические термины
-    "машинное обучение", "глубокое обучение", "transformer",
-    "трансформер", "языковая модель", "мультимодальный",
-    "дообучение", "обучение модели", "датасет", "fine-tuning",
-    
-    # Применение
-    "чат-бот", "голосовой помощник", "распознавание",
-    "ai-ассистент", "умный помощник",
-    "компьютерное зрение", "обработка языка", "nlp",
-    
-    # Продвинутые концепции
-    "agi", "рассуждение", "агент", "ai-агент", "контекстное окно",
-    "токен", "большая языковая модель", "reasoning",
-    "обучение с подкреплением", "rlhf", "промпт", "prompt",
-    "алгоритм машинного", "обучение нейросети",
+    # Tech terms
+    "transformer", "inference", "fine-tuning", "dataset", "chatbot", 
+    "computer vision", "nlp", "natural language processing",
+    "agi", "autonomous agent", "rlhf", "prompt engineering",
+    "text-to-video", "text-to-image",
 ]
 
 EXCLUDE_KEYWORDS = [
-    # Финансы
-    "акции", "биржа", "котировки", "индекс", "инвестиции", "инвестор",
-    "дивиденды", "капитализация", "выручка", "прибыль", "убыток",
-    "доход", "оборот", "отчётность",
-    "центробанк", "ставка", "инфляция", "рецессия",
-    "банк", "кредит", "ипотека", "вклад", "депозит", "сделка", "слияние",
-    "поглощение", "листинг",
+    # Finance & Markets (English)
+    "stock", "shares", "market cap", "earnings call", "quarterly results",
+    "dividend", "ipo", "wall street", "investor", "revenue", "profit",
+    "recession", "inflation", "central bank",
     
-    # Кадры
-    "назначен", "назначение", "отставка", "уволен",
-    "штат", "увольнения", "сокращения", "штаб-квартира",
+    # Games & Entertainment (Non-AI)
+    "game review", "gameplay", "ps5", "xbox", "nintendo", "steam deck",
+    "movie review", "box office", "trailer", "premiere", "netflix series",
+    "actor", "actress", "director",
     
-    # Спорт
-    "футбол", "хоккей", "спорт", "матч", "турнир",
-    "чемпионат", "олимпиада", "сборная",
+    # Cars (Non-AI)
+    "electric car", "ev", "tesla model", "toyota", "bmw", "ford",
+    "engine", "horsepower", "test drive", "mileage",
     
-    # Политика
-    "выборы", "президент", "депутат", "санкции",
-    "тюрьма", "штраф", "приговор", "арест",
-    "министр", "правительство", "госдума",
+    # Politics & Crime
+    "election", "vote", "senate", "congress", "white house",
+    "arrest", "jail", "court", "lawsuit", "police", "crime",
     
-    # Развлечения
-    "кино", "фильм", "сериал", "концерт", "актер", "актёр",
-    "режиссер", "премьера", "кинотеатр",
-    
-    # Авто
-    "автомобиль", "машина", "тесла", "tesla",
-    "электромобиль", "автопилот", "двигатель",
-    "бензин", "дизель", "водитель", "автопром",
-    
-    # Археология/История
-    "археолог", "раскопки", "древний", "артефакт", "мумия",
-    "гробница", "динозавр", "ископаемое",
+    # Archaeology/History
+    "archaeology", "ancient", "fossil", "dinosaur", "tomb", "excavation",
 ]
 
 BAD_PHRASES = [
-    "предлагает решение", "уникальное решение",
-    "обеспечивает защиту", "позволяет сосредоточиться",
-    "делает бизнес устойчивее", "значительно упрощает",
-    "идеальное решение для", "эффективнее работать",
-    "на правах рекламы", "партнерский материал",
-    "лучшее решение", "революционный продукт",
-    "не имеет аналогов", "лидер рынка",
+    "sponsored content", "partner content", "advertisement",
+    "best deals", "black friday", "cyber monday",
+    "buy now", "discount", "coupon",
 ]
 
 
@@ -198,18 +167,16 @@ class Topic:
     }
     
     @classmethod
-    def detect(cls, title: str, summary: str) -> str:
-        text = f"{title} {summary}".lower()
-        
+    def detect(cls, text: str) -> str:
+        text = text.lower()
         if any(kw in text for kw in ["gpt", "chatgpt", "claude", "llm", "gemini"]):
             return cls.LLM
-        if any(kw in text for kw in ["midjourney", "dall-e", "stable diffusion", "генерация изображ"]):
+        if any(kw in text for kw in ["midjourney", "dall-e", "stable diffusion", "image generation"]):
             return cls.IMAGE_GEN
-        if any(kw in text for kw in ["робот", "robot", "робототехник"]):
+        if any(kw in text for kw in ["robot", "robotics", "humanoid"]):
             return cls.ROBOTICS
-        if any(kw in text for kw in ["nvidia", "gpu", "чип", "процессор", "видеокарт"]):
+        if any(kw in text for kw in ["nvidia", "gpu", "chip", "processor", "h100"]):
             return cls.HARDWARE
-        
         return cls.AI
     
     @classmethod
@@ -217,41 +184,59 @@ class Topic:
         return cls.HASHTAGS.get(topic, cls.HASHTAGS[cls.AI])
 
 
-# ============ URL NORMALIZATION ============
+# ============ HELPERS ============
 
 def normalize_url(url: str) -> str:
-    if not url:
-        return ""
+    if not url: return ""
     try:
         parsed = urlparse(url)
         path = parsed.path.rstrip("/")
         domain = parsed.netloc.lower().replace("www.", "")
         return f"{domain}{path}"
-    except Exception:
-        return url.split("?")[0].rstrip("/")
-
+    except: return url.split("?")[0].rstrip("/")
 
 def extract_article_id(url: str) -> str:
     normalized = normalize_url(url)
-    
-    # Habr
-    habr_match = re.search(r'habr\.com/.+?/(\d{5,7})', normalized)
-    if habr_match:
-        return f"habr_{habr_match.group(1)}"
-    
-    # 3DNews
-    dnews_match = re.search(r'3dnews\.ru/(\d+)', normalized)
-    if dnews_match:
-        return f"3dnews_{dnews_match.group(1)}"
-    
-    # iXBT
-    if 'ixbt.com' in normalized:
-        return f"ixbt_{hashlib.md5(normalized.encode()).hexdigest()[:12]}"
-    
     return hashlib.md5(normalized.encode()).hexdigest()[:16]
 
+def clean_text(text: str) -> str:
+    if not text: return ""
+    # Удаляем HTML теги для чистоты проверки ключевых слов
+    clean = re.sub(r'<[^>]+>', '', text)
+    return " ".join(clean.replace("\n", " ").split())
 
-# ============ POSTED ARTICLES MANAGER ============
+def has_exact_keyword(text: str, keywords: List[str]) -> Optional[str]:
+    text_lower = text.lower()
+    words = set(re.findall(r'\b[\w-]+\b', text_lower))
+    for kw in keywords:
+        kw_lower = kw.lower()
+        if " " in kw_lower:
+            if kw_lower in text_lower: return kw
+        elif kw_lower in words: return kw
+    return None
+
+def has_ai_keyword(text: str) -> bool:
+    text_lower = text.lower()
+    return any(kw.lower() in text_lower for kw in AI_KEYWORDS)
+
+def build_final_post(core_text: str, hashtags: str, link: str, max_total: int = 1024) -> str:
+    cta_line = "\n\n🔥 — огонь! | 🗿 — ну такое | ⚡ — прикольно"
+    source_line = f'\n🔗 <a href="{link}">Источник</a>'
+    hashtag_line = f"\n\n{hashtags}"
+    
+    reserved = len(cta_line) + len(hashtag_line) + len(source_line) + 20
+    max_core = max_total - reserved
+    
+    if len(core_text) > max_core:
+        core_text = core_text[:max_core]
+        last_punct = max(core_text.rfind('.'), core_text.rfind('!'), core_text.rfind('?'))
+        if last_punct > max_core // 2:
+            core_text = core_text[:last_punct + 1]
+    
+    return core_text + cta_line + hashtag_line + source_line
+
+
+# ============ POSTED MANAGER ============
 
 class PostedManager:
     def __init__(self, filepath: str):
@@ -261,508 +246,206 @@ class PostedManager:
         self.data: List[Dict] = []
         self._load()
     
-    def _load(self) -> None:
-        if not os.path.exists(self.filepath):
-            self._save()
-            return
-        
+    def _load(self):
+        if not os.path.exists(self.filepath): self._save(); return
         try:
             with open(self.filepath, "r", encoding="utf-8") as f:
                 self.data = json.load(f)
-            
             for item in self.data:
                 if "id" in item:
                     url = item["id"]
                     self.posted_urls.add(normalize_url(url))
                     self.posted_ids.add(extract_article_id(url))
-        except json.JSONDecodeError as e:
-            print(f"⚠️ Ошибка чтения {self.filepath}: {e}")
-            self.data = []
-        except Exception as e:
-            print(f"⚠️ Неожиданная ошибка загрузки: {e}")
-            self.data = []
+        except: self.data = []
     
-    def _save(self) -> None:
+    def _save(self):
         try:
             with open(self.filepath, "w", encoding="utf-8") as f:
                 json.dump(self.data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"❌ Ошибка сохранения {self.filepath}: {e}")
+        except: pass
     
     def is_posted(self, url: str) -> bool:
-        return (
-            extract_article_id(url) in self.posted_ids or 
-            normalize_url(url) in self.posted_urls
-        )
+        return extract_article_id(url) in self.posted_ids or normalize_url(url) in self.posted_urls
     
-    def add(self, url: str, title: str = "") -> None:
+    def add(self, url: str, title: str = ""):
         self.posted_ids.add(extract_article_id(url))
         self.posted_urls.add(normalize_url(url))
-        self.data.append({
-            "id": url,
-            "title": title[:100],
-            "timestamp": datetime.now().timestamp()
-        })
+        self.data.append({"id": url, "title": title[:100], "timestamp": datetime.now().timestamp()})
         self._save()
     
-    def cleanup(self, days: int = 30) -> int:
+    def cleanup(self, days: int = 30):
         cutoff = datetime.now().timestamp() - (days * 86400)
-        old_count = len(self.data)
         self.data = [i for i in self.data if i.get("timestamp", 0) > cutoff]
-        removed = old_count - len(self.data)
-        
-        if removed > 0:
-            # Перестраиваем индексы
-            self.posted_ids.clear()
-            self.posted_urls.clear()
-            for item in self.data:
-                if "id" in item:
-                    url = item["id"]
-                    self.posted_urls.add(normalize_url(url))
-                    self.posted_ids.add(extract_article_id(url))
-            self._save()
-            print(f"🧹 Удалено {removed} старых записей")
-        
-        return removed
+        self._save()
     
-    def count(self) -> int:
-        return len(self.data)
+    def count(self) -> int: return len(self.data)
 
 
-# ============ KEYWORD MATCHING ============
+# ============ LOGIC ============
 
-def has_exact_keyword(text: str, keywords: List[str]) -> Optional[str]:
-    """
-    Проверяет наличие целого слова/фразы.
-    Поддерживает слова с дефисами (ai-ассистент, text-to-image).
-    """
-    text_lower = text.lower()
-    # Захватываем слова с дефисами
-    words = set(re.findall(r'\b[\w-]+\b', text_lower))
-    
-    for kw in keywords:
-        kw_lower = kw.lower()
-        # Фраза из нескольких слов
-        if " " in kw_lower:
-            if kw_lower in text_lower:
-                return kw
-        # Одно слово (возможно с дефисом)
-        elif kw_lower in words:
-            return kw
-    
-    return None
-
-
-def has_ai_keyword(text: str) -> bool:
-    """
-    Проверяет наличие AI-тематики.
-    Для AI используем поиск подстроки (нейросет -> нейросети).
-    """
-    text_lower = text.lower()
-    
-    for kw in AI_KEYWORDS:
-        if kw.lower() in text_lower:
-            return True
-    
-    return False
-
-
-def is_too_promotional(text: str) -> bool:
-    text_lower = text.lower()
-    return any(phrase in text_lower for phrase in BAD_PHRASES)
-
-
-# ============ HELPERS ============
-
-def clean_text(text: str) -> str:
-    """Очищает текст от лишних пробелов и переносов."""
-    if not text:
-        return ""
-    return " ".join(text.replace("\n", " ").replace("\r", " ").split())
-
-
-def build_final_post(
-    core_text: str, 
-    hashtags: str, 
-    link: str, 
-    max_total: int = 1024
-) -> str:
-    """Собирает финальный пост с CTA, хештегами и ссылкой."""
-    
-    # ========== ИЗМЕНЕНИЕ ЗДЕСЬ ==========
-    cta_line = "\n\n🔥 — огонь! | 🗿 — ну такое | ⚡ — прикольно"
-    # =====================================
-    
-    source_line = f'\n🔗 <a href="{link}">Источник</a>'
-    hashtag_line = f"\n\n{hashtags}"
-    
-    # Вычисляем максимальную длину основного текста
-    reserved = len(cta_line) + len(hashtag_line) + len(source_line) + 20
-    max_core = max_total - reserved
-    
-    if len(core_text) > max_core:
-        core_text = core_text[:max_core]
-        # Обрезаем до последнего предложения
-        last_punct = max(
-            core_text.rfind('.'),
-            core_text.rfind('!'),
-            core_text.rfind('?')
-        )
-        if last_punct > max_core // 2:  # Если нашли пунктуацию не слишком рано
-            core_text = core_text[:last_punct + 1]
-    
-    return core_text + cta_line + hashtag_line + source_line
-
-
-# ============ RSS LOADING ============
-
-async def load_rss_async(
-    session: aiohttp.ClientSession, 
-    url: str, 
-    source: str,
-    posted_manager: PostedManager
-) -> List[Article]:
-    """Асинхронно загружает и парсит RSS-ленту."""
+async def load_rss_async(session: aiohttp.ClientSession, url: str, source: str, posted_manager: PostedManager) -> List[Article]:
     articles = []
-    
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            if resp.status != 200:
-                print(f"⚠️ {source}: HTTP {resp.status}")
-                return []
-            
+            if resp.status != 200: return []
             content = await resp.text()
             feed = feedparser.parse(content)
-            
-            if feed.bozo:
-                print(f"⚠️ {source}: RSS parsing issue - {feed.bozo_exception}")
-                if not feed.entries:
-                    return []
+            if feed.bozo and not feed.entries: return []
+    except: return []
     
-    except asyncio.TimeoutError:
-        print(f"⚠️ {source}: Timeout")
-        return []
-    except aiohttp.ClientError as e:
-        print(f"❌ {source}: Connection error - {e}")
-        return []
-    except Exception as e:
-        print(f"❌ {source}: Unexpected error - {e}")
-        return []
-    
-    for entry in feed.entries[:30]:
+    for entry in feed.entries[:20]:
         link = entry.get("link", "")
-        if not link or posted_manager.is_posted(link):
-            continue
-        
+        if not link or posted_manager.is_posted(link): continue
         title = clean_text(entry.get("title") or "")
-        summary = clean_text(
-            entry.get("summary") or entry.get("description") or ""
-        )[:700]
+        summary = clean_text(entry.get("summary") or entry.get("description") or "")[:1000]
+        if not title: continue
         
-        if not title:
-            continue
-        
-        articles.append(Article(
-            id=link,
-            title=title,
-            summary=summary,
-            link=link,
-            source=source,
-            published=datetime.now()
-        ))
-    
+        articles.append(Article(id=link, title=title, summary=summary, link=link, source=source))
     return articles
 
-
 async def load_all_feeds(posted_manager: PostedManager) -> List[Article]:
-    """Загружает все RSS-ленты параллельно."""
-    print("\n🔄 Загрузка RSS...")
-    
+    print("\n🔄 Scanning Western Tech Sources...")
     async with aiohttp.ClientSession(headers=HEADERS) as session:
-        tasks = [
-            load_rss_async(session, url, name, posted_manager)
-            for url, name in RSS_FEEDS
-        ]
+        tasks = [load_rss_async(session, url, name, posted_manager) for url, name in RSS_FEEDS]
         results = await asyncio.gather(*tasks, return_exceptions=True)
     
     articles = []
     for i, result in enumerate(results):
-        if isinstance(result, Exception):
-            print(f"❌ {RSS_FEEDS[i][1]}: {result}")
-        elif isinstance(result, list):
+        if isinstance(result, list):
             articles.extend(result)
-            if result:
-                print(f"✅ {RSS_FEEDS[i][1]}: {len(result)} статей")
-    
-    print(f"📊 Всего найдено {len(articles)} новых статей")
+            if result: print(f"✅ {RSS_FEEDS[i][1]}: found {len(result)}")
+            
+    print(f"📊 Total raw articles: {len(articles)}")
     return articles
 
-
-# ============ FILTERING ============
-
 def filter_articles(articles: List[Article]) -> List[Article]:
-    """Фильтрует статьи по ключевым словам."""
     valid = []
-    excluded_log = []
-    
     for article in articles:
         text = article.get_full_text()
         
-        # 1. Проверка исключений (точное совпадение слов)
-        bad_word = has_exact_keyword(text, EXCLUDE_KEYWORDS)
-        if bad_word:
-            excluded_log.append(f"❌ {article.title[:40]}... (слово: '{bad_word}')")
-            continue
+        # 1. Filter Exclusions (English)
+        if has_exact_keyword(text, EXCLUDE_KEYWORDS): continue
+        if any(p in text.lower() for p in BAD_PHRASES): continue
         
-        # 2. Проверка тематики AI
-        if not has_ai_keyword(text):
-            continue
+        # 2. Require AI Keywords (English)
+        if not has_ai_keyword(text): continue
         
         valid.append(article)
     
-    excluded_count = len(articles) - len(valid)
-    print(f"\n🗑 Отфильтровано {excluded_count} статей")
-    
-    if excluded_log:
-        print("🔍 Примеры исключенных:")
-        for log in excluded_log[:5]:
-            print(f"   {log}")
-    
-    # Сортируем по дате (новые первые)
     valid.sort(key=lambda x: x.published, reverse=True)
-    
+    print(f"🎯 Candidates after filtering: {len(valid)}")
     return valid
 
-
-# ============ GROQ GENERATION ============
-
-async def generate_summary(
-    article: Article,
-    rate_limit_delay: float = 1.0
-) -> Optional[str]:
-    """Генерирует пост через Groq API."""
-    print(f"   📝 Обработка: {article.title[:50]}...")
+async def generate_summary(article: Article) -> Optional[str]:
+    print(f"   📝 Translating & Processing: {article.title[:50]}...")
     
+    # === ГЛАВНОЕ ИЗМЕНЕНИЕ: ПРОМПТ НА ПЕРЕВОД ===
     prompt = f"""
-Роль: Технический редактор Telegram-канала об искусственном интеллекте.
+You are an expert editor for a Russian Telegram channel about AI Technology.
+Your task is to READ the English news and WRITE a post in RUSSIAN.
 
-Задача: Переписать новость в информативный и увлекательный пост для аудитории, интересующейся AI.
+SOURCE (English):
+Title: {article.title}
+Content: {article.summary}
 
-Исходник:
-Заголовок: {article.title}
-Содержание: {article.summary}
+INSTRUCTIONS:
+1.  **TRANSLATE** the core meaning to Russian. Do not just translate word-for-word, adapt it for Russian readers.
+2.  **FORMAT**:
+    - Start with a hook (e.g., "Всем привет! 👋" or "Новости AI ⚡").
+    - Explain WHAT happened and WHY it matters.
+    - Keep it simple, friendly, and informative.
+3.  **LENGTH**: 600-800 characters (Russian text).
+4.  **STRICT RULE**: If the news is NOT about Artificial Intelligence, Machine Learning, or Neural Networks (e.g. it is about general gadgets, crypto, or politics) -> OUTPUT ONLY THE WORD: "SKIP".
 
-Требования:
-1. Начни с приветствия: "Привет! 👋" или "AI-новости ⚡" или "Интересное из мира AI 🤖"
-2. Объясни ЧТО произошло и ПОЧЕМУ это важно/интересно
-3. Используй простой язык, понятный широкой аудитории
-4. НЕ используй маркетинговые клише ("уникальный", "революционный", "лучший")
-5. НЕ добавляй призывы к действию ("подписывайтесь", "ставьте лайк")
-6. Объем: 600-800 символов
-
-Важно: Если новость НЕ связана с AI/ML/нейросетями/технологиями — ответь ТОЛЬКО словом: SKIP
+Output language must be **RUSSIAN**.
 """
     
     try:
-        # Добавляем задержку для rate limiting
-        await asyncio.sleep(rate_limit_delay)
-        
         response = await asyncio.to_thread(
             lambda: groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.6,
-                max_tokens=900,
+                max_tokens=1000,
             )
         )
-        
         content = response.choices[0].message.content.strip()
         
-        # Проверка на SKIP
-        if content.upper().startswith("SKIP") or content.upper() == "SKIP":
-            print("   ⚠️ Groq: тема не подходит (SKIP)")
+        if "SKIP" in content.upper():
+            print("   ⚠️ Skipped by AI (Off-topic)")
             return None
         
-        # Проверка на рекламный текст
-        if is_too_promotional(content):
-            print("   ⚠️ Текст слишком рекламный")
-            return None
-        
-        # Собираем финальный пост
-        topic = Topic.detect(article.title, article.summary)
+        topic = Topic.detect(f"{article.title} {article.summary}")
         hashtags = Topic.get_hashtags(topic)
         
-        return build_final_post(
-            content, 
-            hashtags, 
-            article.link, 
-            config.caption_limit
-        )
-    
+        return build_final_post(content, hashtags, article.link, config.caption_limit)
     except Exception as e:
-        print(f"   ❌ Ошибка генерации: {e}")
+        print(f"   ❌ Generation error: {e}")
         return None
 
-
-# ============ IMAGE GENERATION ============
-
 async def generate_image(title: str) -> Optional[str]:
-    """Генерирует изображение через Pollinations.ai."""
+    # Для Pollinations английский заголовок (как сейчас) подходит идеально!
     try:
-        # Очищаем заголовок для промпта
         clean_title = re.sub(r'[^\w\s]', '', title)[:50]
-        prompt = (
-            f"futuristic AI technology illustration, {clean_title}, "
-            "minimalist design, 4k quality, blue and purple neon lighting, "
-            "dark background, tech aesthetic"
-        )
+        prompt = f"futuristic AI technology illustration, {clean_title}, minimalist, 4k, neon light, dark background"
+        url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}?width=1024&height=1024&nologo=true&seed={random.randint(0,10000)}"
         
-        seed = random.randint(0, 10000)
-        url = (
-            f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}"
-            f"?width=1024&height=1024&nologo=true&seed={seed}"
-        )
-        
-        # Асинхронный запрос изображения
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with session.get(url, timeout=30) as resp:
                 if resp.status == 200:
-                    fname = f"temp_img_{seed}.jpg"
-                    content = await resp.read()
-                    with open(fname, "wb") as f:
-                        f.write(content)
-                    print(f"   🖼 Изображение сгенерировано")
+                    fname = f"temp_{random.randint(0,999)}.jpg"
+                    with open(fname, "wb") as f: f.write(await resp.read())
                     return fname
-                else:
-                    print(f"   ⚠️ Ошибка генерации изображения: HTTP {resp.status}")
-    
-    except asyncio.TimeoutError:
-        print("   ⚠️ Timeout при генерации изображения")
-    except Exception as e:
-        print(f"   ⚠️ Ошибка генерации изображения: {e}")
-    
+    except: pass
     return None
 
-
-# ============ POSTING ============
-
-async def post_to_channel(
-    article: Article,
-    text: str,
-    posted_manager: PostedManager
-) -> bool:
-    """Публикует пост в Telegram-канал."""
-    img_path = None
-    
+async def post_to_channel(article: Article, text: str, posted_manager: PostedManager) -> bool:
+    img_path = await generate_image(article.title)
     try:
-        # Генерируем изображение
-        img_path = await generate_image(article.title)
-        
-        if img_path and os.path.exists(img_path):
-            await bot.send_photo(
-                config.channel_id,
-                photo=FSInputFile(img_path),
-                caption=text
-            )
+        if img_path:
+            await bot.send_photo(config.channel_id, photo=FSInputFile(img_path), caption=text)
         else:
-            await bot.send_message(
-                config.channel_id,
-                text=text,
-                disable_web_page_preview=False
-            )
+            await bot.send_message(config.channel_id, text=text, disable_web_page_preview=False)
         
-        # Добавляем в опубликованные
         posted_manager.add(article.link, article.title)
-        print(f"✅ УСПЕШНО ОПУБЛИКОВАНО: {article.title[:50]}...")
+        print(f"✅ PUBLISHED: {article.title[:40]}...")
         return True
-    
     except Exception as e:
-        print(f"❌ Ошибка отправки в Telegram: {e}")
+        print(f"❌ Telegram Error: {e}")
         return False
-    
     finally:
-        # Удаляем временное изображение
-        if img_path and os.path.exists(img_path):
-            try:
-                os.remove(img_path)
-            except Exception:
-                pass
-
+        if img_path and os.path.exists(img_path): os.remove(img_path)
 
 # ============ MAIN ============
 
 async def autopost():
-    """Основная функция автопостинга."""
-    print(f"\n{'='*50}")
-    print(f"🚀 ЗАПУСК: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'='*50}")
-    
-    # Инициализация менеджера постов
+    print(f"\n{'='*40}\n🚀 STARTING (Western Sources Mode)\n{'='*40}")
     posted_manager = PostedManager(config.posted_file)
-    print(f"📁 Загружено {posted_manager.count()} опубликованных статей")
-    
-    # Очистка старых записей
     posted_manager.cleanup(config.retention_days)
     
-    # Загрузка статей
-    raw_articles = await load_all_feeds(posted_manager)
+    raw = await load_all_feeds(posted_manager)
+    candidates = filter_articles(raw)
     
-    if not raw_articles:
-        print("❌ Не удалось загрузить статьи из RSS")
-        return
+    if not candidates: print("❌ No news found."); return
     
-    # Фильтрация
-    candidates = filter_articles(raw_articles)
-    
-    if not candidates:
-        print("❌ Нет подходящих новостей после фильтрации")
-        return
-    
-    print(f"\n🎯 Подходящих кандидатов: {len(candidates)}")
-    
-    # Пробуем статьи по очереди
-    for i, article in enumerate(candidates, 1):
-        print(f"\n[{i}/{len(candidates)}] Пробуем: {article.title[:60]}...")
-        
-        # Генерация текста
+    for article in candidates:
         text = await generate_summary(article)
+        if not text: continue
         
-        if not text:
-            print("   ⏩ Пропускаем, пробуем следующую...")
-            continue
-        
-        # Публикация
-        success = await post_to_channel(article, text, posted_manager)
-        
-        if success:
-            break  # Выходим после успешной публикации
-        
-        # Небольшая пауза перед следующей попыткой
+        if await post_to_channel(article, text, posted_manager):
+            break 
         await asyncio.sleep(2)
-    
-    else:
-        print("\n⚠️ Не удалось опубликовать ни одной статьи")
-    
-    print(f"\n{'='*50}")
-    print(f"🏁 Работа завершена: {datetime.now().strftime('%H:%M:%S')}")
-    print(f"{'='*50}")
-
+        
+    print("\n🏁 DONE")
 
 async def main():
-    """Точка входа."""
-    try:
-        await autopost()
-    except KeyboardInterrupt:
-        print("\n\n⛔ Прервано пользователем")
-    except Exception as e:
-        print(f"\n❌ Критическая ошибка: {e}")
-        raise
-    finally:
-        await bot.session.close()
-
+    try: await autopost()
+    finally: await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

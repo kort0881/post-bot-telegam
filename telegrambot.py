@@ -68,6 +68,7 @@ AI_KEYWORDS = [
 ]
 
 EXCLUDE_KEYWORDS = [
+    # Финансы и бизнес
     "акции", "акция", "биржа", "котировки", "индекс",
     "инвестиции", "инвестор", "инвесторы", "дивиденды",
     "ipo", "капитализация", "рыночная стоимость",
@@ -83,23 +84,49 @@ EXCLUDE_KEYWORDS = [
     "рынок", "доля рынка", "конкуренты",
     "цена акций", "стоимость компании", "оценка компании",
     "выход на биржу", "размещение", "листинг",
+    
+    # Кадры
     "назначен", "назначение", "отставка", "уволен",
     "генеральный директор", "ceo", "основатель ушёл",
     "сокращение штата", "увольнения", "сокращения",
     "офис", "штаб-квартира", "переезд компании",
+    
+    # Спорт
     "теннис", "футбол", "хоккей", "баскетбол", "спорт", "матч",
     "олимпиада", "чемпионат", "турнир", "сборная",
+    
+    # Игры
     "игра", "геймплей", "playstation", "xbox", "steam", "nintendo",
     "видеоигра", "консоль", "gaming",
+    
+    # Развлечения
     "кино", "фильм", "сериал", "музыка", "концерт", "актёр", "актер",
     "премьера", "трейлер", "netflix", "кинотеатр",
+    
+    # Политика
     "выборы", "президент", "парламент", "политик", "депутат",
     "санкции", "правительство", "министр", "закон", "законопроект",
+    
+    # Медицина
     "болезнь", "covid", "пандемия", "грипп", "вакцина",
+    
+    # Крипта
     "крипто", "bitcoin", "биткойн", "биткоин", "ethereum",
     "nft", "блокчейн", "криптовалюта", "майнинг",
+    
+    # Юридическое
     "суд", "судебный", "арест", "приговор", "тюрьма", "штраф",
-    "иск", "антимонопольный"
+    "иск", "антимонопольный",
+    
+    # НОВОЕ: Археология и история
+    "археолог", "археология", "археологический", "раскопки",
+    "древн", "артефакт", "палеонтолог", "окаменелости",
+    "доисторический", "палеолит", "неолит", "мезолит",
+    "памятник культуры", "исторический памятник",
+    "тысяч лет", "миллион лет", "возраст составляет",
+    "обнаружен во время раскопок", "найден при раскопках",
+    "античн", "средневеков", "династия", "цивилизация",
+    "захоронение", "гробница", "мумия", "саркофаг"
 ]
 
 BAD_PHRASES = [
@@ -135,21 +162,12 @@ def normalize_url(url: str) -> str:
         return ""
     
     try:
-        # Парсим URL
         parsed = urlparse(url)
-        
-        # Базовый путь без параметров
         path = parsed.path.rstrip("/")
-        
-        # Убираем www из домена
         domain = parsed.netloc.lower().replace("www.", "")
-        
-        # Собираем нормализованный URL
         normalized = f"{domain}{path}"
-        
         return normalized
     except Exception:
-        # Fallback: простая очистка
         url = url.replace("https://", "").replace("http://", "")
         url = url.replace("www.", "")
         url = url.split("?")[0].split("#")[0]
@@ -159,32 +177,23 @@ def normalize_url(url: str) -> str:
 def extract_article_id(url: str) -> str:
     """
     Извлекает уникальный ID статьи из URL.
-    Для Habr: номер статьи
-    Для 3DNews: номер новости
-    Для остальных: нормализованный URL
     """
     normalized = normalize_url(url)
     
-    # Habr: извлекаем номер статьи
-    # habr.com/ru/articles/987076 -> 987076
-    # habr.com/ru/news/987076 -> 987076
-    # habr.com/ru/companies/xxx/articles/987076 -> 987076
+    # Habr
     habr_match = re.search(r'habr\.com/.+?/(\d{5,7})', normalized)
     if habr_match:
         return f"habr_{habr_match.group(1)}"
     
-    # 3DNews: извлекаем номер
-    # 3dnews.ru/1135685 -> 1135685
+    # 3DNews
     dnews_match = re.search(r'3dnews\.ru/(\d+)', normalized)
     if dnews_match:
         return f"3dnews_{dnews_match.group(1)}"
     
-    # iXBT: путь к новости
-    # ixbt.com/news/2026/01/24/xxx.html
+    # iXBT
     if 'ixbt.com' in normalized:
         return f"ixbt_{hashlib.md5(normalized.encode()).hexdigest()[:12]}"
     
-    # Остальные: хеш от нормализованного URL
     return hashlib.md5(normalized.encode()).hexdigest()[:16]
 
 
@@ -193,13 +202,12 @@ def extract_article_id(url: str) -> str:
 class PostedManager:
     def __init__(self, filepath: str):
         self.filepath = filepath
-        self.posted_ids: set = set()  # Нормализованные ID
-        self.posted_urls: set = set()  # Нормализованные URL (для обратной совместимости)
-        self.data: list = []  # Сырые данные для сохранения
+        self.posted_ids: set = set()
+        self.posted_urls: set = set()
+        self.data: list = []
         self._load()
     
     def _load(self):
-        """Загружает и индексирует данные"""
         print(f"\n{'='*50}")
         print(f"📂 Загрузка истории: {self.filepath}")
         
@@ -217,13 +225,10 @@ class PostedManager:
                 self.data = []
                 return
             
-            # Индексируем все записи
             for item in self.data:
                 if isinstance(item, dict) and "id" in item:
                     url = item["id"]
-                    # Добавляем нормализованный URL
                     self.posted_urls.add(normalize_url(url))
-                    # Добавляем ID статьи
                     self.posted_ids.add(extract_article_id(url))
             
             print(f"   ✅ Загружено: {len(self.data)} записей")
@@ -237,7 +242,6 @@ class PostedManager:
             self.data = []
     
     def _save(self):
-        """Сохраняет данные"""
         try:
             with open(self.filepath, "w", encoding="utf-8") as f:
                 json.dump(self.data, f, ensure_ascii=False, indent=2)
@@ -246,13 +250,10 @@ class PostedManager:
             print(f"❌ Ошибка сохранения: {e}")
     
     def is_posted(self, url: str) -> bool:
-        """Проверяет, была ли статья опубликована"""
-        # Проверка 1: по ID статьи
         article_id = extract_article_id(url)
         if article_id in self.posted_ids:
             return True
         
-        # Проверка 2: по нормализованному URL
         normalized = normalize_url(url)
         if normalized in self.posted_urls:
             return True
@@ -260,15 +261,12 @@ class PostedManager:
         return False
     
     def add(self, url: str, title: str = ""):
-        """Добавляет статью в историю"""
         article_id = extract_article_id(url)
         normalized = normalize_url(url)
         
-        # Добавляем в индексы
         self.posted_ids.add(article_id)
         self.posted_urls.add(normalized)
         
-        # Добавляем в данные
         self.data.append({
             "id": url,
             "article_id": article_id,
@@ -280,14 +278,12 @@ class PostedManager:
         print(f"   📝 Добавлено: {article_id}")
     
     def cleanup(self, days: int = 30):
-        """Удаляет старые записи"""
         if not self.data:
             return
         
         cutoff = datetime.now().timestamp() - (days * 86400)
         old_count = len(self.data)
         
-        # Фильтруем
         self.data = [
             item for item in self.data
             if item.get("timestamp") is None or item.get("timestamp", 0) > cutoff
@@ -295,7 +291,6 @@ class PostedManager:
         
         removed = old_count - len(self.data)
         if removed > 0:
-            # Перестраиваем индексы
             self.posted_ids.clear()
             self.posted_urls.clear()
             for item in self.data:
@@ -310,7 +305,6 @@ class PostedManager:
         return len(self.data)
 
 
-# Создаём менеджер
 posted = PostedManager(POSTED_FILE)
 
 
@@ -415,7 +409,6 @@ def load_rss(url: str, source: str) -> List[Dict]:
         
         title = clean_text(entry.get("title") or "")
         
-        # ПРОВЕРКА ДУБЛИКАТА
         if posted.is_posted(link):
             skip_count += 1
             continue
@@ -436,26 +429,47 @@ def load_rss(url: str, source: str) -> List[Dict]:
 def load_articles_from_sites() -> List[Dict]:
     print("\n🔄 Загрузка RSS лент...")
     articles: List[Dict] = []
+    
+    # Только специализированные AI-хабы
     articles.extend(load_rss("https://habr.com/ru/rss/hub/artificial_intelligence/all/?fl=ru", "Habr AI"))
     articles.extend(load_rss("https://habr.com/ru/rss/hub/machine_learning/all/?fl=ru", "Habr ML"))
     articles.extend(load_rss("https://habr.com/ru/rss/hub/neural_networks/all/?fl=ru", "Habr Neural"))
+    
+    # Общие техно-ленты (будут фильтроваться)
     articles.extend(load_rss("https://3dnews.ru/news/rss/", "3DNews"))
     articles.extend(load_rss("https://www.ixbt.com/export/news.rss", "iXBT"))
-    articles.extend(load_rss("https://nplus1.ru/rss", "N+1"))
-    articles.extend(load_rss("https://hightech.fm/feed", "Хайтек"))
+    
     print(f"\n📊 Всего новых статей: {len(articles)}")
     return articles
 
 def filter_articles(articles: List[Dict]) -> List[Dict]:
+    """
+    ИСПРАВЛЕННАЯ ФИЛЬТРАЦИЯ:
+    1. Исключаем нежелательные темы
+    2. Оставляем ТОЛЬКО статьи с AI-ключевыми словами
+    """
     valid = []
+    filtered_out = {"exclude": 0, "no_ai": 0}
+    
     for e in articles:
         text = f"{e['title']} {e['summary']}".lower()
+        
+        # Шаг 1: Исключаем нежелательные темы
         if any(kw in text for kw in EXCLUDE_KEYWORDS):
+            filtered_out["exclude"] += 1
             continue
-        if any(kw in text for kw in AI_KEYWORDS):
-            valid.append(e)
-    valid.sort(key=lambda x: x["published_parsed"], reverse=True)
+        
+        # Шаг 2: Оставляем ТОЛЬКО AI-тематику
+        if not any(kw in text for kw in AI_KEYWORDS):
+            filtered_out["no_ai"] += 1
+            continue
+        
+        valid.append(e)
+    
+    print(f"❌ Отфильтровано: {filtered_out['exclude']} (исключения), {filtered_out['no_ai']} (не AI)")
     print(f"🎯 После фильтрации (AI-тематика): {len(valid)}")
+    
+    valid.sort(key=lambda x: x["published_parsed"], reverse=True)
     return valid
 
 
@@ -561,10 +575,8 @@ async def autopost():
     print(f"📊 В истории: {posted.count()} статей")
     print("="*60)
     
-    # Очистка старых
     posted.cleanup(RETENTION_DAYS)
     
-    # Загрузка
     articles = load_articles_from_sites()
     candidates = filter_articles(articles)
     
@@ -572,7 +584,6 @@ async def autopost():
         print("\n❌ Нет подходящих новостей")
         return
     
-    # Берём первую
     art = candidates[0]
     article_id = extract_article_id(art["link"])
     
@@ -581,7 +592,6 @@ async def autopost():
     print(f"   Заголовок: {art['title'][:60]}...")
     print(f"   URL: {art['link']}")
     
-    # Генерация
     post_text = short_summary(art["title"], art["summary"], art["link"])
     
     if not post_text:
@@ -596,7 +606,6 @@ async def autopost():
         else:
             await bot.send_message(CHANNEL_ID, text=post_text, disable_web_page_preview=False)
         
-        # СОХРАНЯЕМ
         posted.add(art["link"], art["title"])
         
         print(f"\n✅ ОПУБЛИКОВАНО!")
@@ -620,6 +629,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

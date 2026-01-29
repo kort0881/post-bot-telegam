@@ -5,9 +5,13 @@ import random
 import re
 import hashlib
 import logging
+import difflib
+import tempfile
+import shutil
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from urllib.parse import urlparse, quote
+from dataclasses import dataclass, field
 
 import aiohttp
 import feedparser
@@ -16,6 +20,13 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import FSInputFile
 from groq import Groq
+
+# Для блокировки файлов (Windows совместимость)
+try:
+    import fcntl
+    HAS_FCNTL = True
+except ImportError:
+    HAS_FCNTL = False
 
 # ====================== ЛОГИ ======================
 logging.basicConfig(
@@ -37,6 +48,9 @@ class Config:
         self.retention_days = int(os.getenv("RETENTION_DAYS", "30"))
         self.caption_limit = 1024
         self.posted_file = "posted_articles.json"
+        
+        # Порог похожести заголовков (0.75 = 75% сходства)
+        self.similarity_threshold = 0.75
 
         missing = []
         for var, name in [(self.groq_api_key, "GROQ_API_KEY"),
@@ -88,8 +102,6 @@ EXCLUDE_KEYWORDS = [
 BAD_PHRASES = ["sponsored", "partner content", "advertisement", "black friday", "deal alert", "coupon"]
 
 # ====================== DATACLASSES ======================
-from dataclasses import dataclass, field
-
 @dataclass
 class Article:
     title: str
@@ -129,18 +141,21 @@ class Topic:
 
 # ====================== HELPERS ======================
 def normalize_url(url: str) -> str:
+    """Агрессивная нормализация URL для удаления UTM-меток и дублей"""
     if not url:
         return ""
     try:
+        url = url.strip()
         parsed = urlparse(url)
-        path = parsed.path.rstrip("/")
         domain = parsed.netloc.lower().replace("www.", "")
-        return f"{domain}{path}".split("?")[0].split("#")[0]
+        path = parsed.path.rstrip("/")
+        return f"{parsed.scheme}://{domain}{path}"
     except:
         return url.split("?")[0].split("#")[0]
 
-def article_id(url: str) -> str:
-    return hashlib.md5(normalize_url(url).encode()).hexdigest()[:16]
+def calculate_similarity(text1: str, text2: str) -> float:
+    """Вычисляет коэффициент схожести двух строк (от 0.0 до 1.0)"""
+    return difflib.SequenceMatcher(None, text1.lower(), text2.lower()).ratio()
 
 def clean_text(text: str) -> str:
     if not text:
@@ -154,14 +169,61 @@ def ai_relevance(text: str) -> float:
     matches = sum(1 for kw in AI_KEYWORDS if kw in lower)
     return min(matches / 3.0, 1.0)
 
+def get_content_hash(text: str) -> str:
+    """Генерирует короткий хеш контента"""
+    if not text:
+        return ""
+    return hashlib.md5(text.strip().lower().encode()).hexdigest()[:16]
+
 # ====================== POSTED MANAGER ======================
 class PostedManager:
     def __init__(self, file="posted_articles.json"):
         self.file = file
+        self.lock_file = file + ".lock"
         self.data = []
-        self.ids = set()
         self.urls = set()
+        self.titles = []
+        self.content_hashes = set()
+        self._lock_fd = None
+        
+        self._acquire_lock()
         self._load()
+
+    def _acquire_lock(self):
+        """Блокировка для предотвращения одновременного запуска"""
+        if not HAS_FCNTL:
+            # Windows: простая проверка через файл
+            if os.path.exists(self.lock_file):
+                try:
+                    # Проверяем, не устарел ли lock файл (> 10 минут)
+                    age = datetime.now().timestamp() - os.path.getmtime(self.lock_file)
+                    if age < 600:
+                        raise SystemExit("⚠️ Другой экземпляр скрипта уже запущен")
+                except OSError:
+                    pass
+            with open(self.lock_file, 'w') as f:
+                f.write(str(os.getpid()))
+            return
+        
+        # Linux/Mac: используем fcntl
+        self._lock_fd = open(self.lock_file, 'w')
+        try:
+            fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self._lock_fd.write(str(os.getpid()))
+            self._lock_fd.flush()
+        except BlockingIOError:
+            raise SystemExit("⚠️ Другой экземпляр скрипта уже запущен")
+
+    def _release_lock(self):
+        """Освобождение блокировки"""
+        try:
+            if HAS_FCNTL and self._lock_fd:
+                fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+                self._lock_fd.close()
+            if os.path.exists(self.lock_file):
+                os.remove(self.lock_file)
+        except Exception:
+            pass
 
     def _load(self):
         if not os.path.exists(self.file):
@@ -174,41 +236,102 @@ class PostedManager:
             for item in self.data:
                 url = item.get("url", "")
                 if url:
-                    self.ids.add(article_id(url))
                     self.urls.add(normalize_url(url))
+                
+                title = item.get("title", "")
+                if title:
+                    self.titles.append(title)
+                
+                content_hash = item.get("content_hash", "")
+                if content_hash:
+                    self.content_hashes.add(content_hash)
             
-            logger.info(f"Загружено {len(self.data)} опубликованных статей")
+            logger.info(f"📚 Загружено {len(self.data)} опубликованных статей")
         except Exception as e:
             logger.error(f"Ошибка загрузки posted_articles.json: {e}")
             self.data = []
 
     def _save(self):
+        """Атомарное сохранение данных"""
         try:
-            with open(self.file, "w", encoding="utf-8") as f:
+            # Создаём временный файл в той же директории
+            dir_name = os.path.dirname(self.file) or '.'
+            fd, tmp_path = tempfile.mkstemp(suffix='.json', dir=dir_name)
+            
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
                 json.dump(self.data, f, ensure_ascii=False, indent=2)
+            
+            # Атомарно заменяем файл
+            shutil.move(tmp_path, self.file)
         except Exception as e:
             logger.error(f"Ошибка сохранения: {e}")
+            # Удаляем временный файл если остался
+            try:
+                if 'tmp_path' in locals() and os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except:
+                pass
 
-    def is_posted(self, url: str) -> bool:
-        return article_id(url) in self.ids or normalize_url(url) in self.urls
-
-    def add(self, url: str, title: str):
-        aid = article_id(url)
-        nurl = normalize_url(url)
+    def is_duplicate(self, url: str, title: str, summary: str = "") -> bool:
+        """Комплексная проверка на дубликат"""
         
-        if aid in self.ids or nurl in self.urls:
+        # 1. Проверка по нормализованному URL
+        norm_url = normalize_url(url)
+        if norm_url in self.urls:
+            logger.debug(f"🚫 Дубликат по URL: {url[:60]}")
+            return True
+
+        # 2. Проверка по хешу контента
+        if summary:
+            content_hash = get_content_hash(summary)
+            if content_hash and content_hash in self.content_hashes:
+                logger.info(f"🚫 Дубликат по контенту: {title[:50]}...")
+                return True
+
+        # 3. Проверка по похожести заголовка (все заголовки, с оптимизацией)
+        title_len = len(title)
+        for existing_title in self.titles:
+            # Быстрый фильтр по длине (если длины сильно отличаются - пропускаем)
+            if abs(len(existing_title) - title_len) > title_len * 0.5:
+                continue
+            
+            similarity = calculate_similarity(title, existing_title)
+            if similarity > config.similarity_threshold:
+                logger.info(f"🚫 Дубликат по заголовку ({int(similarity*100)}%): '{title[:40]}...' ≈ '{existing_title[:40]}...'")
+                return True
+        
+        return False
+
+    def add(self, url: str, title: str, summary: str = ""):
+        """Добавляет статью в историю публикаций"""
+        norm_url = normalize_url(url)
+        
+        # Проверка на случай повторного добавления
+        if norm_url in self.urls:
             return
         
-        self.ids.add(aid)
-        self.urls.add(nurl)
+        content_hash = get_content_hash(summary) if summary else ""
+        
+        # Обновляем кэши
+        self.urls.add(norm_url)
+        self.titles.append(title)
+        if content_hash:
+            self.content_hashes.add(content_hash)
+        
+        # Добавляем запись
         self.data.append({
             "url": url,
-            "title": title[:100],
+            "norm_url": norm_url,
+            "title": title[:200],
+            "content_hash": content_hash,
             "ts": datetime.now(timezone.utc).isoformat() + "Z"
         })
+        
         self._save()
+        logger.info(f"💾 Сохранено в историю: {title[:50]}...")
 
     def cleanup(self, days=30):
+        """Удаляет записи старше N дней"""
         cutoff = datetime.now(timezone.utc).timestamp() - days * 86400
         old_count = len(self.data)
         
@@ -219,17 +342,26 @@ class PostedManager:
         
         removed = old_count - len(self.data)
         if removed > 0:
-            self.ids.clear()
+            # Перестраиваем кэши
             self.urls.clear()
+            self.titles.clear()
+            self.content_hashes.clear()
+            
             for item in self.data:
                 url = item.get("url", "")
+                title = item.get("title", "")
+                content_hash = item.get("content_hash", "")
+                
                 if url:
-                    self.ids.add(article_id(url))
                     self.urls.add(normalize_url(url))
+                if title:
+                    self.titles.append(title)
+                if content_hash:
+                    self.content_hashes.add(content_hash)
             
             self._save()
-            logger.info(f"Удалено {removed} старых записей")
-    
+            logger.info(f"🧹 Удалено {removed} старых записей из истории")
+
     def _parse_ts(self, ts_str: Optional[str]) -> float:
         if not ts_str:
             return 0
@@ -238,6 +370,9 @@ class PostedManager:
             return dt.timestamp()
         except:
             return 0
+
+    def __del__(self):
+        self._release_lock()
 
 # ====================== RSS LOADER ======================
 async def fetch_feed(session: aiohttp.ClientSession, url: str, source: str, posted: PostedManager) -> List[Article]:
@@ -260,13 +395,17 @@ async def fetch_feed(session: aiohttp.ClientSession, url: str, source: str, post
     articles = []
     for entry in feed.entries[:25]:
         link = entry.get("link", "").strip()
-        if not link or posted.is_posted(link):
-            continue
-
         title = clean_text(entry.get("title") or "")
         summary = clean_text(entry.get("summary") or entry.get("description") or "")[:1500]
 
-        if not title or len(title) < 15:
+        if not link or not title:
+            continue
+        
+        if len(title) < 15:
+            continue
+            
+        # ПРОВЕРКА НА ДУБЛИКАТЫ (URL + контент + заголовок)
+        if posted.is_duplicate(link, title, summary):
             continue
 
         published = datetime.now(timezone.utc)
@@ -292,7 +431,7 @@ async def fetch_feed(session: aiohttp.ClientSession, url: str, source: str, post
     return articles
 
 async def load_all_feeds(posted: PostedManager) -> List[Article]:
-    logger.info("🔄 Сканирование западных источников...")
+    logger.info("🔄 Сканирование источников...")
     
     connector = aiohttp.TCPConnector(limit_per_host=5, limit=30)
     async with aiohttp.ClientSession(headers=HEADERS, connector=connector) as session:
@@ -303,11 +442,11 @@ async def load_all_feeds(posted: PostedManager) -> List[Article]:
     for res, (url, name) in zip(results, RSS_FEEDS):
         if isinstance(res, list) and res:
             all_articles.extend(res)
-            logger.info(f"✅ {name}: {len(res)} статей")
+            logger.info(f"✅ {name}: {len(res)} новых статей")
         elif isinstance(res, Exception):
             logger.error(f"❌ {name}: {res}")
 
-    logger.info(f"📊 Всего собрано: {len(all_articles)}")
+    logger.info(f"📊 Всего кандидатов: {len(all_articles)}")
     return all_articles
 
 # ====================== FILTER ======================
@@ -328,8 +467,9 @@ def filter_articles(articles: List[Article]) -> List[Article]:
 
         candidates.append(a)
 
+    # Сортировка: сначала самые свежие
     candidates.sort(key=lambda x: x.published, reverse=True)
-    logger.info(f"🎯 Прошло фильтры: {len(candidates)} статей")
+    logger.info(f"🎯 Прошло фильтры по ключевым словам: {len(candidates)} статей")
     return candidates
 
 # ====================== SUMMARY + TRANSLATE ======================
@@ -340,24 +480,27 @@ GROQ_MODELS = [
 ]
 
 async def generate_summary(article: Article) -> Optional[str]:
-    logger.info(f"📝 Обработка: {article.title[:60]}...")
+    logger.info(f"📝 Генерация поста: {article.title[:60]}...")
     
-    prompt = f"""Ты — редактор топового русскоязычного Telegram-канала про искусственный интеллект (50к+ подписчиков).
+    prompt = f"""Ты — редактор топового русскоязычного Telegram-канала про ИИ.
 
-Оригинальная новость (English):
+Оригинальная новость:
 Заголовок: {article.title}
-Описание: {article.summary[:2000]}
+Текст: {article.summary[:2000]}
 
-Напиши пост на РУССКОМ языке в живом, эмоциональном стиле:
-- Начни с яркого хука (вопрос, восклицание, эмодзи)
-- Объясни простыми словами, ЧТО произошло и ПОЧЕМУ это важно
-- Добавь 1-2 своих комментария в духе «это реально прорыв», «конкуренты в шоке», «ждали годами»
-- Длина: 600-850 символов
-- Закончи вопросом или призывом к обсуждению
+Задача:
+Напиши пост на РУССКОМ языке.
+Стиль: Живой, захватывающий, но без маркетинговой чепухи.
+Структура:
+1. Заголовок-хук (с эмодзи).
+2. Суть новости (что произошло).
+3. Почему это важно (контекст).
+4. Заключение/вопрос.
 
-ВАЖНО: Если новость НЕ про ИИ, нейросети или ML (например, про финансы, политику, игры) — ответь ТОЛЬКО: SKIP
+Длина: до 900 символов.
+Если новость мусорная или не про технологии/ИИ — ответь одним словом: SKIP
 
-Пиши по-русски!"""
+Текст поста:"""
 
     for attempt in range(3):
         try:
@@ -372,7 +515,7 @@ async def generate_summary(article: Article) -> Optional[str]:
             )
             text = resp.choices[0].message.content.strip()
 
-            if "SKIP" in text.upper()[:50]:
+            if "SKIP" in text.upper()[:10]:
                 logger.info("   ⚠️ LLM отклонила тему (SKIP)")
                 return None
 
@@ -386,6 +529,7 @@ async def generate_summary(article: Article) -> Optional[str]:
             if len(final) > config.caption_limit:
                 overflow = len(final) - config.caption_limit + 50
                 text = text[:-overflow]
+                # Обрезаем аккуратно по точке
                 for punct in ['.', '!', '?']:
                     last = text.rfind(punct)
                     if last > len(text) // 2:
@@ -401,54 +545,38 @@ async def generate_summary(article: Article) -> Optional[str]:
 
     return None
 
-# ====================== IMAGE (С ЛОГАМИ!) ======================
+# ====================== IMAGE ======================
 async def generate_image(title: str) -> Optional[str]:
-    logger.info("   🎨 Начинаю генерацию изображения...")
+    logger.info("   🎨 Генерация изображения...")
     
     clean_title = re.sub(r'[^\w\s]', '', title)[:60]
-    prompt = f"minimalist futuristic AI technology illustration, {clean_title}, dark background, neon glow, cyberpunk aesthetic, 4k quality"
+    prompt = f"editorial tech illustration, {clean_title}, isometric 3d, artificial intelligence theme, purple and blue neon lights, dark background, 8k"
     url = f"https://image.pollinations.ai/prompt/{quote(prompt)}?width=1024&height=1024&nologo=true&enhance=true&seed={random.randint(1,999999)}"
     
-    logger.info(f"   📡 URL: {url[:100]}...")
-
     for attempt in range(3):
         try:
-            logger.info(f"   🔄 Попытка {attempt + 1}/3...")
-            
             timeout = aiohttp.ClientTimeout(total=45)
             async with aiohttp.ClientSession(timeout=timeout) as sess:
                 async with sess.get(url) as resp:
-                    logger.info(f"   📊 HTTP Status: {resp.status}")
-                    
                     if resp.status != 200:
-                        logger.warning(f"   ⚠️ Плохой статус: {resp.status}")
-                        await asyncio.sleep(3)
+                        await asyncio.sleep(2)
                         continue
                     
                     content = await resp.read()
-                    size = len(content)
-                    logger.info(f"   💾 Размер: {size} байт")
-                    
-                    if size < 10000:
-                        logger.warning(f"   ⚠️ Слишком маленький файл: {size} байт")
-                        await asyncio.sleep(3)
+                    if len(content) < 5000:
                         continue
                     
                     fname = f"img_{int(datetime.now().timestamp())}_{random.randint(1000,9999)}.jpg"
                     with open(fname, "wb") as f:
                         f.write(content)
                     
-                    logger.info(f"   ✅ Изображение сохранено: {fname}")
+                    logger.info(f"   ✅ Картинка готова: {fname}")
                     return fname
                     
-        except asyncio.TimeoutError:
-            logger.warning(f"   ⏱️ Timeout на попытке {attempt + 1}")
-            await asyncio.sleep(5)
-        except Exception as e:
-            logger.error(f"   ❌ Ошибка генерации: {type(e).__name__}: {e}")
+        except Exception:
             await asyncio.sleep(3)
     
-    logger.warning("   ⚠️ Не удалось сгенерировать изображение после 3 попыток")
+    logger.warning("   ⚠️ Картинку создать не удалось")
     return None
 
 # ====================== POST ======================
@@ -457,16 +585,14 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
     
     try:
         if img and os.path.exists(img):
-            logger.info(f"   📤 Отправка с изображением...")
             await bot.send_photo(config.channel_id, FSInputFile(img), caption=text)
             os.remove(img)
-            logger.info(f"   🗑️ Временный файл удалён")
         else:
-            logger.info(f"   📤 Отправка БЕЗ изображения (текст only)")
             await bot.send_message(config.channel_id, text, disable_web_page_preview=False)
 
-        posted.add(article.link, article.title)
-        logger.info(f"✅ ОПУБЛИКОВАНО: {article.title[:60]}...")
+        # Добавляем в базу опубликованных с контентом для хеширования
+        posted.add(article.link, article.title, article.summary)
+        logger.info(f"✅ УСПЕШНО ОПУБЛИКОВАНО: {article.title[:60]}...")
         return True
         
     except Exception as e:
@@ -481,47 +607,39 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 # ====================== MAIN ======================
 async def autopost():
     logger.info("=" * 60)
-    logger.info("🚀 ЗАПУСК АВТОПОСТЕРА (Western AI News → RU)")
+    logger.info("🚀 ЗАПУСК СКРИПТА")
     logger.info("=" * 60)
 
     posted = PostedManager(config.posted_file)
     posted.cleanup(config.retention_days)
 
     raw = await load_all_feeds(posted)
-    if not raw:
-        logger.info("❌ Новых статей не найдено")
-        return
-
     candidates = filter_articles(raw)
+
     if not candidates:
-        logger.info("❌ Нет подходящих новостей после фильтрации")
+        logger.info("❌ Нет новостей для публикации")
         return
 
-    for i, article in enumerate(candidates[:10], 1):
-        logger.info(f"\n[{i}/{min(10, len(candidates))}] Попытка: {article.source}")
-        
+    # Берем ТОЛЬКО ОДНУ самую свежую и подходящую новость за запуск
+    for article in candidates[:10]:
+        # Двойная проверка перед генерацией
+        if posted.is_duplicate(article.link, article.title, article.summary):
+            continue
+
         summary = await generate_summary(article)
         if not summary:
-            logger.info("   ⏩ Пропуск, пробуем следующую...")
             continue
 
         if await post_article(article, summary, posted):
-            logger.info("\n✨ Пост успешно опубликован! Завершаю работу.")
-            break
+            logger.info("\n🏁 Пост опубликован, скрипт завершает работу.")
+            break 
         
-        await asyncio.sleep(3)
-    else:
-        logger.warning("\n⚠️ Не удалось опубликовать ни одной статьи из топ-10")
-
-    logger.info("=" * 60)
-    logger.info("🏁 Работа завершена")
-    logger.info("=" * 60)
+        await asyncio.sleep(5)
 
 async def main():
+    posted = None
     try:
         await autopost()
-    except KeyboardInterrupt:
-        logger.info("\n⛔ Остановлено пользователем")
     except Exception as e:
         logger.exception(f"💥 Критическая ошибка: {e}")
     finally:

@@ -52,6 +52,11 @@ class Config:
         self.similarity_threshold = 0.60  # Порог похожести заголовков
         self.entity_overlap_threshold = 0.55  # Порог совпадения сущностей
         self.min_post_length = 500
+        
+        # 🆕 НОВЫЕ ПАРАМЕТРЫ ДЛЯ РАЗНООБРАЗИЯ
+        self.recent_posts_check = 5  # Проверять последние N постов на разнообразие
+        self.recent_similarity_threshold = 0.45  # Более строгий порог для последних постов
+        self.min_entity_distance = 2  # Мин. количество уникальных сущностей
 
         missing = []
         for var, name in [(self.groq_api_key, "GROQ_API_KEY"),
@@ -71,14 +76,27 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 }
 
-# ====================== RSS ======================
+# ====================== RSS (РАСШИРЕННЫЙ СПИСОК) ======================
 RSS_FEEDS = [
+    # Основные
     ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch"),
     ("https://venturebeat.com/category/ai/feed/", "VentureBeat"),
     ("https://www.technologyreview.com/topic/artificial-intelligence/feed", "MIT Tech Review"),
     ("https://www.theverge.com/rss/index.xml", "The Verge"),
     ("https://arstechnica.com/tag/artificial-intelligence/feed/", "Ars Technica"),
     ("https://www.wired.com/feed/tag/ai/latest/rss", "WIRED"),
+    
+    # 🆕 ДОПОЛНИТЕЛЬНЫЕ ИСТОЧНИКИ
+    ("https://www.artificialintelligence-news.com/feed/", "AI News"),
+    ("https://hai.stanford.edu/news/rss.xml", "Stanford HAI"),
+    ("https://deepmind.google/blog/rss.xml", "DeepMind Blog"),
+    ("https://openai.com/blog/rss/", "OpenAI Blog"),
+    ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
+    ("https://www.marktechpost.com/feed/", "MarkTechPost"),
+    ("https://syncedreview.com/feed/", "Synced AI"),
+    ("https://news.ycombinator.com/rss", "Hacker News"),  # Много AI-новостей
+    ("https://www.unite.ai/feed/", "Unite.AI"),
+    ("https://analyticsindiamag.com/feed/", "AIM"),
 ]
 
 # ====================== КЛЮЧЕВЫЕ СЛОВА ======================
@@ -87,7 +105,8 @@ AI_KEYWORDS = [
     "neural network", "llm", "large language model", "gpt", "chatgpt", "claude",
     "gemini", "grok", "llama", "mistral", "qwen", "deepseek", "midjourney",
     "dall-e", "stable diffusion", "sora", "groq", "openai", "anthropic",
-    "deepmind", "hugging face", "nvidia", "agi", "transformer", "generative"
+    "deepmind", "hugging face", "nvidia", "agi", "transformer", "generative",
+    "agents", "reasoning", "multimodal", "fine-tuning", "rlhf"
 ]
 
 EXCLUDE_KEYWORDS = [
@@ -139,6 +158,8 @@ class Topic:
     IMAGE_GEN = "image_gen"
     ROBOTICS = "robotics"
     HARDWARE = "hardware"
+    REGULATION = "regulation"
+    RESEARCH = "research"
     GENERAL = "general"
     
     HASHTAGS = {
@@ -146,6 +167,8 @@ class Topic:
         IMAGE_GEN: "#Midjourney #DALLE #StableDiffusion #генерация",
         ROBOTICS: "#роботы #Humanoid #робототехника",
         HARDWARE: "#NVIDIA #GPU #чипы #железо",
+        REGULATION: "#регулирование #безопасность #этика",
+        RESEARCH: "#исследования #наука #DeepMind",
         GENERAL: "#AI #нейросети #ИИ"
     }
 
@@ -160,6 +183,10 @@ class Topic:
             return Topic.ROBOTICS
         if any(x in t for x in ["nvidia", "h100", "h200", "blackwell", "gpu", "cuda"]):
             return Topic.HARDWARE
+        if any(x in t for x in ["regulation", "safety", "alignment", "ethics", "policy"]):
+            return Topic.REGULATION
+        if any(x in t for x in ["research", "paper", "study", "breakthrough", "discovery"]):
+            return Topic.RESEARCH
         return Topic.GENERAL
 
 # ====================== HELPERS ======================
@@ -223,6 +250,7 @@ class PostedManager:
         self.titles: List[str] = []
         self.content_hashes: Set[str] = set()
         self.topic_entities: List[Set[str]] = []
+        self.topics: List[str] = []  # 🆕 Для отслеживания тем
         self._lock_fd = None
         
         self._acquire_lock()
@@ -284,6 +312,7 @@ class PostedManager:
         self.titles.clear()
         self.content_hashes.clear()
         self.topic_entities.clear()
+        self.topics.clear()
         
         for item in self.data:
             # URL
@@ -296,9 +325,9 @@ class PostedManager:
             if title:
                 self.titles.append(title)
             else:
-                self.titles.append("")  # Placeholder для синхронизации индексов
+                self.titles.append("")
             
-            # Entities (загружаем сохранённые или извлекаем из title)
+            # Entities
             saved_entities = item.get("entities", [])
             if saved_entities:
                 self.topic_entities.append(set(saved_entities))
@@ -311,6 +340,10 @@ class PostedManager:
             chash = item.get("content_hash", "")
             if chash:
                 self.content_hashes.add(chash)
+            
+            # 🆕 Topic
+            topic = item.get("topic", Topic.GENERAL)
+            self.topics.append(topic)
 
     def _save(self):
         """Атомарное сохранение"""
@@ -384,7 +417,56 @@ class PostedManager:
         
         return False
 
-    def add(self, url: str, title: str, summary: str = ""):
+    # 🆕 ПРОВЕРКА РАЗНООБРАЗИЯ С ПОСЛЕДНИМИ ПОСТАМИ
+    def is_too_similar_to_recent(self, title: str, summary: str) -> bool:
+        """
+        Проверяет, не слишком ли похожа статья на последние N постов
+        Более строгие пороги для свежих постов
+        """
+        if len(self.data) < 2:
+            return False
+        
+        recent_posts = self.data[-config.recent_posts_check:]
+        full_text = f"{title} {summary}".strip()
+        new_entities = extract_key_entities(full_text)
+        detected_topic = Topic.detect(full_text)
+        
+        for post in recent_posts:
+            # Проверка 1: Похожесть заголовка (строже)
+            post_title = post.get("title", "")
+            if post_title:
+                sim = calculate_similarity(title, post_title)
+                if sim > config.recent_similarity_threshold:
+                    logger.info(f"🔄 [RECENT] Слишком похоже на недавний пост: {post_title[:40]}")
+                    return True
+            
+            # Проверка 2: Совпадение темы + сущностей
+            post_topic = post.get("topic", "")
+            post_entities = set(post.get("entities", []))
+            
+            if detected_topic == post_topic and post_entities:
+                common = new_entities & post_entities
+                if len(common) >= config.min_entity_distance:
+                    logger.info(f"🔄 [RECENT] Та же тема '{detected_topic}' с похожими сущностями: {common}")
+                    return True
+        
+        return False
+    
+    # 🆕 ПОЛУЧИТЬ СТАТИСТИКУ ПОСЛЕДНИХ ПОСТОВ
+    def get_recent_topics_stats(self) -> dict:
+        """Возвращает статистику по темам последних постов"""
+        if len(self.data) < 3:
+            return {}
+        
+        recent = self.data[-10:]
+        stats = {}
+        for post in recent:
+            topic = post.get("topic", Topic.GENERAL)
+            stats[topic] = stats.get(topic, 0) + 1
+        
+        return stats
+
+    def add(self, url: str, title: str, summary: str = "", topic: str = Topic.GENERAL):
         """Добавляет статью в историю"""
         norm_url = normalize_url(url)
         
@@ -401,6 +483,7 @@ class PostedManager:
         self.urls.add(norm_url)
         self.titles.append(title)
         self.topic_entities.append(entities)
+        self.topics.append(topic)
         if chash:
             self.content_hashes.add(chash)
         
@@ -411,11 +494,12 @@ class PostedManager:
             "title": title[:200],
             "content_hash": chash,
             "entities": list(entities),
+            "topic": topic,
             "ts": datetime.now(timezone.utc).isoformat() + "Z"
         })
         
         self._save()
-        logger.info(f"💾 Сохранено: {title[:45]}... | Сущности: {entities if entities else 'нет'}")
+        logger.info(f"💾 [{topic.upper()}] {title[:45]}... | Сущности: {entities if entities else 'нет'}")
 
     def cleanup(self, days: int = 30):
         """Удаляет записи старше N дней"""
@@ -517,8 +601,12 @@ async def load_all_feeds(posted: PostedManager) -> List[Article]:
     return all_articles
 
 # ====================== FILTER ======================
-def filter_articles(articles: List[Article]) -> List[Article]:
+def filter_articles(articles: List[Article], posted: PostedManager) -> List[Article]:
     candidates = []
+    
+    # 🆕 Статистика последних тем
+    recent_stats = posted.get_recent_topics_stats()
+    logger.info(f"📊 Последние темы: {recent_stats}")
     
     for a in articles:
         text = f"{a.title} {a.summary}".lower()
@@ -532,10 +620,37 @@ def filter_articles(articles: List[Article]) -> List[Article]:
         if ai_relevance(text) < 0.4:
             continue
         
+        # 🆕 ПРОВЕРКА НА ПОХОЖЕСТЬ С ПОСЛЕДНИМИ ПОСТАМИ
+        if posted.is_too_similar_to_recent(a.title, a.summary):
+            logger.debug(f"  Пропуск (слишком похоже на недавние): {a.title[:40]}")
+            continue
+        
         candidates.append(a)
 
     # Сортируем по дате (свежие первые)
     candidates.sort(key=lambda x: x.published, reverse=True)
+    
+    # 🆕 ПРИОРИТЕТ РАЗНЫМ ТЕМАМ
+    # Если одна тема преобладает в последних постах, отдаём приоритет другим
+    if recent_stats:
+        dominant_topic = max(recent_stats, key=recent_stats.get)
+        if recent_stats[dominant_topic] >= 3:  # Если 3+ поста подряд об одном
+            logger.info(f"⚖️ Приоритет разнообразию (много '{dominant_topic}' в последних)")
+            
+            # Разделяем на доминантную тему и остальные
+            other_topics = []
+            same_topic = []
+            
+            for art in candidates:
+                detected = Topic.detect(f"{art.title} {art.summary}")
+                if detected == dominant_topic:
+                    same_topic.append(art)
+                else:
+                    other_topics.append(art)
+            
+            # Сначала другие темы, потом доминантная
+            candidates = other_topics + same_topic
+    
     logger.info(f"🎯 После фильтров: {len(candidates)} статей")
     return candidates
 
@@ -632,7 +747,7 @@ async def generate_summary(article: Article) -> Optional[str]:
                         break
                 final = f"{text}{cta}\n\n{hashtags}{source_link}"
 
-            logger.info(f"  ✅ Готово: {len(text)} символов")
+            logger.info(f"  ✅ Готово: {len(text)} символов | Тема: {topic}")
             return final
             
         except Exception as e:
@@ -681,9 +796,11 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
         else:
             await bot.send_message(config.channel_id, text, disable_web_page_preview=False)
         
-        # Сохраняем в историю
-        posted.add(article.link, article.title, article.summary)
-        logger.info(f"✅ ОПУБЛИКОВАНО: {article.title[:50]}")
+        # 🆕 Сохраняем с темой
+        topic = Topic.detect(f"{article.title} {article.summary}")
+        posted.add(article.link, article.title, article.summary, topic)
+        
+        logger.info(f"✅ ОПУБЛИКОВАНО [{topic.upper()}]: {article.title[:50]}")
         return True
         
     except Exception as e:
@@ -698,7 +815,7 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 # ====================== MAIN ======================
 async def main():
     logger.info("=" * 50)
-    logger.info("🚀 ЗАПУСК AI-POSTER")
+    logger.info("🚀 ЗАПУСК AI-POSTER v2.0")
     logger.info("=" * 50)
     
     posted = PostedManager(config.posted_file)
@@ -706,17 +823,22 @@ async def main():
     
     # Загружаем и фильтруем
     raw_articles = await load_all_feeds(posted)
-    candidates = filter_articles(raw_articles)
+    candidates = filter_articles(raw_articles, posted)
     
     if not candidates:
         logger.info("📭 Нет подходящих новостей")
         return
 
     # Пробуем опубликовать одну статью
-    for article in candidates[:15]:
+    for article in candidates[:20]:  # 🆕 Увеличили до 20 попыток
         # Финальная проверка перед генерацией
         if posted.is_duplicate(article.link, article.title, article.summary):
             logger.debug(f"  Пропуск (дубль): {article.title[:40]}")
+            continue
+        
+        # 🆕 Ещё одна проверка на разнообразие
+        if posted.is_too_similar_to_recent(article.title, article.summary):
+            logger.debug(f"  Пропуск (похоже на недавние): {article.title[:40]}")
             continue
         
         summary = await generate_summary(article)
@@ -735,6 +857,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

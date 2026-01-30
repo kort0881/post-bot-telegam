@@ -5,16 +5,12 @@
     "ts": "2026-01-28T12:24:08.644775Z"
   },
   {
-    "url": "https://venturebeat.com/technology/the-creator-of-claude-code-just-revealed-his-workflow-and-developers-are",
-    "norm_url": "https://venturebeat.com/technology/the-creator-of-claude-code-just-revealed-his-workflow-and-developers-are",
-    "title": "The creator of Claude Code just revealed his workflow, and developers are losing their minds",
-    "content_hash": "e17e3dafd826a124",
-    "entities": [
-      "chatgpt",
-      "anthropic",
-      "ai agent",
-      "claude"
-    ],
-    "ts": "2026-01-30T12:28:52.614931+00:00Z"
+    "url": "https://arstechnica.com/gadgets/2025/12/the-npu-in-your-phone-keeps-improving-why-isnt-that-making-ai-better/",
+    "norm_url": "https://arstechnica.com/gadgets/2025/12/the-npu-in-your-phone-keeps-improving-why-isnt-that-making-ai-better",
+    "title": "The NPU in your phone keeps improving—why isn’t that making AI better?",
+    "content_hash": "29ab107ad99cd0d5",
+    "entities": [],
+    "topic": "general",
+    "ts": "2026-01-30T15:23:12.543868+00:00Z"
   }
 ]

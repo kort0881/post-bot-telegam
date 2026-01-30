@@ -5,15 +5,16 @@
     "ts": "2026-01-28T12:24:08.644775Z"
   },
   {
-    "url": "https://arstechnica.com/ai/2025/12/big-tech-joins-forces-with-linux-foundation-to-standardize-ai-agents/",
-    "norm_url": "https://arstechnica.com/ai/2025/12/big-tech-joins-forces-with-linux-foundation-to-standardize-ai-agents",
-    "title": "Big Tech joins forces with Linux Foundation to standardize AI agents",
-    "content_hash": "aa8ae9e8b8fd54ca",
+    "url": "https://venturebeat.com/technology/the-creator-of-claude-code-just-revealed-his-workflow-and-developers-are",
+    "norm_url": "https://venturebeat.com/technology/the-creator-of-claude-code-just-revealed-his-workflow-and-developers-are",
+    "title": "The creator of Claude Code just revealed his workflow, and developers are losing their minds",
+    "content_hash": "e17e3dafd826a124",
     "entities": [
-      "linux foundation",
-      "agentic",
-      "agent"
+      "chatgpt",
+      "anthropic",
+      "ai agent",
+      "claude"
     ],
-    "ts": "2026-01-30T06:33:48.050227+00:00Z"
+    "ts": "2026-01-30T12:28:52.614931+00:00Z"
   }
 ]

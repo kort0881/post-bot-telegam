@@ -5,14 +5,15 @@
     "ts": "2026-01-28T12:24:08.644775Z"
   },
   {
-    "url": "https://arstechnica.com/google/2025/11/google-unveils-gemini-3-ai-model-and-ai-first-ide-called-antigravity/",
-    "norm_url": "https://arstechnica.com/google/2025/11/google-unveils-gemini-3-ai-model-and-ai-first-ide-called-antigravity",
-    "title": "Google unveils Gemini 3 AI model and AI-first IDE called Antigravity",
-    "content_hash": "9b636f2b65344950",
+    "url": "https://arstechnica.com/ai/2025/12/big-tech-joins-forces-with-linux-foundation-to-standardize-ai-agents/",
+    "norm_url": "https://arstechnica.com/ai/2025/12/big-tech-joins-forces-with-linux-foundation-to-standardize-ai-agents",
+    "title": "Big Tech joins forces with Linux Foundation to standardize AI agents",
+    "content_hash": "aa8ae9e8b8fd54ca",
     "entities": [
-      "gemini",
-      "google"
+      "linux foundation",
+      "agentic",
+      "agent"
     ],
-    "ts": "2026-01-29T18:29:06.619720+00:00Z"
+    "ts": "2026-01-30T06:33:48.050227+00:00Z"
   }
 ]

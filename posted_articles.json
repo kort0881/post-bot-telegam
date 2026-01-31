@@ -5,12 +5,15 @@
     "ts": "2026-01-28T12:24:08.644775Z"
   },
   {
-    "url": "https://arstechnica.com/gadgets/2025/12/the-npu-in-your-phone-keeps-improving-why-isnt-that-making-ai-better/",
-    "norm_url": "https://arstechnica.com/gadgets/2025/12/the-npu-in-your-phone-keeps-improving-why-isnt-that-making-ai-better",
-    "title": "The NPU in your phone keeps improving—why isn’t that making AI better?",
-    "content_hash": "29ab107ad99cd0d5",
-    "entities": [],
-    "topic": "general",
-    "ts": "2026-01-31T15:13:57.300636+00:00Z"
+    "url": "https://blog.google/innovation-and-ai/technology/ai/ai-science-forum-2024/",
+    "norm_url": "https://blog.google/innovation-and-ai/technology/ai/ai-science-forum-2024",
+    "title": "The AI for Science Forum: A new era of discovery",
+    "content_hash": "d26d8f010247d2c1",
+    "entities": [
+      "google",
+      "deepmind"
+    ],
+    "topic": "research",
+    "ts": "2026-01-31T18:17:11.205092+00:00Z"
   }
 ]

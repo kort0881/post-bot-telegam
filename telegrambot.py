@@ -53,7 +53,7 @@ class Config:
         self.entity_overlap_threshold = 0.55  # Порог совпадения сущностей
         self.min_post_length = 500
         
-        # 🆕 НОВЫЕ ПАРАМЕТРЫ ДЛЯ РАЗНООБРАЗИЯ
+        # ПАРАМЕТРЫ ДЛЯ РАЗНООБРАЗИЯ
         self.recent_posts_check = 5  # Проверять последние N постов на разнообразие
         self.recent_similarity_threshold = 0.45  # Более строгий порог для последних постов
         self.min_entity_distance = 2  # Мин. количество уникальных сущностей
@@ -86,7 +86,7 @@ RSS_FEEDS = [
     ("https://arstechnica.com/tag/artificial-intelligence/feed/", "Ars Technica"),
     ("https://www.wired.com/feed/tag/ai/latest/rss", "WIRED"),
     
-    # 🆕 ДОПОЛНИТЕЛЬНЫЕ ИСТОЧНИКИ
+    # ДОПОЛНИТЕЛЬНЫЕ ИСТОЧНИКИ
     ("https://www.artificialintelligence-news.com/feed/", "AI News"),
     ("https://hai.stanford.edu/news/rss.xml", "Stanford HAI"),
     ("https://deepmind.google/blog/rss.xml", "DeepMind Blog"),
@@ -94,7 +94,7 @@ RSS_FEEDS = [
     ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
     ("https://www.marktechpost.com/feed/", "MarkTechPost"),
     ("https://syncedreview.com/feed/", "Synced AI"),
-    ("https://news.ycombinator.com/rss", "Hacker News"),  # Много AI-новостей
+    ("https://news.ycombinator.com/rss", "Hacker News"),
     ("https://www.unite.ai/feed/", "Unite.AI"),
     ("https://analyticsindiamag.com/feed/", "AIM"),
 ]
@@ -171,6 +171,52 @@ class Topic:
         RESEARCH: "#исследования #наука #DeepMind",
         GENERAL: "#AI #нейросети #ИИ"
     }
+    
+    # СТИЛИ ИЗОБРАЖЕНИЙ ПО ТЕМАМ (без киберпанка!)
+    IMAGE_STYLES = {
+        LLM: [
+            "clean minimalist illustration, chat interface, soft blue and white gradient, modern UI design, professional",
+            "friendly robot assistant illustration, soft colors, white background, cute character design",
+            "abstract conversation bubbles, flowing shapes, light blue tones, editorial style illustration",
+            "modern flat design, speech bubbles and text symbols, pastel colors, tech magazine cover",
+        ],
+        IMAGE_GEN: [
+            "artistic watercolor illustration, creative palette, splashes of color, gallery aesthetic",
+            "paintbrush and canvas artistic concept, warm colors, creative studio atmosphere",
+            "abstract art composition, flowing colors, creative expression, museum quality",
+            "digital art creation concept, colorful gradients, artistic tools, inspiring atmosphere",
+        ],
+        ROBOTICS: [
+            "technical blueprint illustration, soft gray background, precise mechanical drawings, engineering style",
+            "friendly humanoid robot, soft studio lighting, white background, product photography style",
+            "isometric robot illustration, clean lines, soft shadows, modern industrial design",
+            "robotic arm in laboratory setting, clean environment, professional photography style",
+        ],
+        HARDWARE: [
+            "product photography of tech hardware, studio lighting, reflective surfaces, premium feel",
+            "clean circuit board illustration, green and gold tones, technical precision, macro style",
+            "isometric computer chip illustration, metallic textures, soft gradients, professional",
+            "modern data center visualization, clean rows of servers, soft blue lighting, corporate",
+        ],
+        REGULATION: [
+            "corporate illustration, scales of justice with tech elements, muted blue tones, professional",
+            "formal document and gavel illustration, clean design, government style, serious tone",
+            "handshake between human and robot, diplomatic setting, soft neutral colors, editorial",
+            "policy document with AI symbols, clean infographic style, trustworthy blue palette",
+        ],
+        RESEARCH: [
+            "scientific laboratory illustration, clean white environment, research equipment, academic",
+            "brain and neural connections visualization, soft purple and blue, medical illustration style",
+            "scientist working with data, modern lab setting, clean aesthetic, educational",
+            "abstract knowledge graph, interconnected nodes, soft colors, scientific visualization",
+        ],
+        GENERAL: [
+            "modern flat illustration, geometric shapes, pastel gradient colors, editorial magazine style",
+            "clean tech illustration, simple icons, white background, professional presentation",
+            "isometric technology concept, soft shadows, modern design, business friendly",
+            "minimalist abstract design, flowing lines, soft blue and white, corporate clean",
+        ],
+    }
 
     @staticmethod
     def detect(text: str) -> str:
@@ -188,6 +234,12 @@ class Topic:
         if any(x in t for x in ["research", "paper", "study", "breakthrough", "discovery"]):
             return Topic.RESEARCH
         return Topic.GENERAL
+    
+    @staticmethod
+    def get_image_style(topic: str) -> str:
+        """Возвращает случайный стиль изображения для темы"""
+        styles = Topic.IMAGE_STYLES.get(topic, Topic.IMAGE_STYLES[Topic.GENERAL])
+        return random.choice(styles)
 
 # ====================== HELPERS ======================
 def normalize_url(url: str) -> str:
@@ -214,7 +266,6 @@ def extract_key_entities(text: str) -> Set[str]:
     
     for entity in KEY_ENTITIES:
         if entity in text_lower:
-            # Нормализуем некоторые варианты
             normalized = entity.replace("-", " ").replace("_", " ")
             found.add(normalized)
     
@@ -237,7 +288,6 @@ def get_content_hash(text: str) -> str:
     if not text:
         return ""
     normalized = re.sub(r'\s+', ' ', text.strip().lower())
-    # Берём первые 500 символов для хеша (достаточно для уникальности)
     return hashlib.md5(normalized[:500].encode()).hexdigest()[:16]
 
 # ====================== POSTED MANAGER ======================
@@ -250,7 +300,7 @@ class PostedManager:
         self.titles: List[str] = []
         self.content_hashes: Set[str] = set()
         self.topic_entities: List[Set[str]] = []
-        self.topics: List[str] = []  # 🆕 Для отслеживания тем
+        self.topics: List[str] = []
         self._lock_fd = None
         
         self._acquire_lock()
@@ -259,7 +309,6 @@ class PostedManager:
     def _acquire_lock(self):
         """Блокировка для предотвращения параллельного запуска"""
         if not HAS_FCNTL:
-            # Windows fallback
             if os.path.exists(self.lock_file):
                 try:
                     age = datetime.now().timestamp() - os.path.getmtime(self.lock_file)
@@ -272,7 +321,6 @@ class PostedManager:
                 f.write(str(os.getpid()))
             return
         
-        # Linux/Mac
         self._lock_fd = open(self.lock_file, 'w')
         try:
             fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -315,19 +363,16 @@ class PostedManager:
         self.topics.clear()
         
         for item in self.data:
-            # URL
             url = item.get("url", "")
             if url:
                 self.urls.add(normalize_url(url))
             
-            # Title
             title = item.get("title", "")
             if title:
                 self.titles.append(title)
             else:
                 self.titles.append("")
             
-            # Entities
             saved_entities = item.get("entities", [])
             if saved_entities:
                 self.topic_entities.append(set(saved_entities))
@@ -336,12 +381,10 @@ class PostedManager:
             else:
                 self.topic_entities.append(set())
             
-            # Content hash
             chash = item.get("content_hash", "")
             if chash:
                 self.content_hashes.add(chash)
             
-            # 🆕 Topic
             topic = item.get("topic", Topic.GENERAL)
             self.topics.append(topic)
 
@@ -365,26 +408,22 @@ class PostedManager:
         4. Пересечение ключевых сущностей
         """
         
-        # === 1. URL ===
         norm_url = normalize_url(url)
         if norm_url in self.urls:
             logger.info(f"🚫 [URL] Дубликат: {title[:50]}...")
             return True
 
-        # === 2. Хеш контента ===
         if summary:
             chash = get_content_hash(summary)
             if chash and chash in self.content_hashes:
                 logger.info(f"🚫 [HASH] Дубликат: {title[:50]}...")
                 return True
 
-        # === 3. Похожесть заголовка ===
         title_len = len(title)
         for i, existing_title in enumerate(self.titles):
             if not existing_title:
                 continue
             
-            # Быстрый фильтр по длине
             if abs(len(existing_title) - title_len) > title_len * 0.6:
                 continue
             
@@ -393,23 +432,18 @@ class PostedManager:
                 logger.info(f"🚫 [TITLE {int(sim*100)}%] '{title[:35]}' ≈ '{existing_title[:35]}'")
                 return True
 
-        # === 4. Пересечение сущностей ===
         full_text = f"{title} {summary}".strip()
         new_entities = extract_key_entities(full_text)
         
-        # Проверяем только если есть достаточно сущностей
         if len(new_entities) >= 2:
             for i, existing_entities in enumerate(self.topic_entities):
                 if len(existing_entities) < 2:
                     continue
                 
                 common = new_entities & existing_entities
-                
-                # Считаем overlap относительно меньшего набора
                 min_size = min(len(new_entities), len(existing_entities))
                 overlap_ratio = len(common) / min_size if min_size > 0 else 0
                 
-                # Если совпадает 2+ сущности и overlap > порога
                 if len(common) >= 2 and overlap_ratio >= config.entity_overlap_threshold:
                     existing_title = self.titles[i] if i < len(self.titles) else "?"
                     logger.info(f"🚫 [TOPIC] Совпадение: {common} | '{existing_title[:35]}'")
@@ -417,11 +451,9 @@ class PostedManager:
         
         return False
 
-    # 🆕 ПРОВЕРКА РАЗНООБРАЗИЯ С ПОСЛЕДНИМИ ПОСТАМИ
     def is_too_similar_to_recent(self, title: str, summary: str) -> bool:
         """
         Проверяет, не слишком ли похожа статья на последние N постов
-        Более строгие пороги для свежих постов
         """
         if len(self.data) < 2:
             return False
@@ -432,7 +464,6 @@ class PostedManager:
         detected_topic = Topic.detect(full_text)
         
         for post in recent_posts:
-            # Проверка 1: Похожесть заголовка (строже)
             post_title = post.get("title", "")
             if post_title:
                 sim = calculate_similarity(title, post_title)
@@ -440,7 +471,6 @@ class PostedManager:
                     logger.info(f"🔄 [RECENT] Слишком похоже на недавний пост: {post_title[:40]}")
                     return True
             
-            # Проверка 2: Совпадение темы + сущностей
             post_topic = post.get("topic", "")
             post_entities = set(post.get("entities", []))
             
@@ -452,7 +482,6 @@ class PostedManager:
         
         return False
     
-    # 🆕 ПОЛУЧИТЬ СТАТИСТИКУ ПОСЛЕДНИХ ПОСТОВ
     def get_recent_topics_stats(self) -> dict:
         """Возвращает статистику по темам последних постов"""
         if len(self.data) < 3:
@@ -470,7 +499,6 @@ class PostedManager:
         """Добавляет статью в историю"""
         norm_url = normalize_url(url)
         
-        # Проверка на случай повторного добавления
         if norm_url in self.urls:
             logger.debug(f"Уже есть в базе: {title[:40]}")
             return
@@ -479,7 +507,6 @@ class PostedManager:
         full_text = f"{title} {summary}".strip()
         entities = extract_key_entities(full_text)
         
-        # Обновляем кэши
         self.urls.add(norm_url)
         self.titles.append(title)
         self.topic_entities.append(entities)
@@ -487,7 +514,6 @@ class PostedManager:
         if chash:
             self.content_hashes.add(chash)
         
-        # Добавляем запись
         self.data.append({
             "url": url,
             "norm_url": norm_url,
@@ -554,7 +580,6 @@ async def fetch_feed(session: aiohttp.ClientSession, url: str, source: str, post
         if not link or len(title) < 15:
             continue
         
-        # Проверка дублей при загрузке
         if posted.is_duplicate(link, title, summary):
             continue
 
@@ -604,7 +629,6 @@ async def load_all_feeds(posted: PostedManager) -> List[Article]:
 def filter_articles(articles: List[Article], posted: PostedManager) -> List[Article]:
     candidates = []
     
-    # 🆕 Статистика последних тем
     recent_stats = posted.get_recent_topics_stats()
     logger.info(f"📊 Последние темы: {recent_stats}")
     
@@ -620,24 +644,19 @@ def filter_articles(articles: List[Article], posted: PostedManager) -> List[Arti
         if ai_relevance(text) < 0.4:
             continue
         
-        # 🆕 ПРОВЕРКА НА ПОХОЖЕСТЬ С ПОСЛЕДНИМИ ПОСТАМИ
         if posted.is_too_similar_to_recent(a.title, a.summary):
             logger.debug(f"  Пропуск (слишком похоже на недавние): {a.title[:40]}")
             continue
         
         candidates.append(a)
 
-    # Сортируем по дате (свежие первые)
     candidates.sort(key=lambda x: x.published, reverse=True)
     
-    # 🆕 ПРИОРИТЕТ РАЗНЫМ ТЕМАМ
-    # Если одна тема преобладает в последних постах, отдаём приоритет другим
     if recent_stats:
         dominant_topic = max(recent_stats, key=recent_stats.get)
-        if recent_stats[dominant_topic] >= 3:  # Если 3+ поста подряд об одном
+        if recent_stats[dominant_topic] >= 3:
             logger.info(f"⚖️ Приоритет разнообразию (много '{dominant_topic}' в последних)")
             
-            # Разделяем на доминантную тему и остальные
             other_topics = []
             same_topic = []
             
@@ -648,7 +667,6 @@ def filter_articles(articles: List[Article], posted: PostedManager) -> List[Arti
                 else:
                     other_topics.append(art)
             
-            # Сначала другие темы, потом доминантная
             candidates = other_topics + same_topic
     
     logger.info(f"🎯 После фильтров: {len(candidates)} статей")
@@ -703,30 +721,26 @@ async def generate_summary(article: Article) -> Optional[str]:
             resp = await asyncio.to_thread(
                 groq_client.chat.completions.create,
                 model=random.choice(GROQ_MODELS),
-                messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
                 max_tokens=1100,
+                messages=[{"role": "user", "content": prompt}],
             )
             text = resp.choices[0].message.content.strip()
 
-            # Проверка на SKIP
             if "SKIP" in text.upper()[:15]:
                 logger.info("  ⏭️ LLM: SKIP")
                 return None
 
-            # Проверка длины
             if len(text) < config.min_post_length:
                 logger.warning(f"  ⚠️ Короткий текст ({len(text)} симв.), повтор...")
                 continue
 
-            # Проверка на воду
             water = ["стоит отметить", "важно понимать", "интересно, что", 
                     "давайте разберёмся", "не секрет", "очевидно, что"]
             if any(w in text.lower() for w in water):
                 logger.warning("  ⚠️ Обнаружена вода, повтор...")
                 continue
 
-            # Формируем финальный пост
             topic = Topic.detect(f"{article.title} {article.summary}")
             hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
             
@@ -735,11 +749,9 @@ async def generate_summary(article: Article) -> Optional[str]:
             
             final = f"{text}{cta}\n\n{hashtags}{source_link}"
 
-            # Обрезка если превышает лимит
             if len(final) > config.caption_limit:
                 excess = len(final) - config.caption_limit + 20
                 text = text[:-excess]
-                # Ищем последнюю точку/вопрос
                 for p in ['. ', '! ', '? ']:
                     idx = text.rfind(p)
                     if idx > len(text) * 0.6:
@@ -756,38 +768,71 @@ async def generate_summary(article: Article) -> Optional[str]:
 
     return None
 
-# ====================== КАРТИНКИ ======================
-async def generate_image(title: str) -> Optional[str]:
-    logger.info("  🎨 Генерация картинки...")
+# ====================== КАРТИНКИ (СТИЛЬ ПО ТЕМЕ) ======================
+async def generate_image(title: str, topic: str = Topic.GENERAL) -> Optional[str]:
+    """
+    Генерирует изображение в стиле, соответствующем теме статьи.
+    Без киберпанка! Чистые, профессиональные, разнообразные стили.
+    """
+    logger.info(f"  🎨 Генерация картинки для темы: {topic}")
     
-    clean = re.sub(r'[^\w\s]', '', title)[:50]
-    prompt = f"tech editorial illustration {clean} neon purple blue dark background 8k"
-    url = f"https://image.pollinations.ai/prompt/{quote(prompt)}?width=1024&height=1024&nologo=true&seed={random.randint(1,99999)}"
+    # Очищаем заголовок от спецсимволов
+    clean_title = re.sub(r'[^\w\s]', '', title)[:50]
     
-    for attempt in range(2):
+    # Получаем стиль для темы
+    style = Topic.get_image_style(topic)
+    
+    # Формируем промпт
+    prompt = f"{style}, {clean_title}, high quality, 4k, sharp focus"
+    
+    # Добавляем негативные промпты через URL (если поддерживается)
+    negative = "neon, cyberpunk, dark, dystopian, gritty, purple glow, matrix"
+    
+    url = (
+        f"https://image.pollinations.ai/prompt/{quote(prompt)}"
+        f"?width=1024&height=1024&nologo=true&seed={random.randint(1,99999)}"
+    )
+    
+    for attempt in range(3):
         try:
             async with aiohttp.ClientSession() as sess:
-                async with sess.get(url, timeout=aiohttp.ClientTimeout(total=40)) as resp:
+                async with sess.get(url, timeout=aiohttp.ClientTimeout(total=45)) as resp:
                     if resp.status != 200:
+                        logger.warning(f"  ⚠️ HTTP {resp.status}, попытка {attempt+1}")
                         continue
+                    
                     data = await resp.read()
+                    
+                    # Проверяем размер (минимум 10KB для нормального изображения)
                     if len(data) < 10000:
+                        logger.warning(f"  ⚠️ Слишком маленький файл ({len(data)} bytes)")
                         continue
                     
                     fname = f"img_{random.randint(1000,9999)}.jpg"
                     with open(fname, "wb") as f:
                         f.write(data)
-                    logger.info(f"  ✅ Картинка: {fname}")
+                    
+                    logger.info(f"  ✅ Картинка сохранена: {fname} ({len(data)//1024}KB)")
+                    logger.info(f"  🎯 Стиль: {style[:50]}...")
                     return fname
-        except:
+                    
+        except asyncio.TimeoutError:
+            logger.warning(f"  ⚠️ Таймаут, попытка {attempt+1}/3")
+            await asyncio.sleep(2)
+        except Exception as e:
+            logger.warning(f"  ⚠️ Ошибка генерации ({attempt+1}/3): {e}")
             await asyncio.sleep(2)
     
-    logger.warning("  ⚠️ Картинка не создана")
+    logger.warning("  ❌ Не удалось сгенерировать картинку")
     return None
 
 # ====================== ПУБЛИКАЦИЯ ======================
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
-    img = await generate_image(article.title)
+    # Определяем тему для изображения
+    topic = Topic.detect(f"{article.title} {article.summary}")
+    
+    # Генерируем изображение с учётом темы
+    img = await generate_image(article.title, topic)
     
     try:
         if img and os.path.exists(img):
@@ -796,8 +841,6 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
         else:
             await bot.send_message(config.channel_id, text, disable_web_page_preview=False)
         
-        # 🆕 Сохраняем с темой
-        topic = Topic.detect(f"{article.title} {article.summary}")
         posted.add(article.link, article.title, article.summary, topic)
         
         logger.info(f"✅ ОПУБЛИКОВАНО [{topic.upper()}]: {article.title[:50]}")
@@ -815,13 +858,12 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 # ====================== MAIN ======================
 async def main():
     logger.info("=" * 50)
-    logger.info("🚀 ЗАПУСК AI-POSTER v2.0")
+    logger.info("🚀 ЗАПУСК AI-POSTER v2.1 (без киберпанка)")
     logger.info("=" * 50)
     
     posted = PostedManager(config.posted_file)
     posted.cleanup(config.retention_days)
     
-    # Загружаем и фильтруем
     raw_articles = await load_all_feeds(posted)
     candidates = filter_articles(raw_articles, posted)
     
@@ -829,14 +871,11 @@ async def main():
         logger.info("📭 Нет подходящих новостей")
         return
 
-    # Пробуем опубликовать одну статью
-    for article in candidates[:20]:  # 🆕 Увеличили до 20 попыток
-        # Финальная проверка перед генерацией
+    for article in candidates[:20]:
         if posted.is_duplicate(article.link, article.title, article.summary):
             logger.debug(f"  Пропуск (дубль): {article.title[:40]}")
             continue
         
-        # 🆕 Ещё одна проверка на разнообразие
         if posted.is_too_similar_to_recent(article.title, article.summary):
             logger.debug(f"  Пропуск (похоже на недавние): {article.title[:40]}")
             continue

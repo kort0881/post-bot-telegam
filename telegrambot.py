@@ -928,10 +928,10 @@ class PostedManager:
         conn = self._get_conn()
         cursor = conn.cursor()
         
-        cursor.execute('''
+        cursor.execute(f'''
             DELETE FROM posted_articles 
-            WHERE posted_date < datetime("now", "-? days")
-        ''', (days,))
+            WHERE posted_date < datetime('now', '-{days} days')
+        ''')
         
         deleted = cursor.rowcount
         conn.commit()

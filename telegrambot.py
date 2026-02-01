@@ -199,342 +199,266 @@ class Topic:
     
     HASHTAGS = {
         LLM: "#ChatGPT #LLM #OpenAI #нейросети",
-        IMAGE_GEN: "#Midjourney #DALLE #StableDiffusion #генерация",
-        ROBOTICS: "#роботы #Humanoid #робототехника",
-        HARDWARE: "#NVIDIA #GPU #чипы #железо",
-        REGULATION: "#регулирование #безопасность #этика",
-        RESEARCH: "#исследования #наука #DeepMind",
-        AGENTS: "#AIAgents #Агенты #AutonomousAI",
-        CODING: "#Cursor #GitHubCopilot #AIкодинг",
-        GENERAL: "#AI #нейросети #ИИ"
+        IMAGE_GEN: "#Midjourney #StableDiffusion #ImageGen #ИИАрт",
+        ROBOTICS: "#ИИ #роботы #робототехника #автоматизация",
+        HARDWARE: "#NVIDIA #чипы #GPU #железо",
+        REGULATION: "#регулирование #законы #этика #безопасность",
+        RESEARCH: "#исследования #наука #ML #DeepLearning",
+        AGENTS: "#агенты #автономность #AutoGPT #AI",
+        CODING: "#программирование #код #разработка #DevTools",
+        GENERAL: "#ИИ #технологии #инновации #AI"
     }
     
     IMAGE_STYLES = {
-        LLM: [
-            "clean minimalist illustration, chat interface, soft blue and white gradient, modern UI design, professional",
-            "friendly robot assistant illustration, soft colors, white background, cute character design",
-            "abstract conversation bubbles, flowing shapes, light blue tones, editorial style illustration",
-            "modern flat design, speech bubbles and text symbols, pastel colors, tech magazine cover",
-        ],
-        IMAGE_GEN: [
-            "artistic watercolor illustration, creative palette, splashes of color, gallery aesthetic",
-            "paintbrush and canvas artistic concept, warm colors, creative studio atmosphere",
-            "abstract art composition, flowing colors, creative expression, museum quality",
-            "digital art creation concept, colorful gradients, artistic tools, inspiring atmosphere",
-        ],
-        ROBOTICS: [
-            "technical blueprint illustration, soft gray background, precise mechanical drawings, engineering style",
-            "friendly humanoid robot, soft studio lighting, white background, product photography style",
-            "isometric robot illustration, clean lines, soft shadows, modern industrial design",
-            "robotic arm in laboratory setting, clean environment, professional photography style",
-        ],
-        HARDWARE: [
-            "product photography of tech hardware, studio lighting, reflective surfaces, premium feel",
-            "clean circuit board illustration, green and gold tones, technical precision, macro style",
-            "isometric computer chip illustration, metallic textures, soft gradients, professional",
-            "modern data center visualization, clean rows of servers, soft blue lighting, corporate",
-        ],
-        REGULATION: [
-            "corporate illustration, scales of justice with tech elements, muted blue tones, professional",
-            "formal document and gavel illustration, clean design, government style, serious tone",
-            "handshake between human and robot, diplomatic setting, soft neutral colors, editorial",
-            "policy document with AI symbols, clean infographic style, trustworthy blue palette",
-        ],
-        RESEARCH: [
-            "scientific laboratory illustration, clean white environment, research equipment, academic",
-            "brain and neural connections visualization, soft purple and blue, medical illustration style",
-            "scientist working with data, modern lab setting, clean aesthetic, educational",
-            "abstract knowledge graph, interconnected nodes, soft colors, scientific visualization",
-        ],
-        AGENTS: [
-            "autonomous agent illustration, interconnected nodes, soft purple and blue, futuristic but clean",
-            "ai agent workflow diagram, clean design, soft gradients, professional infographic",
-            "multiple ai agents collaborating, isometric illustration, soft colors, modern tech",
-            "autonomous system visualization, flowing data streams, soft blue tones, editorial",
-        ],
-        CODING: [
-            "clean code editor interface, syntax highlighting, dark theme with soft colors, developer aesthetic",
-            "ai coding assistant illustration, code snippets floating, soft blue and purple, modern",
-            "programmer workspace with ai, clean desk setup, soft lighting, professional",
-            "abstract code visualization, flowing lines of code, soft gradients, tech magazine",
-        ],
-        GENERAL: [
-            "modern flat illustration, geometric shapes, pastel gradient colors, editorial magazine style",
-            "clean tech illustration, simple icons, white background, professional presentation",
-            "isometric technology concept, soft shadows, modern design, business friendly",
-            "minimalist abstract design, flowing lines, soft blue and white, corporate clean",
-        ],
+        LLM: "futuristic digital brain, circuit patterns, neural network visualization, blue purple gradient",
+        IMAGE_GEN: "creative art studio, digital canvas, vibrant colors, artistic AI generation",
+        ROBOTICS: "sleek humanoid robot, high-tech laboratory, metallic surfaces, dramatic lighting",
+        HARDWARE: "advanced computer chips, circuit boards, neon lights, technological precision",
+        REGULATION: "digital scales of justice, government building, legal documents, professional",
+        RESEARCH: "scientific laboratory, data visualization, graphs and charts, academic",
+        AGENTS: "autonomous systems, interconnected nodes, workflow automation, modern tech",
+        CODING: "code editor interface, programming environment, dark theme, developer workspace",
+        GENERAL: "abstract technology, digital innovation, modern tech aesthetic, clean design"
     }
-
+    
     @staticmethod
     def detect(text: str) -> str:
-        t = text.lower()
-        if any(x in t for x in ["cursor", "copilot", "replit", "v0", "bolt.new", "coding", "programming", "developer"]):
-            return Topic.CODING
-        if any(x in t for x in ["agent", "autonomous", "crewai", "autogen", "langchain agent"]):
-            return Topic.AGENTS
-        if any(x in t for x in ["gpt", "chatgpt", "claude", "gemini", "llama", "grok", "llm", "o3", "o1", "deepseek"]):
+        text_lower = text.lower()
+        
+        llm_terms = ["gpt", "claude", "gemini", "llm", "chatbot", "language model", 
+                     "chatgpt", "llama", "mistral", "deepseek", "qwen", "reasoning"]
+        if any(term in text_lower for term in llm_terms):
             return Topic.LLM
-        if any(x in t for x in ["midjourney", "dall-e", "stable diffusion", "flux", "sora", "imagen"]):
+        
+        image_terms = ["dall-e", "midjourney", "stable diffusion", "image generation",
+                      "text-to-image", "imagen", "firefly", "flux", "sora", "video generation"]
+        if any(term in text_lower for term in image_terms):
             return Topic.IMAGE_GEN
-        if any(x in t for x in ["robot", "humanoid", "boston dynamics", "optimus", "figure", "unitree", "agility"]):
+        
+        robot_terms = ["robot", "humanoid", "automation", "robotic", "boston dynamics",
+                      "figure ai", "optimus", "tesla bot"]
+        if any(term in text_lower for term in robot_terms):
             return Topic.ROBOTICS
-        if any(x in t for x in ["nvidia", "h100", "h200", "blackwell", "gpu", "cuda", "chip", "hardware"]):
+        
+        hw_terms = ["nvidia", "chip", "gpu", "hardware", "semiconductor", "processor",
+                   "tpu", "asic", "groq chip"]
+        if any(term in text_lower for term in hw_terms):
             return Topic.HARDWARE
-        if any(x in t for x in ["regulation", "safety", "alignment", "ethics", "policy", "governance"]):
+        
+        reg_terms = ["regulation", "policy", "law", "government", "ethical", "ban",
+                    "restriction", "compliance", "legal"]
+        if any(term in text_lower for term in reg_terms):
             return Topic.REGULATION
-        if any(x in t for x in ["research", "paper", "study", "breakthrough", "discovery", "arxiv"]):
+        
+        research_terms = ["research", "paper", "study", "breakthrough", "discovery",
+                         "scientific", "experiment", "arxiv"]
+        if any(term in text_lower for term in research_terms):
             return Topic.RESEARCH
+        
+        agent_terms = ["agent", "autonomous", "autogpt", "workflow", "automation tool",
+                      "ai assistant", "personal ai"]
+        if any(term in text_lower for term in agent_terms):
+            return Topic.AGENTS
+        
+        code_terms = ["coding", "copilot", "cursor", "programming", "developer",
+                     "ide", "code generation", "replit", "v0"]
+        if any(term in text_lower for term in code_terms):
+            return Topic.CODING
+        
         return Topic.GENERAL
     
     @staticmethod
     def get_image_style(topic: str) -> str:
-        styles = Topic.IMAGE_STYLES.get(topic, Topic.IMAGE_STYLES[Topic.GENERAL])
-        return random.choice(styles)
+        return Topic.IMAGE_STYLES.get(topic, Topic.IMAGE_STYLES[Topic.GENERAL])
 
-# ====================== URL НОРМАЛИЗАЦИЯ ======================
-UTM_PARAMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-              'fbclid', 'gclid', 'twclid', 'li_fat_id', 'mc_cid', 'mc_eid',
-              'utm_id', 'utm_source_platform', 'utm_creative_format', 'utm_marketing_tactic']
+# ====================== GROQ МОДЕЛИ ======================
+GROQ_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-70b-versatile",
+]
 
+# ====================== UTILITY FUNCTIONS ======================
 def normalize_url(url: str) -> str:
-    """
-    Усиленная нормализация URL:
-    - Удаление UTM-параметров
-    - Удаление якорей
-    - Удаление trailing slashes
-    - Приведение к lowercase
-    - Оставляем только scheme://host/path
-    """
-    if not url:
-        return ""
-    try:
-        url = url.strip().lower()
-        parsed = urlparse(url)
-        
-        # Удаляем UTM и другие tracking параметры
+    """Нормализация URL для поиска дубликатов"""
+    parsed = urlparse(url.lower())
+    
+    # Убираем query параметры для трекинга
+    if parsed.query:
         query_params = parse_qs(parsed.query)
-        filtered_params = {k: v for k, v in query_params.items() 
-                          if k.lower() not in UTM_PARAMS}
-        
-        # Формируем нормализованный URL
-        domain = parsed.netloc.replace("www.", "")
-        path = parsed.path.rstrip("/")
-        
-        if filtered_params:
-            new_query = urlencode(filtered_params, doseq=True)
-            return f"{parsed.scheme}://{domain}{path}?{new_query}"
-        else:
-            return f"{parsed.scheme}://{domain}{path}"
-    except Exception:
-        # Fallback: базовая очистка
-        url = url.lower().split('#')[0].split('?')[0].rstrip('/')
-        return url
+        tracking_params = {'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 
+                          'fbclid', 'gclid', 'ref', 'source'}
+        clean_params = {k: v for k, v in query_params.items() if k not in tracking_params}
+        clean_query = urlencode(clean_params, doseq=True) if clean_params else ''
+    else:
+        clean_query = ''
+    
+    # Убираем trailing slash
+    path = parsed.path.rstrip('/')
+    
+    # Формируем нормализованный URL
+    norm = f"{parsed.netloc}{path}"
+    if clean_query:
+        norm += f"?{clean_query}"
+    
+    return norm
 
 def get_domain(url: str) -> str:
-    """Извлекает нормализованный домен из URL"""
-    try:
-        parsed = urlparse(url)
-        return parsed.netloc.lower().replace("www.", "")
-    except:
-        return ""
+    """Извлекает домен из URL"""
+    parsed = urlparse(url.lower())
+    domain = parsed.netloc
+    # Убираем www.
+    if domain.startswith('www.'):
+        domain = domain[4:]
+    return domain
 
 def get_title_signature(title: str) -> str:
-    """Возвращает сигнатуру заголовка (первая половина слов)"""
-    words = re.findall(r'\w+', title.lower())
-    half = max(1, len(words) // 2)
-    return ' '.join(words[:half])
-
-# ====================== ХЕШИРОВАНИЕ ======================
-def get_content_hash(text: str) -> str:
-    """MD5 хеш нормализованного контента"""
-    if not text:
-        return ""
-    normalized = re.sub(r'\s+', ' ', text.strip().lower())
-    return hashlib.md5(normalized[:2000].encode()).hexdigest()
+    """Создаёт сигнатуру заголовка (первые 4 значимых слова)"""
+    words = re.findall(r'\b[a-zA-Z]{4,}\b', title.lower())
+    return ' '.join(words[:4]) if words else title.lower()[:30]
 
 def get_summary_hash(summary: str) -> str:
-    """MD5 хеш нормализованного summary"""
-    if not summary:
-        return ""
-    # Удаляем пунктуацию и лишние пробелы
-    normalized = re.sub(r'[^\w\s]', '', summary.lower())
-    normalized = re.sub(r'\s+', ' ', normalized.strip())
-    return hashlib.md5(normalized.encode()).hexdigest()
+    """Хеш summary для быстрой проверки"""
+    clean = re.sub(r'\s+', ' ', summary.lower().strip())
+    return hashlib.md5(clean.encode('utf-8')).hexdigest()
 
-# ====================== ПОХОЖЕСТЬ ТЕКСТА ======================
-def calculate_similarity(text1: str, text2: str) -> float:
-    """Схожесть двух строк (0.0 - 1.0) с использованием SequenceMatcher"""
-    if not text1 or not text2:
-        return 0.0
-    return difflib.SequenceMatcher(None, text1.lower(), text2.lower()).ratio()
+def get_content_hash(text: str, length: int = 200) -> Optional[str]:
+    """Хеш первых N символов контента"""
+    if not text or len(text) < 50:
+        return None
+    clean = re.sub(r'\s+', ' ', text.lower().strip())[:length]
+    return hashlib.md5(clean.encode('utf-8')).hexdigest()
 
-def ngram_similarity(text1: str, text2: str, n: int = 3) -> float:
-    """Схожесть по n-граммам"""
-    if not text1 or not text2:
+def calculate_similarity(str1: str, str2: str) -> float:
+    """SequenceMatcher similarity"""
+    return difflib.SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
+
+def ngram_similarity(str1: str, str2: str, n: int = 3) -> float:
+    """N-gram similarity для обнаружения перефразированных заголовков"""
+    def get_ngrams(text: str, n: int) -> Set[str]:
+        words = text.lower().split()
+        return set(' '.join(words[i:i+n]) for i in range(len(words) - n + 1))
+    
+    if len(str1.split()) < n or len(str2.split()) < n:
         return 0.0
     
-    def get_ngrams(text, n):
-        text = text.lower()
-        text = re.sub(r'[^\w\s]', '', text)
-        words = text.split()
-        return set([' '.join(words[i:i+n]) for i in range(len(words)-n+1)])
-    
-    ngrams1 = get_ngrams(text1, n)
-    ngrams2 = get_ngrams(text2, n)
+    ngrams1 = get_ngrams(str1, n)
+    ngrams2 = get_ngrams(str2, n)
     
     if not ngrams1 or not ngrams2:
         return 0.0
     
-    intersection = ngrams1 & ngrams2
-    union = ngrams1 | ngrams2
+    intersection = len(ngrams1 & ngrams2)
+    union = len(ngrams1 | ngrams2)
     
-    return len(intersection) / len(union) if union else 0.0
+    return intersection / union if union > 0 else 0.0
 
-# ====================== TF-IDF SIMILARITY ======================
-class TFIDFCalculator:
-    """Простой TF-IDF калькулятор для сравнения текстов"""
-    
-    @staticmethod
-    def tokenize(text: str) -> List[str]:
-        text = text.lower()
-        text = re.sub(r'[^\w\s]', ' ', text)
-        words = text.split()
-        # Удаляем стоп-слова
-        stop_words = {'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
-                      'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
-                      'would', 'could', 'should', 'may', 'might', 'must', 'shall',
-                      'can', 'need', 'dare', 'ought', 'used', 'to', 'of', 'in',
-                      'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into',
-                      'through', 'during', 'before', 'after', 'above', 'below',
-                      'between', 'under', 'and', 'but', 'or', 'yet', 'so', 'if',
-                      'because', 'although', 'though', 'while', 'where', 'when',
-                      'that', 'which', 'who', 'whom', 'whose', 'what', 'this',
-                      'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they',
-                      'me', 'him', 'her', 'us', 'them', 'my', 'your', 'his', 'her',
-                      'its', 'our', 'their', 'mine', 'yours', 'hers', 'ours', 'theirs'}
-        return [w for w in words if len(w) > 2 and w not in stop_words]
-    
-    @staticmethod
-    def compute_tf(tokens: List[str]) -> Dict[str, float]:
-        token_counts = Counter(tokens)
-        total = len(tokens)
-        return {token: count / total for token, count in token_counts.items()} if total else {}
-    
-    @staticmethod
-    def compute_idf(documents: List[List[str]]) -> Dict[str, float]:
-        idf = {}
-        total_docs = len(documents)
-        all_tokens = set()
-        for doc in documents:
-            all_tokens.update(doc)
-        
-        for token in all_tokens:
-            doc_count = sum(1 for doc in documents if token in doc)
-            idf[token] = math.log(total_docs / (doc_count + 1)) + 1
-        
-        return idf
-    
-    @classmethod
-    def cosine_similarity(cls, text1: str, text2: str, context_texts: List[str] = None) -> float:
-        """Вычисляет косинусное сходство между двумя текстами"""
-        tokens1 = cls.tokenize(text1)
-        tokens2 = cls.tokenize(text2)
-        
-        if not tokens1 or not tokens2:
-            return 0.0
-        
-        # Собираем документы для IDF
-        documents = [tokens1, tokens2]
-        if context_texts:
-            documents.extend([cls.tokenize(t) for t in context_texts])
-        
-        idf = cls.compute_idf(documents)
-        
-        tf1 = cls.compute_tf(tokens1)
-        tf2 = cls.compute_tf(tokens2)
-        
-        # TF-IDF векторы
-        all_terms = set(tf1.keys()) | set(tf2.keys())
-        vec1 = [tf1.get(term, 0) * idf.get(term, 1) for term in all_terms]
-        vec2 = [tf2.get(term, 0) * idf.get(term, 1) for term in all_terms]
-        
-        # Косинусное сходство
-        dot_product = sum(a * b for a, b in zip(vec1, vec2))
-        norm1 = math.sqrt(sum(a * a for a in vec1))
-        norm2 = math.sqrt(sum(a * a for a in vec2))
-        
-        if norm1 == 0 or norm2 == 0:
-            return 0.0
-        
-        return dot_product / (norm1 * norm2)
-
-# ====================== ИЗВЛЕЧЕНИЕ СУЩНОСТЕЙ ======================
 def extract_key_entities(text: str) -> Set[str]:
-    """Извлекает ключевые сущности из текста с fuzzy matching"""
+    """Извлекает ключевые сущности из текста"""
     text_lower = text.lower()
     found = set()
     
     for entity in KEY_ENTITIES:
-        # Точное совпадение
+        # Точное совпадение или как отдельное слово
         if entity in text_lower:
-            normalized = entity.replace("-", " ").replace("_", " ")
-            found.add(normalized)
-            continue
-        
-        # Fuzzy matching для вариаций
-        entity_words = entity.split()
-        if len(entity_words) == 1:
-            # Для однословных сущностей проверяем границы слов
+            # Проверяем что это не часть другого слова
             pattern = r'\b' + re.escape(entity) + r'\b'
             if re.search(pattern, text_lower):
                 found.add(entity)
     
     return found
 
-def fuzzy_entity_match(entities1: Set[str], entities2: Set[str]) -> float:
-    """Fuzzy matching между наборами сущностей"""
+def fuzzy_entity_match(entities1: Set[str], entities2: Set[str], threshold: float = 0.85) -> float:
+    """Fuzzy matching сущностей для обнаружения вариаций (GPT-4 vs GPT4)"""
     if not entities1 or not entities2:
         return 0.0
     
     matches = 0
     for e1 in entities1:
         for e2 in entities2:
-            # Прямое совпадение
-            if e1 == e2:
+            sim = calculate_similarity(e1, e2)
+            if sim >= threshold:
                 matches += 1
                 break
-            # Частичное совпадение (одно содержит другое)
-            if e1 in e2 or e2 in e1:
-                matches += 0.8
-                break
-            # Высокая схожесть
-            if calculate_similarity(e1, e2) > 0.85:
-                matches += 0.7
-                break
     
-    return matches / max(len(entities1), len(entities2))
+    max_size = max(len(entities1), len(entities2))
+    return matches / max_size if max_size > 0 else 0.0
 
-# ====================== SQLITE MANAGER ======================
+def tfidf_cosine_similarity(docs: List[str]) -> List[List[float]]:
+    """TF-IDF косинусная близость между документами"""
+    if len(docs) < 2:
+        return [[1.0]]
+    
+    # Tokenize
+    all_words = set()
+    tokenized_docs = []
+    for doc in docs:
+        words = re.findall(r'\b\w+\b', doc.lower())
+        tokenized_docs.append(words)
+        all_words.update(words)
+    
+    # Term frequency
+    tf_docs = []
+    for words in tokenized_docs:
+        word_count = Counter(words)
+        total = len(words)
+        tf = {word: count / total for word, count in word_count.items()}
+        tf_docs.append(tf)
+    
+    # Inverse document frequency
+    idf = {}
+    num_docs = len(docs)
+    for word in all_words:
+        doc_count = sum(1 for tf in tf_docs if word in tf)
+        idf[word] = math.log(num_docs / doc_count) if doc_count > 0 else 0
+    
+    # TF-IDF vectors
+    tfidf_vectors = []
+    for tf in tf_docs:
+        vector = {word: tf.get(word, 0) * idf.get(word, 0) for word in all_words}
+        tfidf_vectors.append(vector)
+    
+    # Cosine similarity
+    similarity_matrix = []
+    for i, vec1 in enumerate(tfidf_vectors):
+        row = []
+        for j, vec2 in enumerate(tfidf_vectors):
+            if i == j:
+                row.append(1.0)
+            else:
+                dot_product = sum(vec1.get(word, 0) * vec2.get(word, 0) for word in all_words)
+                mag1 = math.sqrt(sum(v**2 for v in vec1.values()))
+                mag2 = math.sqrt(sum(v**2 for v in vec2.values()))
+                cos_sim = dot_product / (mag1 * mag2) if mag1 > 0 and mag2 > 0 else 0.0
+                row.append(cos_sim)
+        similarity_matrix.append(row)
+    
+    return similarity_matrix
+
+import threading
+
+# ====================== POSTED MANAGER (SQLite) ======================
 class PostedManager:
     """SQLite-based менеджер с атомарными операциями и advisory locks"""
     
     def __init__(self, db_file: str = "posted_articles.db"):
         self.db_file = db_file
-        self._local = threading.local()
+        self._lock = threading.Lock()
+        self._conn = None
         self._init_db()
-        self._acquire_lock()
     
     def _get_conn(self) -> sqlite3.Connection:
-        """Получает thread-local соединение"""
-        if not hasattr(self._local, 'conn') or self._local.conn is None:
-            self._local.conn = sqlite3.connect(self.db_file, check_same_thread=False)
-            self._local.conn.row_factory = sqlite3.Row
-        return self._local.conn
+        """Получает единое соединение с базой данных"""
+        if self._conn is None:
+            self._conn = sqlite3.connect(self.db_file, timeout=30.0, check_same_thread=False)
+            self._conn.row_factory = sqlite3.Row
+            # Настройки для предотвращения блокировок
+            self._conn.execute('PRAGMA journal_mode=WAL')
+            self._conn.execute('PRAGMA busy_timeout=30000')
+        return self._conn
     
     def _init_db(self):
         """Инициализация базы данных"""
-        conn = sqlite3.connect(self.db_file)
+        conn = self._get_conn()
         cursor = conn.cursor()
         
         # Основная таблица posted_articles
@@ -586,28 +510,7 @@ class PostedManager:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_rejected_reason ON rejected_articles(rejection_reason)')
         
         conn.commit()
-        conn.close()
         logger.info("📚 База данных инициализирована")
-    
-    def _acquire_lock(self):
-        """SQLite advisory lock для предотвращения параллельного запуска"""
-        self.lock_conn = sqlite3.connect(self.db_file)
-        try:
-            # Пробуем получить advisory lock
-            self.lock_conn.execute("BEGIN IMMEDIATE")
-            logger.info("🔒 Advisory lock получен")
-        except sqlite3.OperationalError:
-            logger.warning("⚠️ Не удалось получить lock, другой процесс работает")
-            raise SystemExit(0)
-    
-    def _release_lock(self):
-        """Освобождает advisory lock"""
-        try:
-            if hasattr(self, 'lock_conn') and self.lock_conn:
-                self.lock_conn.close()
-                logger.info("🔓 Advisory lock освобождён")
-        except:
-            pass
     
     def is_duplicate(self, url: str, title: str, summary: str = "") -> Tuple[bool, str]:
         """
@@ -621,557 +524,517 @@ class PostedManager:
         
         Returns: (is_duplicate, reason)
         """
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        
-        norm_url = normalize_url(url)
-        domain = get_domain(url)
-        title_sig = get_title_signature(title)
-        summary_hash = get_summary_hash(summary)
-        content_hash = get_content_hash(summary)
-        
-        # 1. Проверка по нормализованному URL
-        cursor.execute('SELECT title FROM posted_articles WHERE norm_url = ?', (norm_url,))
-        if cursor.fetchone():
-            return True, f"URL_DUPLICATE: {norm_url[:60]}"
-        
-        # 2. Проверка по хешу summary
-        cursor.execute('SELECT title FROM posted_articles WHERE summary_hash = ?', (summary_hash,))
-        if cursor.fetchone():
-            return True, f"SUMMARY_HASH_DUPLICATE"
-        
-        # 3. Проверка по хешу контента
-        if content_hash:
-            cursor.execute('SELECT title FROM posted_articles WHERE content_hash = ?', (content_hash,))
-            if cursor.fetchone():
-                return True, f"CONTENT_HASH_DUPLICATE"
-        
-        # 4. Проверка по домену + сигнатуре заголовка (mirror-сайты)
-        cursor.execute('SELECT title FROM posted_articles WHERE domain = ? AND title_signature = ?',
-                      (domain, title_sig))
-        if cursor.fetchone():
-            return True, f"DOMAIN_TITLE_SIGNATURE: {domain}"
-        
-        # 5. Проверка похожести заголовков
-        cursor.execute('SELECT title FROM posted_articles WHERE posted_date > datetime("now", "-7 days")')
-        recent_titles = [row[0] for row in cursor.fetchall()]
-        
-        for existing_title in recent_titles:
-            # SequenceMatcher
-            sim = calculate_similarity(title, existing_title)
-            if sim > config.similarity_threshold:
-                return True, f"TITLE_SIMILARITY: {sim:.2f}"
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
             
-            # N-gram similarity
-            ngram_sim = ngram_similarity(title, existing_title)
-            if ngram_sim > config.similarity_threshold:
-                return True, f"TITLE_NGRAM_SIMILARITY: {ngram_sim:.2f}"
-        
-        # 6. Проверка пересечения сущностей
-        full_text = f"{title} {summary}".strip()
-        new_entities = extract_key_entities(full_text)
-        
-        if len(new_entities) >= 2:
-            cursor.execute('SELECT title, entities FROM posted_articles WHERE posted_date > datetime("now", "-14 days")')
-            for row in cursor.fetchall():
-                existing_title, saved_entities_json = row
-                if saved_entities_json:
-                    existing_entities = set(json.loads(saved_entities_json))
-                else:
-                    existing_entities = extract_key_entities(existing_title)
+            norm_url = normalize_url(url)
+            domain = get_domain(url)
+            title_sig = get_title_signature(title)
+            summary_hash = get_summary_hash(summary)
+            content_hash = get_content_hash(summary)
+            
+            # 1. Проверка по нормализованному URL
+            cursor.execute('SELECT title FROM posted_articles WHERE norm_url = ?', (norm_url,))
+            if cursor.fetchone():
+                return True, f"URL_DUPLICATE: {norm_url[:60]}"
+            
+            # 2. Проверка по хешу summary
+            cursor.execute('SELECT title FROM posted_articles WHERE summary_hash = ?', (summary_hash,))
+            if cursor.fetchone():
+                return True, f"SUMMARY_HASH_DUPLICATE"
+            
+            # 3. Проверка по хешу контента
+            if content_hash:
+                cursor.execute('SELECT title FROM posted_articles WHERE content_hash = ?', (content_hash,))
+                if cursor.fetchone():
+                    return True, f"CONTENT_HASH_DUPLICATE"
+            
+            # 4. Проверка по домену + сигнатуре заголовка (mirror-сайты)
+            cursor.execute('SELECT title FROM posted_articles WHERE domain = ? AND title_signature = ?',
+                          (domain, title_sig))
+            if cursor.fetchone():
+                return True, f"DOMAIN_TITLE_SIGNATURE: {domain}"
+            
+            # 5. Проверка похожести заголовков
+            cursor.execute('SELECT title FROM posted_articles WHERE posted_date > datetime("now", "-7 days")')
+            recent_titles = [row[0] for row in cursor.fetchall()]
+            
+            for existing_title in recent_titles:
+                # SequenceMatcher
+                sim = calculate_similarity(title, existing_title)
+                if sim > config.similarity_threshold:
+                    return True, f"TITLE_SIMILARITY: {sim:.2f}"
                 
-                if len(existing_entities) < 2:
-                    continue
-                
-                # Fuzzy matching сущностей
-                entity_sim = fuzzy_entity_match(new_entities, existing_entities)
-                if entity_sim >= config.entity_overlap_threshold:
-                    return True, f"ENTITY_OVERLAP: {entity_sim:.2f}"
-                
-                # Прямое пересечение
-                common = new_entities & existing_entities
-                min_size = min(len(new_entities), len(existing_entities))
-                overlap_ratio = len(common) / min_size if min_size > 0 else 0
-                
-                if len(common) >= 2 and overlap_ratio >= config.entity_overlap_threshold:
-                    return True, f"ENTITY_COMMON: {len(common)} entities"
-        
-        return False, ""
+                # N-gram similarity
+                ngram_sim = ngram_similarity(title, existing_title)
+                if ngram_sim > config.similarity_threshold:
+                    return True, f"TITLE_NGRAM_SIMILARITY: {ngram_sim:.2f}"
+            
+            # 6. Проверка пересечения сущностей
+            full_text = f"{title} {summary}".strip()
+            new_entities = extract_key_entities(full_text)
+            
+            if len(new_entities) >= 2:
+                cursor.execute('SELECT title, entities FROM posted_articles WHERE posted_date > datetime("now", "-14 days")')
+                for row in cursor.fetchall():
+                    existing_title, saved_entities_json = row
+                    if saved_entities_json:
+                        existing_entities = set(json.loads(saved_entities_json))
+                    else:
+                        existing_entities = extract_key_entities(existing_title)
+                    
+                    if len(existing_entities) < 2:
+                        continue
+                    
+                    # Fuzzy matching сущностей
+                    entity_sim = fuzzy_entity_match(new_entities, existing_entities)
+                    if entity_sim >= config.entity_overlap_threshold:
+                        return True, f"ENTITY_OVERLAP: {entity_sim:.2f}"
+                    
+                    # Прямое пересечение
+                    common = new_entities & existing_entities
+                    min_size = min(len(new_entities), len(existing_entities))
+                    overlap_ratio = len(common) / min_size if min_size > 0 else 0
+                    
+                    if len(common) >= 2 and overlap_ratio >= config.entity_overlap_threshold:
+                        return True, f"ENTITY_COMMON: {len(common)} entities"
+            
+            return False, ""
     
     def is_too_similar_to_recent(self, title: str, summary: str) -> Tuple[bool, str]:
         """
         Проверяет, не слишком ли похожа статья на последние N постов
         Использует TF-IDF cosine similarity
         """
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT title, summary, topic, entities FROM posted_articles '
-                      'ORDER BY posted_date DESC LIMIT ?', (config.recent_posts_check,))
-        recent_posts = cursor.fetchall()
-        
-        if len(recent_posts) < 2:
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT title, summary, topic, entities FROM posted_articles '
+                          'ORDER BY posted_date DESC LIMIT ?', (config.recent_posts_check,))
+            recent_posts = cursor.fetchall()
+            
+            if len(recent_posts) < 2:
+                return False, ""
+            
+            full_text = f"{title} {summary}".strip()
+            new_entities = extract_key_entities(full_text)
+            detected_topic = Topic.detect(full_text)
+            
+            # Собираем контекст для TF-IDF
+            docs = [full_text]
+            for row in recent_posts:
+                docs.append(f"{row[0]} {row[1]}")
+            
+            # Вычисляем TF-IDF similarity
+            similarity_matrix = tfidf_cosine_similarity(docs)
+            
+            # Проверяем похожесть с каждым недавним постом
+            for idx, row in enumerate(recent_posts, start=1):
+                sim_score = similarity_matrix[0][idx]
+                
+                if sim_score > config.tfidf_similarity_threshold:
+                    return True, f"TFIDF_SIMILARITY: {sim_score:.2f} with '{row[0][:40]}...'"
+                
+                # Дополнительная проверка по сущностям
+                if row[3]:  # entities
+                    existing_entities = set(json.loads(row[3]))
+                    common = new_entities & existing_entities
+                    
+                    if len(common) >= 3:
+                        return True, f"TOO_MANY_COMMON_ENTITIES: {len(common)}"
+            
             return False, ""
-        
-        full_text = f"{title} {summary}".strip()
-        new_entities = extract_key_entities(full_text)
-        detected_topic = Topic.detect(full_text)
-        
-        # Собираем контекст для TF-IDF
-        context_texts = [row[1] for row in recent_posts if row[1]]
-        
-        for post in recent_posts:
-            post_title, post_summary, post_topic, saved_entities_json = post
-            
-            # Проверка похожести заголовков
-            if post_title:
-                sim = calculate_similarity(title, post_title)
-                if sim > config.recent_similarity_threshold:
-                    return True, f"RECENT_TITLE_SIM: {sim:.2f}"
-            
-            # TF-IDF similarity для summary
-            if post_summary and summary:
-                tfidf_sim = TFIDFCalculator.cosine_similarity(summary, post_summary, context_texts)
-                if tfidf_sim > config.tfidf_similarity_threshold:
-                    return True, f"TFIDF_SIMILARITY: {tfidf_sim:.2f}"
-            
-            # Проверка темы и сущностей
-            post_entities = set(json.loads(saved_entities_json)) if saved_entities_json else set()
-            
-            if detected_topic == post_topic and post_entities:
-                common = new_entities & post_entities
-                if len(common) >= config.min_entity_distance:
-                    return True, f"RECENT_TOPIC_ENTITIES: {detected_topic}"
-        
-        return False, ""
     
-    def check_diversity_requirement(self, proposed_topic: str) -> Tuple[bool, str]:
+    def check_diversity_requirement(self, topic: str) -> Tuple[bool, str]:
         """
-        Проверяет требование разнообразия:
-        если последние 3 поста про одну тему, следующий должен быть другой
+        Проверяет требования по разнообразию контента
+        Не публикуем подряд посты из одной темы
         """
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT topic FROM posted_articles '
-                      'ORDER BY posted_date DESC LIMIT ?', (config.diversity_window,))
-        recent_topics = [row[0] for row in cursor.fetchall()]
-        
-        if len(recent_topics) < config.diversity_window:
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            cursor.execute(
+                'SELECT topic FROM posted_articles ORDER BY posted_date DESC LIMIT ?',
+                (config.diversity_window,)
+            )
+            recent_topics = [row[0] for row in cursor.fetchall()]
+            
+            if not recent_topics:
+                return True, ""
+            
+            # Если последний пост такой же темы — отклоняем
+            if recent_topics[0] == topic:
+                return False, f"DIVERSITY: последний пост был {topic}"
+            
+            # Если 2 из 3 последних — такая же тема, отклоняем
+            if len(recent_topics) >= config.diversity_window:
+                same_topic_count = sum(1 for t in recent_topics[:config.diversity_window] if t == topic)
+                if same_topic_count >= 2:
+                    return False, f"DIVERSITY: {same_topic_count}/{config.diversity_window} последних — {topic}"
+            
             return True, ""
-        
-        # Проверяем, все ли последние посты на одну тему
-        topic_counts = Counter(recent_topics)
-        dominant_topic, count = topic_counts.most_common(1)[0]
-        
-        if count >= config.diversity_window and proposed_topic == dominant_topic:
-            return False, f"DIVERSITY_REQUIRED: последние {config.diversity_window} постов про {dominant_topic}"
-        
-        return True, ""
     
     def llm_duplicate_check(self, article: Article, recent_posts: List[dict]) -> Tuple[bool, str]:
         """
-        LLM-проверка: отправляет новую статью + последние 3 поста в LLM
-        с вопросом "Это дубликат? YES/NO"
+        LLM-проверка: действительно ли это дубликат/похожая новость
         """
         if not recent_posts:
             return False, ""
         
-        # Формируем контекст
-        context = "НЕДАВНИЕ ПОСТЫ:\n\n"
+        # Формируем контекст для LLM
+        context = "НЕДАВНИЕ ПОСТЫ:\n"
         for i, post in enumerate(recent_posts[:3], 1):
-            context += f"{i}. {post.get('title', '')}\n"
-            context += f"   Сущности: {', '.join(post.get('entities', []))}\n\n"
+            context += f"{i}. {post['title']}\n"
         
-        prompt = f"""Ты — редактор новостного канала про ИИ. Твоя задача — определить, является ли новая статья дубликатом уже опубликованных.
+        new_article_text = f"НОВАЯ СТАТЬЯ:\n{article.title}\n{article.summary[:300]}"
+        
+        prompt = f"""{context}
 
-{context}
+{new_article_text}
 
-НОВАЯ СТАТЬЯ:
-Заголовок: {article.title}
-Краткое содержание: {article.summary[:500]}
-Источник: {article.source}
-
-ПРАВИЛА:
-- Дубликат = статья про ТОТ ЖЕ новостной событие/анонс/релиз
-- Разные источники про одно событие = дубликат
-- Перефразированный заголовок, но та же суть = дубликат
-- Другой аспект той же темы = НЕ дубликат
-- Разные модели/продукты одной компании = НЕ дубликат
-
-Ответь ТОЛЬКО: YES (если дубликат) или NO (если уникальная новость)
-
-Ответ:"""
+Является ли новая статья дубликатом или очень похожей на недавние посты?
+Отвечай ТОЛЬКО: YES или NO"""
         
         try:
             resp = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                temperature=0.1,
+                model=GROQ_MODELS[0],
+                temperature=0.3,
                 max_tokens=10,
                 messages=[{"role": "user", "content": prompt}],
             )
             answer = resp.choices[0].message.content.strip().upper()
             
             if "YES" in answer:
-                return True, "LLM_DUPLICATE_CHECK"
-            return False, ""
-            
+                return True, "LLM_DUPLICATE_DETECTION"
         except Exception as e:
             logger.warning(f"⚠️ LLM duplicate check failed: {e}")
-            return False, ""  # При ошибке LLM пропускаем
-    
-    def log_rejected(self, article: Article, reason: str, duplicate_of: str = None, 
-                     similarity_score: float = None):
-        """Логирует отклонённую статью в отдельную таблицу"""
-        conn = self._get_conn()
-        cursor = conn.cursor()
         
-        try:
+        return False, ""
+    
+    def add(self, article: Article, topic: str = Topic.GENERAL):
+        """Добавляет статью в базу"""
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            norm_url = normalize_url(article.link)
+            domain = get_domain(article.link)
+            title_sig = get_title_signature(article.title)
+            summary_hash = get_summary_hash(article.summary)
+            content_hash = get_content_hash(article.summary)
+            
+            full_text = f"{article.title} {article.summary}".strip()
+            entities = list(extract_key_entities(full_text))
+            
+            cursor.execute('''
+                INSERT OR IGNORE INTO posted_articles 
+                (url, norm_url, domain, title, title_signature, summary, 
+                 content_hash, summary_hash, entities, topic, source, published_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                article.link, norm_url, domain, article.title, title_sig, article.summary,
+                content_hash, summary_hash, json.dumps(entities), topic, article.source,
+                article.published.isoformat()
+            ))
+            
+            conn.commit()
+    
+    def log_rejected(self, article: Article, reason: str, duplicate_of: str = None, similarity: float = None):
+        """Логирует отклонённую статью"""
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            norm_url = normalize_url(article.link)
+            
             cursor.execute('''
                 INSERT INTO rejected_articles 
                 (url, norm_url, title, summary, source, rejection_reason, duplicate_of, similarity_score)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                article.link,
-                normalize_url(article.link),
-                article.title[:200],
-                article.summary[:1000] if article.summary else None,
-                article.source,
-                reason,
-                duplicate_of,
-                similarity_score
+                article.link, norm_url, article.title, article.summary[:500],
+                article.source, reason, duplicate_of, similarity
             ))
+            
             conn.commit()
-            logger.info(f"📝 Залогировано rejected: {reason[:50]}")
-        except Exception as e:
-            logger.error(f"Ошибка логирования rejected: {e}")
-    
-    def add(self, article: Article, topic: str = Topic.GENERAL):
-        """Добавляет статью в историю"""
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        
-        norm_url = normalize_url(article.link)
-        domain = get_domain(article.link)
-        title_sig = get_title_signature(article.title)
-        summary_hash = get_summary_hash(article.summary)
-        content_hash = get_content_hash(article.summary)
-        full_text = f"{article.title} {article.summary}".strip()
-        entities = list(extract_key_entities(full_text))
-        
-        try:
-            cursor.execute('''
-                INSERT INTO posted_articles 
-                (url, norm_url, domain, title, title_signature, summary, content_hash, summary_hash, 
-                 entities, topic, source, published_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                article.link,
-                norm_url,
-                domain,
-                article.title[:200],
-                title_sig,
-                article.summary[:2000] if article.summary else None,
-                content_hash,
-                summary_hash,
-                json.dumps(entities),
-                topic,
-                article.source,
-                article.published.isoformat() if article.published else None
-            ))
-            conn.commit()
-            logger.info(f"💾 [{topic.upper()}] {article.title[:45]}... | Сущности: {entities if entities else 'нет'}")
-        except sqlite3.IntegrityError:
-            logger.warning(f"⚠️ IntegrityError (дубликат URL): {article.title[:40]}")
-        except Exception as e:
-            logger.error(f"Ошибка добавления статьи: {e}")
     
     def get_recent_posts(self, limit: int = 5) -> List[dict]:
-        """Возвращает последние N постов"""
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT title, summary, topic, entities, url 
-            FROM posted_articles 
-            ORDER BY posted_date DESC 
-            LIMIT ?
-        ''', (limit,))
-        
-        posts = []
-        for row in cursor.fetchall():
-            posts.append({
-                'title': row[0],
-                'summary': row[1],
-                'topic': row[2],
-                'entities': json.loads(row[3]) if row[3] else [],
-                'url': row[4]
-            })
-        return posts
+        """Возвращает последние N постов с метаданными"""
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT title, summary, topic, entities, url
+                FROM posted_articles
+                ORDER BY posted_date DESC
+                LIMIT ?
+            ''', (limit,))
+            
+            posts = []
+            for row in cursor.fetchall():
+                posts.append({
+                    'title': row[0],
+                    'summary': row[1],
+                    'topic': row[2],
+                    'entities': json.loads(row[3]) if row[3] else [],
+                    'url': row[4]
+                })
+            return posts
     
     def get_recent_topics_stats(self) -> dict:
         """Возвращает статистику по темам последних постов"""
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT topic, COUNT(*) as count 
-            FROM posted_articles 
-            WHERE posted_date > datetime("now", "-7 days")
-            GROUP BY topic
-        ''')
-        
-        return {row[0]: row[1] for row in cursor.fetchall()}
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT topic, COUNT(*) as count 
+                FROM posted_articles 
+                WHERE posted_date > datetime("now", "-7 days")
+                GROUP BY topic
+            ''')
+            
+            return {row[0]: row[1] for row in cursor.fetchall()}
     
     def cleanup(self, days: int = 60):
         """Удаляет записи старше N дней"""
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        
-        cursor.execute(f'''
-            DELETE FROM posted_articles 
-            WHERE posted_date < datetime('now', '-{days} days')
-        ''')
-        
-        deleted = cursor.rowcount
-        conn.commit()
-        
-        # Очищаем старые rejected тоже
-        cursor.execute('''
-            DELETE FROM rejected_articles 
-            WHERE checked_at < datetime("now", "-30 days")
-        ''')
-        rejected_deleted = cursor.rowcount
-        conn.commit()
-        
-        if deleted > 0 or rejected_deleted > 0:
-            logger.info(f"🧹 Очистка: удалено {deleted} posted, {rejected_deleted} rejected")
-        
-        # VACUUM для оптимизации
-        if deleted > 100:
-            cursor.execute('VACUUM')
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            cursor.execute(f'''
+                DELETE FROM posted_articles 
+                WHERE posted_date < datetime('now', '-{days} days')
+            ''')
+            
+            deleted = cursor.rowcount
             conn.commit()
+            
+            # Очищаем старые rejected тоже
+            cursor.execute('''
+                DELETE FROM rejected_articles 
+                WHERE checked_at < datetime("now", "-30 days")
+            ''')
+            rejected_deleted = cursor.rowcount
+            conn.commit()
+            
+            if deleted > 0 or rejected_deleted > 0:
+                logger.info(f"🧹 Очистка: удалено {deleted} posted, {rejected_deleted} rejected")
+            
+            # VACUUM для оптимизации
+            if deleted > 100:
+                cursor.execute('VACUUM')
+                conn.commit()
     
     def get_stats(self) -> dict:
         """Возвращает статистику базы данных"""
-        conn = self._get_conn()
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT COUNT(*) FROM posted_articles')
-        total_posted = cursor.fetchone()[0]
-        
-        cursor.execute('SELECT COUNT(*) FROM rejected_articles')
-        total_rejected = cursor.fetchone()[0]
-        
-        cursor.execute('''
-            SELECT rejection_reason, COUNT(*) as count 
-            FROM rejected_articles 
-            GROUP BY rejection_reason
-            ORDER BY count DESC
-        ''')
-        rejection_reasons = {row[0]: row[1] for row in cursor.fetchall()}
-        
-        return {
-            'total_posted': total_posted,
-            'total_rejected': total_rejected,
-            'rejection_reasons': rejection_reasons
-        }
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT COUNT(*) FROM posted_articles')
+            total_posted = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT COUNT(*) FROM rejected_articles')
+            total_rejected = cursor.fetchone()[0]
+            
+            cursor.execute('''
+                SELECT rejection_reason, COUNT(*) as count 
+                FROM rejected_articles 
+                GROUP BY rejection_reason
+                ORDER BY count DESC
+            ''')
+            rejection_reasons = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            return {
+                'total_posted': total_posted,
+                'total_rejected': total_rejected,
+                'rejection_reasons': rejection_reasons
+            }
     
-    def __del__(self):
-        self._release_lock()
+    def close(self):
+        """Закрывает соединение с базой данных"""
+        if self._conn:
+            self._conn.close()
+            self._conn = None
+            logger.info("🔒 База данных закрыта")
 
-import threading  # Добавляем импорт для thread-local storage
-
-# ====================== HELPERS ======================
-def clean_text(text: str) -> str:
-    if not text:
-        return ""
-    text = re.sub(r'<[^>]+>', '', text)
-    text = re.sub(r'\s+', ' ', text)
-    return text.strip()
-
-def ai_relevance(text: str) -> float:
-    lower = text.lower()
-    matches = sum(1 for kw in AI_KEYWORDS if kw in lower)
-    return min(matches / 3.0, 1.0)
-
-# ====================== RSS LOADER ======================
-async def fetch_feed(session: aiohttp.ClientSession, url: str, source: str, 
-                     posted: PostedManager) -> List[Article]:
-    # Добавляем jitter к timeout
-    timeout = config.rss_timeout + random.uniform(0, config.rss_jitter)
+# ====================== RSS LOADING ======================
+async def fetch_feed(url: str, source: str, posted: PostedManager) -> List[Article]:
+    """Загружает один RSS feed"""
+    logger.info(f"📥 Загрузка: {source}")
     
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
-            if resp.status != 200:
-                logger.warning(f"{source}: HTTP {resp.status}")
-                return []
-            text = await resp.text()
+        jitter = random.uniform(0, config.rss_jitter)
+        await asyncio.sleep(jitter)
+        
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(url, headers=HEADERS, timeout=aiohttp.ClientTimeout(total=config.rss_timeout)) as resp:
+                if resp.status != 200:
+                    logger.warning(f"  ⚠️ HTTP {resp.status}")
+                    return []
+                
+                content = await resp.text()
+        
+        feed = await asyncio.to_thread(feedparser.parse, content)
+        
+        if not feed.entries:
+            logger.warning(f"  ⚠️ Нет записей")
+            return []
+        
+        articles = []
+        for entry in feed.entries[:15]:
+            link = entry.get('link', '')
+            title = entry.get('title', '').strip()
+            summary = entry.get('summary', entry.get('description', '')).strip()
+            
+            if not link or not title:
+                continue
+            
+            # Удаляем HTML теги из summary
+            summary = re.sub(r'<[^>]+>', '', summary)
+            
+            # Парсим дату публикации
+            pub_date = entry.get('published_parsed') or entry.get('updated_parsed')
+            if pub_date:
+                published = datetime(*pub_date[:6], tzinfo=timezone.utc)
+            else:
+                published = datetime.now(timezone.utc)
+            
+            articles.append(Article(
+                title=title,
+                summary=summary,
+                link=link,
+                source=source,
+                published=published
+            ))
+        
+        logger.info(f"  ✅ {len(articles)} статей")
+        return articles
+        
     except asyncio.TimeoutError:
-        logger.warning(f"{source}: Timeout after {timeout:.1f}s")
+        logger.warning(f"  ⏱️ Таймаут")
         return []
     except Exception as e:
-        logger.warning(f"{source}: {e}")
+        logger.warning(f"  ❌ Ошибка: {e}")
         return []
-
-    try:
-        feed = feedparser.parse(text)
-    except Exception as e:
-        logger.warning(f"{source}: Parse error {e}")
-        return []
-
-    articles = []
-    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=config.max_article_age_hours)
-    
-    for entry in feed.entries[:25]:
-        link = entry.get("link", "").strip()
-        title = clean_text(entry.get("title") or "")
-        summary = clean_text(entry.get("summary") or entry.get("description") or "")[:1500]
-
-        if not link or len(title) < 15:
-            continue
-        
-        # Проверка длины summary
-        if len(summary) < config.min_summary_length:
-            logger.debug(f"  Пропуск (короткий summary {len(summary)}): {title[:40]}")
-            continue
-        
-        # Парсим дату публикации
-        published = datetime.now(timezone.utc)
-        date_found = False
-        for df in ["published", "updated", "created", "pubDate"]:
-            ds = entry.get(df)
-            if ds:
-                try:
-                    parsed = feedparser._parse_date(ds)
-                    if parsed:
-                        published = datetime(*parsed[:6], tzinfo=timezone.utc)
-                        date_found = True
-                        break
-                except:
-                    pass
-        
-        # Проверка возраста статьи
-        if date_found and published < cutoff_time:
-            logger.debug(f"  Пропуск (устарело {published}): {title[:40]}")
-            continue
-        
-        # Проверка на дубликат
-        is_dup, reason = posted.is_duplicate(link, title, summary)
-        if is_dup:
-            logger.debug(f"  Пропуск (дубликат: {reason}): {title[:40]}")
-            continue
-
-        articles.append(Article(
-            title=title,
-            summary=summary,
-            link=link,
-            source=source,
-            published=published
-        ))
-
-    return articles
 
 async def load_all_feeds(posted: PostedManager) -> List[Article]:
-    logger.info("🔄 Загрузка RSS...")
+    """Загружает все RSS feeds параллельно"""
+    tasks = [fetch_feed(url, source, posted) for url, source in RSS_FEEDS]
+    results = await asyncio.gather(*tasks)
     
-    conn = aiohttp.TCPConnector(limit=30)
-    async with aiohttp.ClientSession(headers=HEADERS, connector=conn) as session:
-        tasks = [fetch_feed(session, url, name, posted) for url, name in RSS_FEEDS]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
     all_articles = []
-    for i, res in enumerate(results):
-        source_name = RSS_FEEDS[i][1]
-        if isinstance(res, list) and res:
-            all_articles.extend(res)
-            logger.info(f"  ✓ {source_name}: {len(res)} новых")
-        elif isinstance(res, Exception):
-            logger.error(f"  ✗ {source_name}: {res}")
-
-    logger.info(f"📊 Всего кандидатов: {len(all_articles)}")
+    for feed_articles in results:
+        all_articles.extend(feed_articles)
+    
+    logger.info(f"📦 Всего загружено: {len(all_articles)} статей")
     return all_articles
 
-# ====================== FILTER ======================
-def filter_articles(articles: List[Article], posted: PostedManager) -> List[Article]:
-    candidates = []
+# ====================== ФИЛЬТРАЦИЯ ======================
+def is_relevant(article: Article) -> bool:
+    """Проверка релевантности статьи"""
+    text_lower = f"{article.title} {article.summary}".lower()
     
-    recent_stats = posted.get_recent_topics_stats()
-    logger.info(f"📊 Последние темы: {recent_stats}")
+    # Исключаем по плохим фразам
+    if any(bad in text_lower for bad in BAD_PHRASES):
+        return False
     
-    for a in articles:
-        text = f"{a.title} {a.summary}".lower()
-        
-        if any(p in text for p in BAD_PHRASES):
-            posted.log_rejected(a, "BAD_PHRASES")
-            continue
-        if any(kw in text for kw in EXCLUDE_KEYWORDS):
-            posted.log_rejected(a, "EXCLUDE_KEYWORDS")
-            continue
-        if not any(kw in text for kw in AI_KEYWORDS):
-            posted.log_rejected(a, "NO_AI_KEYWORDS")
-            continue
-        if ai_relevance(text) < 0.4:
-            posted.log_rejected(a, "LOW_AI_RELEVANCE")
-            continue
-        
-        # Проверка на схожесть с недавними постами
-        is_similar, reason = posted.is_too_similar_to_recent(a.title, a.summary)
-        if is_similar:
-            posted.log_rejected(a, f"TOO_SIMILAR_RECENT: {reason}")
-            logger.debug(f"  Пропуск (слишком похоже на недавние): {a.title[:40]}")
-            continue
-        
-        candidates.append(a)
+    # Исключаем по ключевым словам
+    if any(ex in text_lower for ex in EXCLUDE_KEYWORDS):
+        return False
+    
+    # Проверяем наличие AI ключевых слов
+    has_ai_keyword = any(kw in text_lower for kw in AI_KEYWORDS)
+    if not has_ai_keyword:
+        return False
+    
+    # Проверка возраста статьи
+    age_hours = (datetime.now(timezone.utc) - article.published).total_seconds() / 3600
+    if age_hours > config.max_article_age_hours:
+        return False
+    
+    return True
 
-    candidates.sort(key=lambda x: x.published, reverse=True)
+def filter_articles(articles: List[Article], posted: PostedManager) -> List[Article]:
+    """Фильтрует и сортирует статьи"""
+    logger.info("🔍 Фильтрация статей...")
     
-    logger.info(f"🎯 После фильтров: {len(candidates)} статей")
+    candidates = []
+    for article in articles:
+        # Проверка релевантности
+        if not is_relevant(article):
+            continue
+        
+        # Проверка на дубликаты
+        is_dup, reason = posted.is_duplicate(article.link, article.title, article.summary)
+        if is_dup:
+            posted.log_rejected(article, reason)
+            continue
+        
+        # Проверка на похожесть с недавними
+        is_similar, reason = posted.is_too_similar_to_recent(article.title, article.summary)
+        if is_similar:
+            posted.log_rejected(article, reason)
+            continue
+        
+        candidates.append(article)
+    
+    # Сортировка по свежести и наличию сущностей
+    def score_article(art: Article) -> float:
+        text = f"{art.title} {art.summary}".lower()
+        entities = extract_key_entities(text)
+        entity_score = len(entities) * 0.5
+        
+        # Бонус за свежесть
+        age_hours = (datetime.now(timezone.utc) - art.published).total_seconds() / 3600
+        freshness_score = max(0, 24 - age_hours) / 24
+        
+        return entity_score + freshness_score
+    
+    candidates.sort(key=score_article, reverse=True)
+    
+    logger.info(f"✅ Отфильтровано: {len(candidates)} кандидатов")
     return candidates
 
-# ====================== ГЕНЕРАТОР ПОСТОВ ======================
-GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama3-70b-8192",
-]
-
+# ====================== EXPONENTIAL BACKOFF ======================
 def exponential_backoff(attempt: int) -> float:
     """Экспоненциальная задержка с jitter"""
-    delay = min(
-        config.groq_base_delay * (2 ** attempt) + random.uniform(0, 1),
-        config.groq_max_delay
-    )
-    return delay
+    delay = min(config.groq_base_delay * (2 ** attempt), config.groq_max_delay)
+    jitter = random.uniform(0, delay * 0.1)
+    return delay + jitter
 
+# ====================== ГЕНЕРАЦИЯ САММАРИ ======================
 async def generate_summary(article: Article) -> Optional[str]:
-    logger.info(f"📝 Генерация: {article.title[:55]}...")
+    """Генерирует пост через Groq"""
+    logger.info(f"📝 Обработка: {article.title[:60]}...")
     
-    prompt = f"""Ты — редактор крупного русскоязычного Telegram-канала про ИИ и технологии.
+    prompt = f"""Превратите эту AI-новость в вирусный пост для Telegram-канала про нейросети.
 
 НОВОСТЬ:
-Заголовок: {article.title}
-Текст: {article.summary[:2200]}
-Источник: {article.source}
+{article.title}
+{article.summary[:800]}
 
-ЗАДАЧА: Напиши пост на русском языке.
+СТРУКТУРА ПОСТА:
+1. Взрывной заголовок (5-8 слов) — никакой воды, сразу к делу
+2. Главная суть одним предложением (что случилось?)
+3. Почему это важно (2-3 предложения без клише)
+4. Краткий контекст или прогноз (1-2 предложения)
 
-СТРУКТУРА (обязательно):
-1. 🔥 ЗАГОЛОВОК — цепляющий, с эмодзи, отражает суть
-2. ЧТО СЛУЧИЛОСЬ — 3-4 предложения с фактами (кто, что, когда, цифры)
-3. ПОЧЕМУ ВАЖНО — 2 предложения о влиянии на индустрию/пользователей  
-4. ВЫВОД — острый комментарий или провокационный вопрос
+ВАЖНО:
+× Никаких банальностей вроде "интересно отметить", "стоит сказать", "примечательно, что"
+× Без очевидных вещей типа "ИИ развивается", "компании соревнуются"
+× Только конкретика, цифры, факты, последствия
+× Эмодзи в меру (1-2 максимум в начале)
+× Пиши на русском, простым языком, без хайпа ради хайпа
 
-ТРЕБОВАНИЯ:
-- Длина: 600-850 символов (ОБЯЗАТЕЛЬНО)
-- Только факты, никакой воды
-- Конкретика: названия компаний, цифры, даты
-
-ЗАПРЕЩЕНО:
-- Фразы: "стоит отметить", "важно понимать", "интересно что", "друзья"
-- Шаблонные вопросы типа "Что думаете?"
-- Пустые обобщения без фактов
-
-ХОРОШИЕ ВОПРОСЫ:
+ХОРОШИЕ ПРИМЕРЫ ПОДАЧИ:
+✓ "DeepMind обучила ИИ предсказывать погоду точнее метеорологов"
+✓ "Новая модель обходит GPT-4 в математике при 10x меньших затратах"
 ✓ "Google снова догоняет — или на этот раз обгонит?"
 ✓ "Сколько стартапов похоронит это обновление?"
 
@@ -1329,50 +1192,55 @@ async def main():
     logger.info("=" * 50)
     
     posted = PostedManager(config.db_file)
-    posted.cleanup(config.retention_days)
     
-    # Выводим статистику
-    stats = posted.get_stats()
-    logger.info(f"📊 Статистика БД: {stats['total_posted']} posted, {stats['total_rejected']} rejected")
-    
-    raw_articles = await load_all_feeds(posted)
-    candidates = filter_articles(raw_articles, posted)
-    
-    if not candidates:
-        logger.info("📭 Нет подходящих новостей")
-        return
+    try:
+        posted.cleanup(config.retention_days)
+        
+        # Выводим статистику
+        stats = posted.get_stats()
+        logger.info(f"📊 Статистика БД: {stats['total_posted']} posted, {stats['total_rejected']} rejected")
+        
+        raw_articles = await load_all_feeds(posted)
+        candidates = filter_articles(raw_articles, posted)
+        
+        if not candidates:
+            logger.info("📭 Нет подходящих новостей")
+            return
 
-    for article in candidates[:20]:
-        # Финальная проверка на дубликат перед обработкой
-        is_dup, reason = posted.is_duplicate(article.link, article.title, article.summary)
-        if is_dup:
-            posted.log_rejected(article, f"FINAL_CHECK: {reason}")
-            logger.debug(f"  Пропуск (финальная проверка): {article.title[:40]}")
-            continue
-        
-        is_similar, reason = posted.is_too_similar_to_recent(article.title, article.summary)
-        if is_similar:
-            posted.log_rejected(article, f"FINAL_RECENT: {reason}")
-            logger.debug(f"  Пропуск (похоже на недавние): {article.title[:40]}")
-            continue
-        
-        summary = await generate_summary(article)
-        if not summary:
-            posted.log_rejected(article, "LLM_GENERATION_FAILED")
-            continue
-        
-        if await post_article(article, summary, posted):
-            logger.info("\n🏁 Готово! Скрипт завершён.")
-            break
-        
-        await asyncio.sleep(3)
-    else:
-        logger.info("😔 Не удалось опубликовать ни одной статьи")
-
-    await bot.session.close()
+        for article in candidates[:20]:
+            # Финальная проверка на дубликат перед обработкой
+            is_dup, reason = posted.is_duplicate(article.link, article.title, article.summary)
+            if is_dup:
+                posted.log_rejected(article, f"FINAL_CHECK: {reason}")
+                logger.debug(f"  Пропуск (финальная проверка): {article.title[:40]}")
+                continue
+            
+            is_similar, reason = posted.is_too_similar_to_recent(article.title, article.summary)
+            if is_similar:
+                posted.log_rejected(article, f"FINAL_RECENT: {reason}")
+                logger.debug(f"  Пропуск (похоже на недавние): {article.title[:40]}")
+                continue
+            
+            summary = await generate_summary(article)
+            if not summary:
+                posted.log_rejected(article, "LLM_GENERATION_FAILED")
+                continue
+            
+            if await post_article(article, summary, posted):
+                logger.info("\n🏁 Готово! Скрипт завершён.")
+                break
+            
+            await asyncio.sleep(3)
+        else:
+            logger.info("😔 Не удалось опубликовать ни одной статьи")
+    
+    finally:
+        posted.close()
+        await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

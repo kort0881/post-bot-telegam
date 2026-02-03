@@ -10,7 +10,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from typing import List, Set, Optional, Tuple
-from urllib.parse import urlparse, quote, parse_qs, urlencode
+from urllib.parse import urlparse, parse_qs, urlencode
 from dataclasses import dataclass, field
 
 import aiohttp
@@ -18,7 +18,6 @@ import feedparser
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import FSInputFile
 from groq import Groq
 
 # ====================== ЛОГИ ======================
@@ -40,7 +39,6 @@ class Config:
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.channel_id = os.getenv("CHANNEL_ID")
         self.retention_days = int(os.getenv("RETENTION_DAYS", "90"))
-        self.caption_limit = 1024
         self.db_file = "posted_articles.db"
         
         # Пороги дедупликации
@@ -88,16 +86,6 @@ GROQ_MODELS = [
 ]
 
 
-# ====================== СТИЛИ ИЗОБРАЖЕНИЙ ======================
-IMAGE_STYLES = {
-    "llm": "modern AI brain visualization, neural network connections, glowing blue and purple gradient, digital consciousness, futuristic",
-    "image_gen": "creative digital art studio, colorful palette, artistic AI creation, vibrant neon colors, abstract",
-    "robotics": "sleek humanoid robot, high-tech laboratory, metallic chrome surfaces, dramatic lighting, futuristic factory",
-    "hardware": "advanced computer chips, circuit boards closeup, neon green lights, technological precision, macro photography",
-    "general": "abstract technology concept, digital innovation, modern geometric shapes, blue purple gradient, clean minimal"
-}
-
-
 # ====================== RSS ======================
 RSS_FEEDS = [
     ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch"),
@@ -122,29 +110,67 @@ AI_KEYWORDS = [
     "deepmind", "nvidia", "agi", "transformer", "generative"
 ]
 
+# Расширенный список исключений
 EXCLUDE_KEYWORDS = [
+    # Финансы
     "stock price", "ipo", "earnings call", "quarterly results", "dividend",
-    "market cap", "wall street", "ps5", "xbox", "nintendo", "game review",
-    "netflix", "movie review", "box office", "bitcoin", "crypto", "blockchain",
-    "nft", "ethereum", "election", "trump", "biden", "congress"
+    "market cap", "wall street", "sec filing", "shareholders",
+    
+    # Развлечения
+    "ps5", "xbox", "nintendo", "game review", "netflix", "movie review",
+    "box office", "trailer", "streaming",
+    
+    # Крипта
+    "bitcoin", "crypto", "blockchain", "nft", "ethereum",
+    
+    # Политика США
+    "election", "trump", "biden", "congress", "senate", "white house",
+    "republican", "democrat", "supreme court", "governor",
+    
+    # Местечковые американские темы
+    "fbi", "cia", "nsa", "dhs", "homeland security",
+    "federal government", "federal agency", "us government",
+    "executive order", "state department", "pentagon",
+    "lawsuit", "court ruling", "legal battle", "antitrust",
+    "california", "texas", "new york", "florida", "washington dc",
+    "silicon valley drama", "layoffs", "hiring freeze",
+    "union", "strike", "labor dispute",
+    "immigration", "visa", "h1b", "border",
+    "healthcare", "insurance", "medicare", "medicaid",
+    "gun", "shooting", "police", "crime",
+    "school", "university", "college", "student",
+    "local news", "city council", "mayor",
+    
+    # Скандалы и драма
+    "controversy", "scandal", "accused", "allegations",
+    "harassment", "discrimination", "lawsuit filed",
+    "fired", "resigned", "stepping down",
 ]
 
 BAD_PHRASES = ["sponsored", "partner content", "advertisement", "black friday", "deal alert"]
 
 
-# ====================== KEY ENTITIES ======================
+# ====================== KEY ENTITIES (глобальные компании/продукты) ======================
 KEY_ENTITIES = [
+    # Глобальные AI компании
     "openai", "google", "meta", "microsoft", "anthropic", "nvidia", "apple",
     "amazon", "deepmind", "hugging face", "stability ai", "midjourney",
     "mistral", "cohere", "perplexity", "xai", "inflection",
+    "baidu", "alibaba", "tencent", "yandex", "sber",
+    
+    # Модели и продукты
     "gpt-4", "gpt-5", "gpt-4o", "chatgpt", "claude", "claude 3", "claude 3.5",
     "gemini", "gemini 2", "llama", "llama 3", "mistral", "mixtral",
     "copilot", "dall-e", "sora", "stable diffusion", "flux", "grok",
-    "deepseek", "qwen", "o1", "o3",
-    "linux foundation", "agentic", "ai agent", "agi", "regulation", "safety",
-    "alignment", "open source", "robotics", "humanoid",
+    "deepseek", "qwen", "o1", "o3", "gigachat", "yandexgpt",
+    
+    # Глобальные темы
+    "agi", "asi", "ai safety", "alignment", "open source",
+    "robotics", "humanoid", "autonomous", "self-driving",
+    
+    # Технологии
     "transformer", "diffusion", "multimodal", "reasoning", "fine-tuning",
-    "rlhf", "rag", "vector database", "embedding"
+    "rlhf", "rag", "vector database", "embedding", "inference"
 ]
 
 
@@ -190,7 +216,6 @@ class Topic:
 
 # ====================== UTILITIES ======================
 def normalize_url(url: str) -> str:
-    """Нормализация URL с удалением протокола для предотвращения дубликатов"""
     try:
         u = url.lower().strip()
         u = u.replace("https://", "").replace("http://", "")
@@ -306,6 +331,61 @@ def get_content_hash(text: str) -> str:
     return hashlib.md5(normalized.encode()).hexdigest()
 
 
+def is_local_us_news(text: str) -> bool:
+    """
+    Проверяет, является ли новость местечковой американской.
+    Возвращает True если это локальная новость (нужно отфильтровать).
+    """
+    text_lower = text.lower()
+    
+    # Американские госорганы и политика (ОБНОВЛЕНО)
+    us_gov_keywords = [
+        "fbi", "cia", "nsa", "dhs", "homeland security", "pentagon",
+        "white house", "congress", "senate", "supreme court",
+        "federal government", "federal agency", "us government",
+        "executive order", "state department", "doj", "ftc", "fcc",
+        "us military", "us army", "us navy",
+        "ice", "cbp", "tsa", "irs", "fema", "usps",  # НОВОЕ
+        "democrats", "republicans",  # НОВОЕ
+    ]
+    
+    # Американские штаты и города (в контексте новостей)
+    us_locations = [
+        "california", "texas", "new york", "florida", "washington dc",
+        "los angeles", "san francisco", "seattle", "boston", "chicago",
+        "silicon valley",
+    ]
+    
+    # Американские законы и суды
+    us_legal = [
+        "us court", "federal court", "district court", "appeals court",
+        "antitrust lawsuit", "class action", "sec investigation",
+        "ftc lawsuit", "doj investigation",
+    ]
+    
+    # Проверяем госорганы
+    for kw in us_gov_keywords:
+        if kw in text_lower:
+            # Исключение: если это глобальная новость про AI безопасность
+            if any(g in text_lower for g in ["ai safety", "ai regulation", "artificial intelligence"]):
+                continue
+            return True
+    
+    # Проверяем локации (только если нет глобального контекста)
+    us_location_count = sum(1 for loc in us_locations if loc in text_lower)
+    global_context = any(g in text_lower for g in ["global", "worldwide", "international", "launch", "release", "announce"])
+    
+    if us_location_count >= 2 and not global_context:
+        return True
+    
+    # Проверяем суды
+    for kw in us_legal:
+        if kw in text_lower:
+            return True
+    
+    return False
+
+
 # ====================== DUPLICATE RESULT ======================
 @dataclass
 class DuplicateCheckResult:
@@ -415,19 +495,16 @@ class PostedManager:
             content_hash = get_content_hash(f"{title} {summary}")
             entities = extract_entities(f"{title} {summary}")
             
-            # 0. Ранее отклонённые
             if self._was_rejected(norm_url):
                 result.add_reason("PREVIOUSLY_REJECTED")
                 return result
             
-            # 1. Точное совпадение URL
             cursor.execute('SELECT title FROM posted_articles WHERE norm_url = ?', (norm_url,))
             row = cursor.fetchone()
             if row:
                 result.add_reason(f"URL_EXACT", 1.0, row[0])
                 return result
             
-            # 2. Точное совпадение хеша
             if content_hash:
                 cursor.execute('SELECT title FROM posted_articles WHERE content_hash = ?', (content_hash,))
                 row = cursor.fetchone()
@@ -435,38 +512,32 @@ class PostedManager:
                     result.add_reason(f"CONTENT_HASH", 1.0, row[0])
                     return result
             
-            # 3. Точное совпадение нормализованного заголовка
             cursor.execute('SELECT title FROM posted_articles WHERE title_normalized = ?', (title_normalized,))
             row = cursor.fetchone()
             if row:
                 result.add_reason(f"TITLE_EXACT", 1.0, row[0])
                 return result
             
-            # 4. Совпадение сигнатуры слов
             cursor.execute('SELECT title FROM posted_articles WHERE title_word_signature = ?', (word_signature,))
             row = cursor.fetchone()
             if row:
                 result.add_reason(f"WORD_SIGNATURE", 0.95, row[0])
                 return result
             
-            # 5. Проверка похожести со всеми записями
             cursor.execute('SELECT id, title, title_normalized, title_words, entities, domain FROM posted_articles')
             all_posts = cursor.fetchall()
             
             for row in all_posts:
                 existing_id, existing_title, existing_normalized, existing_words_json, existing_entities_json, existing_domain = row
                 
-                # 5a. SequenceMatcher
                 seq_sim = calculate_similarity(title_normalized, existing_normalized)
                 if seq_sim > config.title_similarity_threshold:
                     result.add_reason(f"TITLE_SIM ({seq_sim:.0%})", seq_sim, existing_title)
                 
-                # 5b. N-gram
                 ngram_sim = ngram_similarity(title, existing_title)
                 if ngram_sim > config.ngram_similarity_threshold:
                     result.add_reason(f"NGRAM ({ngram_sim:.0%})", ngram_sim, existing_title)
                 
-                # 5c. Jaccard
                 if existing_words_json:
                     try:
                         existing_words = set(json.loads(existing_words_json))
@@ -476,7 +547,6 @@ class PostedManager:
                     except:
                         pass
                 
-                # 5d. Entities
                 if entities and existing_entities_json:
                     try:
                         existing_entities = set(json.loads(existing_entities_json))
@@ -490,7 +560,6 @@ class PostedManager:
                     except:
                         pass
                 
-                # 5e. Same domain
                 if domain == existing_domain:
                     same_sim = calculate_similarity(title_normalized, existing_normalized)
                     if same_sim > config.same_domain_similarity:
@@ -499,9 +568,7 @@ class PostedManager:
             return result
 
     def check_diversity(self, topic: str) -> Tuple[bool, str]:
-        """Проверка разнообразия тем. Для general разрешаем повторы."""
         with self._lock:
-            # Для general всегда разрешаем
             if topic == Topic.GENERAL:
                 return True, ""
             
@@ -515,11 +582,9 @@ class PostedManager:
             if not recent_topics:
                 return True, ""
             
-            # Для узких тем: не постим если последний пост такой же
             if recent_topics[0] == topic:
                 return False, f"SAME_AS_LAST: {topic}"
             
-            # Не больше N постов одной узкой темы в окне
             same_count = sum(1 for t in recent_topics if t == topic)
             if same_count >= config.same_topic_limit:
                 return False, f"TOO_MANY: {same_count}/{config.diversity_window} = {topic}"
@@ -527,7 +592,6 @@ class PostedManager:
             return True, ""
 
     def add(self, article: Article, topic: str = Topic.GENERAL) -> bool:
-        """Добавляет статью с проверкой сохранения"""
         with self._lock:
             conn = self._get_conn()
             cursor = conn.cursor()
@@ -684,15 +748,27 @@ async def load_all_feeds() -> List[Article]:
 
 # ====================== FILTERING ======================
 def is_relevant(article: Article) -> bool:
+    """Проверяет релевантность статьи для глобальной аудитории"""
     text = f"{article.title} {article.summary}".lower()
     
+    # Проверка на плохие фразы
     if any(bad in text for bad in BAD_PHRASES):
         return False
+    
+    # Проверка на исключённые темы
     if any(ex in text for ex in EXCLUDE_KEYWORDS):
         return False
+    
+    # Проверка на AI ключевые слова
     if not any(kw in text for kw in AI_KEYWORDS):
         return False
     
+    # Проверка на местечковые американские новости
+    if is_local_us_news(text):
+        logger.debug(f"  🇺🇸 Местечковая новость: {article.title[:40]}")
+        return False
+    
+    # Проверка возраста
     age_hours = (datetime.now(timezone.utc) - article.published).total_seconds() / 3600
     if age_hours > config.max_article_age_hours:
         return False
@@ -753,34 +829,35 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     return candidates
 
 
-# ====================== TEXT GENERATION ======================
+# ====================== TEXT GENERATION (ОБНОВЛЁННЫЙ ПРОМПТ) ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     
-    prompt = f"""Превратите AI-новость в пост для Telegram-канала.
+    # ОБНОВЛЁННЫЙ ПРОМПТ — для российской аудитории
+    prompt = f"""Ты — редактор Telegram-канала про технологии для аудитории из РФ и СНГ.
 
 НОВОСТЬ:
 {article.title}
 {article.summary[:800]}
 
-СТРУКТУРА ПОСТА:
-1. 🔥 Заголовок (5-8 слов, цепляющий, с эмодзи)
-2. Суть — что произошло (2-3 предложения с фактами и цифрами)
-3. Почему важно (2-3 предложения, контекст и последствия)
-4. Вывод или провокационный вопрос к читателям
+ЗАДАЧА: Адаптируй новость для российского читателя.
 
-ЖЁСТКИЕ ТРЕБОВАНИЯ:
-✅ Длина: СТРОГО 700-950 символов (меньше 700 = переделка!)
-✅ Только факты, цифры, имена, даты
-✅ Русский язык
-✅ Каждый абзац должен нести новую информацию
+СТРУКТУРА:
+1. 🔥 Заголовок (цепляющий, на русском, без "США")
+2. Суть — что произошло (факты)
+3. Взгляд из РФ — почему это важно нам? (Если новость про блокировки/санкции/глобальные тренды — подчеркни это. Если это чисто внутренняя политика США — напиши SKIP).
+4. Вывод
+
+ТРЕБОВАНИЯ:
+✅ Если новость про суды в Техасе, забастовки в Нью-Йорке или локальные разборки с полицией США — ответь ТОЛЬКО: SKIP
+✅ Убирай чисто американский контекст (названия местных законов, имена сенаторов), оставляй суть технологии.
+✅ Длина: 700-900 символов.
 
 ЗАПРЕЩЕНО:
-❌ "стоит отметить", "интересно, что", "важно понимать"
-❌ "давайте разберёмся", "как мы знаем", "не секрет"
-❌ Общие фразы и вода
-
-Если новость — мусор или реклама, ответь: SKIP
+❌ Упоминать узко-американские детали без объяснения
+❌ Писать так, будто читатель живёт в США
+❌ Фразы: "стоит отметить", "интересно, что", "важно понимать"
+❌ Общие фразы без конкретики
 
 ПОСТ:"""
 
@@ -800,7 +877,7 @@ async def generate_summary(article: Article) -> Optional[str]:
                 text = resp.choices[0].message.content.strip()
 
                 if "SKIP" in text.upper()[:10]:
-                    logger.info("  ⏭️ SKIP")
+                    logger.info("  ⏭️ SKIP (локальная новость)")
                     return None
 
                 if len(text) < config.min_post_length:
@@ -821,15 +898,6 @@ async def generate_summary(article: Article) -> Optional[str]:
                 
                 final = f"{text}{cta}\n\n{hashtags}{source_link}"
 
-                if len(final) > config.caption_limit:
-                    text = text[:config.caption_limit - 150]
-                    for p in ['. ', '! ', '? ']:
-                        idx = text.rfind(p)
-                        if idx > len(text) * 0.5:
-                            text = text[:idx+1]
-                            break
-                    final = f"{text}{cta}\n\n{hashtags}{source_link}"
-
                 logger.info(f"  ✅ [{model}]: {len(text)} симв.")
                 return final
                 
@@ -845,161 +913,18 @@ async def generate_summary(article: Article) -> Optional[str]:
     return None
 
 
-# ====================== IMAGE GENERATION (4 API) ======================
-async def generate_image(title: str, topic: str = None) -> Optional[str]:
-    """
-    Генерация изображения с 4 fallback API:
-    1. Pollinations.ai (AI-генерация, лучшее качество)
-    2. PixelEncounter (абстрактные роботы/монстры, очень надёжно)
-    3. RoboHash (роботы по тексту, 100% аптайм)
-    4. LoremFlickr (фото, последний вариант)
-    """
-    logger.info(f"  🎨 Генерация изображения...")
-    
-    if topic is None or topic not in IMAGE_STYLES:
-        topic = "general"
-    
-    logger.info(f"  📋 Тема: {topic}")
-    
-    style = IMAGE_STYLES.get(topic, IMAGE_STYLES["general"])
-    clean_title = re.sub(r'[^\w\s]', '', title)[:40].strip() or "technology"
-    seed = random.randint(1, 99999)
-    prompt = f"{style}, {clean_title}, high quality, 4k"
-    
-    # Список API с приоритетом
-    apis = [
-        {
-            "name": "Pollinations",
-            "url": f"https://image.pollinations.ai/prompt/{quote(prompt)}?width=1024&height=1024&nologo=true&seed={seed}",
-            "timeout": 60,
-            "retries": 3,
-            "min_size": 5000
-        },
-        {
-            "name": "PixelEncounter",
-            "url": f"https://app.pixelencounter.com/api/basic/monsters/random/png?size=1024",
-            "timeout": 20,
-            "retries": 2,
-            "min_size": 1000
-        },
-        {
-            "name": "RoboHash",
-            "url": f"https://robohash.org/{quote(clean_title)}?size=1024x1024&set=set1",
-            "timeout": 15,
-            "retries": 2,
-            "min_size": 1000
-        },
-        {
-            "name": "LoremFlickr",
-            "url": f"https://loremflickr.com/1024/1024/technology,ai,robot/all",
-            "timeout": 30,
-            "retries": 2,
-            "min_size": 5000
-        }
-    ]
-    
-    for api in apis:
-        api_name = api["name"]
-        url = api["url"]
-        timeout_sec = api["timeout"]
-        max_retries = api["retries"]
-        min_size = api["min_size"]
-        
-        logger.info(f"  🔗 [{api_name}] Запрос...")
-        
-        for attempt in range(max_retries):
-            try:
-                timeout = aiohttp.ClientTimeout(total=timeout_sec, connect=10)
-                
-                async with aiohttp.ClientSession() as sess:
-                    async with sess.get(url, timeout=timeout, headers=HEADERS, allow_redirects=True) as resp:
-                        logger.info(f"  📊 [{api_name}] HTTP {resp.status} (попытка {attempt + 1}/{max_retries})")
-                        
-                        if resp.status == 429:
-                            logger.warning(f"  ⚠️ [{api_name}] Rate limit, жду 5 сек...")
-                            await asyncio.sleep(5)
-                            continue
-                        
-                        if resp.status >= 500:
-                            logger.warning(f"  ⚠️ [{api_name}] Сервер недоступен ({resp.status})")
-                            break
-                        
-                        if resp.status != 200:
-                            logger.warning(f"  ⚠️ [{api_name}] HTTP {resp.status}")
-                            await asyncio.sleep(2)
-                            continue
-                        
-                        data = await resp.read()
-                        logger.info(f"  📦 [{api_name}] Получено {len(data)} байт")
-                        
-                        if len(data) < min_size:
-                            logger.warning(f"  ⚠️ [{api_name}] Файл слишком маленький ({len(data)} < {min_size})")
-                            await asyncio.sleep(2)
-                            continue
-                        
-                        # Проверка формата
-                        is_jpeg = data[:3] == b'\xff\xd8\xff'
-                        is_png = data[:8] == b'\x89PNG\r\n\x1a\n'
-                        is_svg = b'<svg' in data[:100] or b'<?xml' in data[:100]
-                        
-                        if is_jpeg:
-                            ext = "jpg"
-                            fmt = "JPEG"
-                        elif is_png:
-                            ext = "png"
-                            fmt = "PNG"
-                        elif is_svg:
-                            logger.warning(f"  ⚠️ [{api_name}] SVG формат, пробую другой API...")
-                            break
-                        else:
-                            logger.warning(f"  ⚠️ [{api_name}] Неизвестный формат: {data[:20]}")
-                            break
-                        
-                        fname = f"img_{random.randint(1000, 9999)}.{ext}"
-                        
-                        with open(fname, "wb") as f:
-                            f.write(data)
-                        
-                        if os.path.exists(fname) and os.path.getsize(fname) > 0:
-                            file_size_kb = os.path.getsize(fname) // 1024
-                            logger.info(f"  ✅ [{api_name}] Сохранено: {fname} ({fmt}, {file_size_kb} KB)")
-                            return fname
-                        else:
-                            logger.error(f"  ❌ [{api_name}] Файл не создан")
-                            continue
-                            
-            except asyncio.TimeoutError:
-                logger.warning(f"  ⏱️ [{api_name}] Таймаут (попытка {attempt + 1}/{max_retries})")
-                await asyncio.sleep(2)
-            except aiohttp.ClientError as e:
-                logger.warning(f"  🌐 [{api_name}] Сетевая ошибка: {e}")
-                await asyncio.sleep(2)
-            except Exception as e:
-                logger.error(f"  ❌ [{api_name}] Ошибка: {type(e).__name__}: {e}")
-                await asyncio.sleep(2)
-        
-        await asyncio.sleep(1)
-    
-    logger.warning("  ❌ Все API не сработали, пост будет без картинки")
-    return None
-
-
-# ====================== POSTING ======================
+# ====================== POSTING (БЕЗ КАРТИНОК) ======================
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
+    """Публикация поста БЕЗ картинки"""
     topic = Topic.detect(f"{article.title} {article.summary}")
     
-    logger.info(f"  🎨 Начинаю генерацию изображения...")
-    img = await generate_image(article.title, topic)
-    
     try:
-        if img and os.path.exists(img):
-            logger.info(f"  📤 Отправка с картинкой: {img}")
-            await bot.send_photo(config.channel_id, FSInputFile(img), caption=text)
-            os.remove(img)
-            logger.info(f"  🗑️ Картинка удалена")
-        else:
-            logger.info(f"  📤 Отправка без картинки")
-            await bot.send_message(config.channel_id, text, disable_web_page_preview=False)
+        logger.info(f"  📤 Отправка поста...")
+        await bot.send_message(
+            config.channel_id, 
+            text, 
+            disable_web_page_preview=False  # Превью ссылки будет показано
+        )
         
         saved = posted.add(article, topic)
         if saved:
@@ -1008,24 +933,18 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
         
     except Exception as e:
         logger.error(f"❌ Telegram: {e}")
-        if img and os.path.exists(img):
-            try:
-                os.remove(img)
-            except:
-                pass
         return False
 
 
 # ====================== MAIN ======================
 async def main():
     logger.info("=" * 50)
-    logger.info("🚀 AI-POSTER v6.2 (Final)")
+    logger.info("🚀 AI-POSTER v7.1 (Updated Filters + RU Focus)")
     logger.info("=" * 50)
     
     posted = PostedManager(config.db_file)
     
     try:
-        # Проверка БД
         if posted.verify_db():
             logger.info("✅ БД OK")
         else:
@@ -1036,14 +955,12 @@ async def main():
         stats = posted.get_stats()
         logger.info(f"📊 Статистика: {stats['total_posted']} posted, {stats['total_rejected']} rejected")
         
-        # Последние посты
         recent = posted.get_recent_posts(3)
         if recent:
             logger.info("📋 Последние посты:")
             for p in recent:
                 logger.info(f"   • [{p['topic']}] {p['title'][:40]}...")
         
-        # Загрузка и фильтрация
         raw = await load_all_feeds()
         candidates = filter_and_dedupe(raw, posted)
         
@@ -1051,7 +968,6 @@ async def main():
             logger.info("📭 Нет подходящих новостей")
             return
 
-        # Публикация
         for article in candidates[:25]:
             dup_result = posted.is_duplicate(article.link, article.title, article.summary)
             if dup_result.is_duplicate:

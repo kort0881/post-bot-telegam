@@ -32,6 +32,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 # ====================== CONFIG ======================
 class Config:
     def __init__(self):
@@ -42,18 +43,22 @@ class Config:
         self.caption_limit = 1024
         self.db_file = "posted_articles.db"
         
+        # Пороги дедупликации
         self.title_similarity_threshold = 0.55
         self.ngram_similarity_threshold = 0.40
         self.entity_overlap_threshold = 0.45
         self.jaccard_threshold = 0.50
         self.same_domain_similarity = 0.40
         
+        # Длина поста
         self.min_post_length = 700
         self.max_article_age_hours = 48
         
+        # Разнообразие
         self.diversity_window = 5
         self.same_topic_limit = 2
         
+        # Groq
         self.groq_retries_per_model = 2
         self.groq_base_delay = 2.0
 
@@ -66,6 +71,7 @@ class Config:
         if missing:
             raise SystemExit(f"❌ Отсутствуют: {', '.join(missing)}")
 
+
 config = Config()
 
 bot = Bot(token=config.telegram_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -73,12 +79,16 @@ groq_client = Groq(api_key=config.groq_api_key)
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
+
+# ====================== GROQ МОДЕЛИ ======================
 GROQ_MODELS = [
     "llama-3.3-70b-versatile",
     "mixtral-8x7b-32768",
     "gemma2-9b-it",
 ]
 
+
+# ====================== СТИЛИ ИЗОБРАЖЕНИЙ ======================
 IMAGE_STYLES = {
     "llm": "modern AI brain visualization, neural network connections, glowing blue and purple gradient, digital consciousness, futuristic",
     "image_gen": "creative digital art studio, colorful palette, artistic AI creation, vibrant neon colors, abstract",
@@ -87,6 +97,8 @@ IMAGE_STYLES = {
     "general": "abstract technology concept, digital innovation, modern geometric shapes, blue purple gradient, clean minimal"
 }
 
+
+# ====================== RSS ======================
 RSS_FEEDS = [
     ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch"),
     ("https://venturebeat.com/category/ai/feed/", "VentureBeat"),
@@ -100,6 +112,8 @@ RSS_FEEDS = [
     ("https://www.marktechpost.com/feed/", "MarkTechPost"),
 ]
 
+
+# ====================== KEYWORDS ======================
 AI_KEYWORDS = [
     "ai", "artificial intelligence", "machine learning", "deep learning",
     "neural network", "llm", "large language model", "gpt", "chatgpt", "claude",
@@ -117,6 +131,8 @@ EXCLUDE_KEYWORDS = [
 
 BAD_PHRASES = ["sponsored", "partner content", "advertisement", "black friday", "deal alert"]
 
+
+# ====================== KEY ENTITIES ======================
 KEY_ENTITIES = [
     "openai", "google", "meta", "microsoft", "anthropic", "nvidia", "apple",
     "amazon", "deepmind", "hugging face", "stability ai", "midjourney",
@@ -132,6 +148,7 @@ KEY_ENTITIES = [
 ]
 
 
+# ====================== DATACLASS ======================
 @dataclass
 class Article:
     title: str
@@ -141,6 +158,7 @@ class Article:
     published: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+# ====================== TOPIC ======================
 class Topic:
     LLM = "llm"
     IMAGE_GEN = "image_gen"
@@ -170,21 +188,14 @@ class Topic:
         return Topic.GENERAL
 
 
-# ====================== ИСПРАВЛЕНИЕ #2: normalize_url без протокола ======================
+# ====================== UTILITIES ======================
 def normalize_url(url: str) -> str:
-    """
-    Нормализация URL с удалением протокола (http/https)
-    для предотвращения дубликатов из-за разницы протоколов
-    """
+    """Нормализация URL с удалением протокола для предотвращения дубликатов"""
     try:
-        # Убираем протокол полностью
         u = url.lower().strip()
         u = u.replace("https://", "").replace("http://", "")
-        
-        # Убираем www.
         u = u.replace("www.", "")
         
-        # Парсим для удаления tracking параметров
         if "?" in u:
             base, query_str = u.split("?", 1)
             params = parse_qs(query_str)
@@ -198,12 +209,9 @@ def normalize_url(url: str) -> str:
             else:
                 u = base
         
-        # Убираем trailing slash
         u = u.rstrip("/")
-        
         return u
     except:
-        # Fallback: просто убираем протокол и www
         return url.lower().strip().replace("https://", "").replace("http://", "").replace("www.", "").rstrip("/")
 
 
@@ -298,6 +306,7 @@ def get_content_hash(text: str) -> str:
     return hashlib.md5(normalized.encode()).hexdigest()
 
 
+# ====================== DUPLICATE RESULT ======================
 @dataclass
 class DuplicateCheckResult:
     is_duplicate: bool
@@ -313,6 +322,7 @@ class DuplicateCheckResult:
         self.is_duplicate = True
 
 
+# ====================== POSTED MANAGER ======================
 class PostedManager:
     def __init__(self, db_file: str = "posted_articles.db"):
         self.db_file = db_file
@@ -405,16 +415,19 @@ class PostedManager:
             content_hash = get_content_hash(f"{title} {summary}")
             entities = extract_entities(f"{title} {summary}")
             
+            # 0. Ранее отклонённые
             if self._was_rejected(norm_url):
                 result.add_reason("PREVIOUSLY_REJECTED")
                 return result
             
+            # 1. Точное совпадение URL
             cursor.execute('SELECT title FROM posted_articles WHERE norm_url = ?', (norm_url,))
             row = cursor.fetchone()
             if row:
                 result.add_reason(f"URL_EXACT", 1.0, row[0])
                 return result
             
+            # 2. Точное совпадение хеша
             if content_hash:
                 cursor.execute('SELECT title FROM posted_articles WHERE content_hash = ?', (content_hash,))
                 row = cursor.fetchone()
@@ -422,32 +435,38 @@ class PostedManager:
                     result.add_reason(f"CONTENT_HASH", 1.0, row[0])
                     return result
             
+            # 3. Точное совпадение нормализованного заголовка
             cursor.execute('SELECT title FROM posted_articles WHERE title_normalized = ?', (title_normalized,))
             row = cursor.fetchone()
             if row:
                 result.add_reason(f"TITLE_EXACT", 1.0, row[0])
                 return result
             
+            # 4. Совпадение сигнатуры слов
             cursor.execute('SELECT title FROM posted_articles WHERE title_word_signature = ?', (word_signature,))
             row = cursor.fetchone()
             if row:
                 result.add_reason(f"WORD_SIGNATURE", 0.95, row[0])
                 return result
             
+            # 5. Проверка похожести со всеми записями
             cursor.execute('SELECT id, title, title_normalized, title_words, entities, domain FROM posted_articles')
             all_posts = cursor.fetchall()
             
             for row in all_posts:
                 existing_id, existing_title, existing_normalized, existing_words_json, existing_entities_json, existing_domain = row
                 
+                # 5a. SequenceMatcher
                 seq_sim = calculate_similarity(title_normalized, existing_normalized)
                 if seq_sim > config.title_similarity_threshold:
                     result.add_reason(f"TITLE_SIM ({seq_sim:.0%})", seq_sim, existing_title)
                 
+                # 5b. N-gram
                 ngram_sim = ngram_similarity(title, existing_title)
                 if ngram_sim > config.ngram_similarity_threshold:
                     result.add_reason(f"NGRAM ({ngram_sim:.0%})", ngram_sim, existing_title)
                 
+                # 5c. Jaccard
                 if existing_words_json:
                     try:
                         existing_words = set(json.loads(existing_words_json))
@@ -457,6 +476,7 @@ class PostedManager:
                     except:
                         pass
                 
+                # 5d. Entities
                 if entities and existing_entities_json:
                     try:
                         existing_entities = set(json.loads(existing_entities_json))
@@ -470,6 +490,7 @@ class PostedManager:
                     except:
                         pass
                 
+                # 5e. Same domain
                 if domain == existing_domain:
                     same_sim = calculate_similarity(title_normalized, existing_normalized)
                     if same_sim > config.same_domain_similarity:
@@ -477,13 +498,8 @@ class PostedManager:
             
             return result
 
-    # ====================== ИСПРАВЛЕНИЕ #3: check_diversity с исключением для general ======================
     def check_diversity(self, topic: str) -> Tuple[bool, str]:
-        """
-        Проверка разнообразия тем.
-        Для темы 'general' разрешаем повторы (80% новостей — general).
-        Для узких тем (robotics, hardware) — строгая проверка.
-        """
+        """Проверка разнообразия тем. Для general разрешаем повторы."""
         with self._lock:
             # Для general всегда разрешаем
             if topic == Topic.GENERAL:
@@ -511,6 +527,7 @@ class PostedManager:
             return True, ""
 
     def add(self, article: Article, topic: str = Topic.GENERAL) -> bool:
+        """Добавляет статью с проверкой сохранения"""
         with self._lock:
             conn = self._get_conn()
             cursor = conn.cursor()
@@ -617,6 +634,7 @@ class PostedManager:
                 self._conn = None
 
 
+# ====================== RSS LOADING ======================
 async def fetch_feed(url: str, source: str) -> List[Article]:
     try:
         await asyncio.sleep(random.uniform(0.5, 2))
@@ -664,6 +682,7 @@ async def load_all_feeds() -> List[Article]:
     return all_articles
 
 
+# ====================== FILTERING ======================
 def is_relevant(article: Article) -> bool:
     text = f"{article.title} {article.summary}".lower()
     
@@ -734,6 +753,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     return candidates
 
 
+# ====================== TEXT GENERATION ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     
@@ -825,13 +845,14 @@ async def generate_summary(article: Article) -> Optional[str]:
     return None
 
 
-# ====================== ИСПРАВЛЕНИЕ #1: generate_image с рабочими API ======================
+# ====================== IMAGE GENERATION (4 API) ======================
 async def generate_image(title: str, topic: str = None) -> Optional[str]:
     """
-    Генерация изображения с 3 fallback API:
-    1. Pollinations.ai (AI-генерация)
-    2. LoremFlickr (реальные фото, замена Unsplash)
-    3. Picsum (абстрактные фото, всегда работает)
+    Генерация изображения с 4 fallback API:
+    1. Pollinations.ai (AI-генерация, лучшее качество)
+    2. PixelEncounter (абстрактные роботы/монстры, очень надёжно)
+    3. RoboHash (роботы по тексту, 100% аптайм)
+    4. LoremFlickr (фото, последний вариант)
     """
     logger.info(f"  🎨 Генерация изображения...")
     
@@ -843,110 +864,127 @@ async def generate_image(title: str, topic: str = None) -> Optional[str]:
     style = IMAGE_STYLES.get(topic, IMAGE_STYLES["general"])
     clean_title = re.sub(r'[^\w\s]', '', title)[:40].strip() or "technology"
     seed = random.randint(1, 99999)
+    prompt = f"{style}, {clean_title}, high quality, 4k"
     
-    # API 1: Pollinations.ai (AI-генерация)
-    async def try_pollinations() -> Optional[bytes]:
-        prompt = f"{style}, {clean_title}, high quality, 4k"
-        url = f"https://image.pollinations.ai/prompt/{quote(prompt)}?width=1024&height=1024&nologo=true&seed={seed}"
+    # Список API с приоритетом
+    apis = [
+        {
+            "name": "Pollinations",
+            "url": f"https://image.pollinations.ai/prompt/{quote(prompt)}?width=1024&height=1024&nologo=true&seed={seed}",
+            "timeout": 60,
+            "retries": 3,
+            "min_size": 5000
+        },
+        {
+            "name": "PixelEncounter",
+            "url": f"https://app.pixelencounter.com/api/basic/monsters/random/png?size=1024",
+            "timeout": 20,
+            "retries": 2,
+            "min_size": 1000
+        },
+        {
+            "name": "RoboHash",
+            "url": f"https://robohash.org/{quote(clean_title)}?size=1024x1024&set=set1",
+            "timeout": 15,
+            "retries": 2,
+            "min_size": 1000
+        },
+        {
+            "name": "LoremFlickr",
+            "url": f"https://loremflickr.com/1024/1024/technology,ai,robot/all",
+            "timeout": 30,
+            "retries": 2,
+            "min_size": 5000
+        }
+    ]
+    
+    for api in apis:
+        api_name = api["name"]
+        url = api["url"]
+        timeout_sec = api["timeout"]
+        max_retries = api["retries"]
+        min_size = api["min_size"]
         
-        logger.info(f"  🔗 [Pollinations] Запрос...")
+        logger.info(f"  🔗 [{api_name}] Запрос...")
         
-        for attempt in range(3):
+        for attempt in range(max_retries):
             try:
-                timeout = aiohttp.ClientTimeout(total=60, connect=15)
+                timeout = aiohttp.ClientTimeout(total=timeout_sec, connect=10)
+                
                 async with aiohttp.ClientSession() as sess:
-                    async with sess.get(url, timeout=timeout, headers=HEADERS) as resp:
-                        logger.info(f"  📊 [Pollinations] HTTP {resp.status}")
+                    async with sess.get(url, timeout=timeout, headers=HEADERS, allow_redirects=True) as resp:
+                        logger.info(f"  📊 [{api_name}] HTTP {resp.status} (попытка {attempt + 1}/{max_retries})")
                         
                         if resp.status == 429:
-                            await asyncio.sleep(10)
+                            logger.warning(f"  ⚠️ [{api_name}] Rate limit, жду 5 сек...")
+                            await asyncio.sleep(5)
                             continue
+                        
+                        if resp.status >= 500:
+                            logger.warning(f"  ⚠️ [{api_name}] Сервер недоступен ({resp.status})")
+                            break
+                        
                         if resp.status != 200:
-                            await asyncio.sleep(3)
+                            logger.warning(f"  ⚠️ [{api_name}] HTTP {resp.status}")
+                            await asyncio.sleep(2)
                             continue
                         
                         data = await resp.read()
-                        logger.info(f"  📦 [Pollinations] {len(data)} байт")
+                        logger.info(f"  📦 [{api_name}] Получено {len(data)} байт")
                         
-                        if len(data) >= 5000:
-                            return data
+                        if len(data) < min_size:
+                            logger.warning(f"  ⚠️ [{api_name}] Файл слишком маленький ({len(data)} < {min_size})")
+                            await asyncio.sleep(2)
+                            continue
+                        
+                        # Проверка формата
+                        is_jpeg = data[:3] == b'\xff\xd8\xff'
+                        is_png = data[:8] == b'\x89PNG\r\n\x1a\n'
+                        is_svg = b'<svg' in data[:100] or b'<?xml' in data[:100]
+                        
+                        if is_jpeg:
+                            ext = "jpg"
+                            fmt = "JPEG"
+                        elif is_png:
+                            ext = "png"
+                            fmt = "PNG"
+                        elif is_svg:
+                            logger.warning(f"  ⚠️ [{api_name}] SVG формат, пробую другой API...")
+                            break
+                        else:
+                            logger.warning(f"  ⚠️ [{api_name}] Неизвестный формат: {data[:20]}")
+                            break
+                        
+                        fname = f"img_{random.randint(1000, 9999)}.{ext}"
+                        
+                        with open(fname, "wb") as f:
+                            f.write(data)
+                        
+                        if os.path.exists(fname) and os.path.getsize(fname) > 0:
+                            file_size_kb = os.path.getsize(fname) // 1024
+                            logger.info(f"  ✅ [{api_name}] Сохранено: {fname} ({fmt}, {file_size_kb} KB)")
+                            return fname
+                        else:
+                            logger.error(f"  ❌ [{api_name}] Файл не создан")
+                            continue
+                            
             except asyncio.TimeoutError:
-                logger.warning(f"  ⏱️ [Pollinations] Таймаут")
+                logger.warning(f"  ⏱️ [{api_name}] Таймаут (попытка {attempt + 1}/{max_retries})")
+                await asyncio.sleep(2)
+            except aiohttp.ClientError as e:
+                logger.warning(f"  🌐 [{api_name}] Сетевая ошибка: {e}")
+                await asyncio.sleep(2)
             except Exception as e:
-                logger.warning(f"  ❌ [Pollinations] {e}")
-            await asyncio.sleep(3)
-        return None
+                logger.error(f"  ❌ [{api_name}] Ошибка: {type(e).__name__}: {e}")
+                await asyncio.sleep(2)
+        
+        await asyncio.sleep(1)
     
-    # API 2: LoremFlickr (замена нерабочего Unsplash Source)
-    async def try_loremflickr() -> Optional[bytes]:
-        keywords = clean_title.replace(' ', ',')[:30]
-        url = f"https://loremflickr.com/1024/1024/{quote(keywords)},technology,ai/all"
-        
-        logger.info(f"  🔗 [LoremFlickr] Запрос...")
-        
-        try:
-            timeout = aiohttp.ClientTimeout(total=30)
-            async with aiohttp.ClientSession() as sess:
-                async with sess.get(url, timeout=timeout, allow_redirects=True) as resp:
-                    logger.info(f"  📊 [LoremFlickr] HTTP {resp.status}")
-                    
-                    if resp.status == 200:
-                        data = await resp.read()
-                        logger.info(f"  📦 [LoremFlickr] {len(data)} байт")
-                        if len(data) >= 5000:
-                            return data
-        except Exception as e:
-            logger.warning(f"  ❌ [LoremFlickr] {e}")
-        return None
-    
-    # API 3: Picsum (всегда работает)
-    async def try_picsum() -> Optional[bytes]:
-        url = f"https://picsum.photos/seed/{seed}/1024/1024"
-        
-        logger.info(f"  🔗 [Picsum] Запрос...")
-        
-        try:
-            timeout = aiohttp.ClientTimeout(total=20)
-            async with aiohttp.ClientSession() as sess:
-                async with sess.get(url, timeout=timeout, allow_redirects=True) as resp:
-                    logger.info(f"  📊 [Picsum] HTTP {resp.status}")
-                    
-                    if resp.status == 200:
-                        data = await resp.read()
-                        logger.info(f"  📦 [Picsum] {len(data)} байт")
-                        if len(data) >= 5000:
-                            return data
-        except Exception as e:
-            logger.warning(f"  ❌ [Picsum] {e}")
-        return None
-    
-    # Пробуем API по очереди
-    for api_name, api_func in [
-        ("Pollinations", try_pollinations),
-        ("LoremFlickr", try_loremflickr),
-        ("Picsum", try_picsum)
-    ]:
-        data = await api_func()
-        
-        if data:
-            is_jpeg = data[:3] == b'\xff\xd8\xff'
-            is_png = data[:8] == b'\x89PNG\r\n\x1a\n'
-            
-            if is_jpeg or is_png:
-                ext = "jpg" if is_jpeg else "png"
-                fname = f"img_{random.randint(1000, 9999)}.{ext}"
-                
-                with open(fname, "wb") as f:
-                    f.write(data)
-                
-                if os.path.exists(fname):
-                    logger.info(f"  ✅ [{api_name}] Сохранено: {fname} ({len(data)//1024} KB)")
-                    return fname
-    
-    logger.warning("  ❌ Все API не сработали")
+    logger.warning("  ❌ Все API не сработали, пост будет без картинки")
     return None
 
 
+# ====================== POSTING ======================
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
     topic = Topic.detect(f"{article.title} {article.summary}")
     
@@ -958,6 +996,7 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
             logger.info(f"  📤 Отправка с картинкой: {img}")
             await bot.send_photo(config.channel_id, FSInputFile(img), caption=text)
             os.remove(img)
+            logger.info(f"  🗑️ Картинка удалена")
         else:
             logger.info(f"  📤 Отправка без картинки")
             await bot.send_message(config.channel_id, text, disable_web_page_preview=False)
@@ -970,19 +1009,23 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
     except Exception as e:
         logger.error(f"❌ Telegram: {e}")
         if img and os.path.exists(img):
-            try: os.remove(img)
-            except: pass
+            try:
+                os.remove(img)
+            except:
+                pass
         return False
 
 
+# ====================== MAIN ======================
 async def main():
     logger.info("=" * 50)
-    logger.info("🚀 AI-POSTER v6.1 (Final Fix)")
+    logger.info("🚀 AI-POSTER v6.2 (Final)")
     logger.info("=" * 50)
     
     posted = PostedManager(config.db_file)
     
     try:
+        # Проверка БД
         if posted.verify_db():
             logger.info("✅ БД OK")
         else:
@@ -993,19 +1036,22 @@ async def main():
         stats = posted.get_stats()
         logger.info(f"📊 Статистика: {stats['total_posted']} posted, {stats['total_rejected']} rejected")
         
+        # Последние посты
         recent = posted.get_recent_posts(3)
         if recent:
-            logger.info("📋 Последние:")
+            logger.info("📋 Последние посты:")
             for p in recent:
                 logger.info(f"   • [{p['topic']}] {p['title'][:40]}...")
         
+        # Загрузка и фильтрация
         raw = await load_all_feeds()
         candidates = filter_and_dedupe(raw, posted)
         
         if not candidates:
-            logger.info("📭 Нет новостей")
+            logger.info("📭 Нет подходящих новостей")
             return
 
+        # Публикация
         for article in candidates[:25]:
             dup_result = posted.is_duplicate(article.link, article.title, article.summary)
             if dup_result.is_duplicate:

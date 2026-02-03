@@ -30,7 +30,10 @@ jobs:
       - name: Debug - before
         run: |
           echo "📂 До запуска:"
-          wc -l posted_articles.json 2>/dev/null || echo "Файл не существует"
+          ls -la *.db 2>/dev/null || echo "БД не существует"
+          if [ -f posted_articles.db ]; then
+            sqlite3 posted_articles.db "SELECT COUNT(*) || ' записей в БД' FROM posted_articles;" 2>/dev/null || echo "Таблица пуста"
+          fi
 
       - name: Run bot
         env:
@@ -42,17 +45,22 @@ jobs:
       - name: Debug - after
         run: |
           echo "📂 После запуска:"
-          wc -l posted_articles.json
-          tail -3 posted_articles.json
+          ls -la *.db 2>/dev/null || echo "БД не существует"
+          if [ -f posted_articles.db ]; then
+            echo "=== Последние 5 записей ==="
+            sqlite3 posted_articles.db "SELECT id, substr(title,1,50) || '...', posted_date FROM posted_articles ORDER BY id DESC LIMIT 5;"
+            echo "=== Всего записей ==="
+            sqlite3 posted_articles.db "SELECT COUNT(*) FROM posted_articles;"
+          fi
 
       - name: Commit state
         run: |
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
-          git add posted_articles.json
-          git diff --staged --quiet || git commit -m "Update state [skip ci]"
+          git add posted_articles.db 2>/dev/null || true
+          git add ai_poster.log 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "🤖 Update database [skip ci]"
           git push || (git pull --rebase && git push)
-
 
 
 

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.env
+.venv
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Временные файлы
+*.log
+img_*.jpg
+img_*.png
+img_*.jpeg
+
+# Старый JSON (больше не используется)
+# posted_articles.json
+
+# НЕ игнорируем базу данных SQLite - она должна сохраняться!
+# posted_articles.db - коммитится в репозиторий

@@ -6,16 +6,12 @@ import re
 import hashlib
 import logging
 import difflib
-import tempfile
-import shutil
 import sqlite3
-import time
-from datetime import datetime, timezone, timedelta
-from typing import List, Set, Optional, Tuple, Dict
+import threading
+from datetime import datetime, timezone
+from typing import List, Set, Optional, Tuple
 from urllib.parse import urlparse, quote, parse_qs, urlencode
 from dataclasses import dataclass, field
-from collections import Counter
-import math
 
 import aiohttp
 import feedparser
@@ -42,33 +38,27 @@ class Config:
         self.groq_api_key = os.getenv("GROQ_API_KEY")
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.channel_id = os.getenv("CHANNEL_ID")
-        self.retention_days = int(os.getenv("RETENTION_DAYS", "60"))  # Увеличено до 60
+        self.retention_days = int(os.getenv("RETENTION_DAYS", "90"))
         self.caption_limit = 1024
         self.db_file = "posted_articles.db"
         
-        self.similarity_threshold = 0.72  # Увеличено с 0.60
-        self.entity_overlap_threshold = 0.55
+        # Пороги дедупликации
+        self.title_similarity_threshold = 0.55
+        self.ngram_similarity_threshold = 0.40
+        self.entity_overlap_threshold = 0.45
+        self.jaccard_threshold = 0.50
+        self.same_domain_similarity = 0.40
+        
         self.min_post_length = 500
-        self.min_summary_length = 200  # Увеличено с 100
-        self.max_article_age_hours = 24  # Уменьшено с 72 (3 дня)
+        self.max_article_age_hours = 48
         
-        # TF-IDF порог
-        self.tfidf_similarity_threshold = 0.65
+        # Разнообразие
+        self.diversity_window = 5
+        self.same_topic_limit = 2
         
-        # Параметры для разнообразия
-        self.recent_posts_check = 5
-        self.recent_similarity_threshold = 0.45
-        self.min_entity_distance = 2
-        self.diversity_window = 3  # Последние N постов для проверки разнообразия
-        
-        # Retry параметры
-        self.groq_max_retries = 5
-        self.groq_base_delay = 1.0
-        self.groq_max_delay = 30.0
-        
-        # RSS параметры
-        self.rss_timeout = 20
-        self.rss_jitter = 3
+        # Groq
+        self.groq_max_retries = 3
+        self.groq_base_delay = 2.0
 
         missing = []
         for var, name in [(self.groq_api_key, "GROQ_API_KEY"),
@@ -84,11 +74,9 @@ config = Config()
 bot = Bot(token=config.telegram_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 groq_client = Groq(api_key=config.groq_api_key)
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-}
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
-# ====================== RSS (РАСШИРЕННЫЙ СПИСОК) ======================
+# ====================== RSS ======================
 RSS_FEEDS = [
     ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch"),
     ("https://venturebeat.com/category/ai/feed/", "VentureBeat"),
@@ -97,83 +85,42 @@ RSS_FEEDS = [
     ("https://arstechnica.com/tag/artificial-intelligence/feed/", "Ars Technica"),
     ("https://www.wired.com/feed/tag/ai/latest/rss", "WIRED"),
     ("https://www.artificialintelligence-news.com/feed/", "AI News"),
-    ("https://hai.stanford.edu/news/rss.xml", "Stanford HAI"),
-    ("https://deepmind.google/blog/rss.xml", "DeepMind Blog"),
     ("https://openai.com/blog/rss/", "OpenAI Blog"),
     ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
     ("https://www.marktechpost.com/feed/", "MarkTechPost"),
-    ("https://syncedreview.com/feed/", "Synced AI"),
-    ("https://news.ycombinator.com/rss", "Hacker News"),
-    ("https://www.unite.ai/feed/", "Unite.AI"),
-    ("https://analyticsindiamag.com/feed/", "AIM"),
 ]
 
-# ====================== КЛЮЧЕВЫЕ СЛОВА ======================
+# ====================== KEYWORDS ======================
 AI_KEYWORDS = [
     "ai", "artificial intelligence", "machine learning", "deep learning",
     "neural network", "llm", "large language model", "gpt", "chatgpt", "claude",
-    "gemini", "grok", "llama", "mistral", "qwen", "deepseek", "midjourney",
-    "dall-e", "stable diffusion", "sora", "groq", "openai", "anthropic",
-    "deepmind", "hugging face", "nvidia", "agi", "transformer", "generative",
-    "agents", "reasoning", "multimodal", "fine-tuning", "rlhf", "o3", "o1",
-    "cursor", "copilot", "replit", "v0", "perplexity", "cohere", "01.ai"
+    "gemini", "grok", "llama", "mistral", "deepseek", "midjourney",
+    "dall-e", "stable diffusion", "sora", "openai", "anthropic",
+    "deepmind", "nvidia", "agi", "transformer", "generative"
 ]
 
 EXCLUDE_KEYWORDS = [
     "stock price", "ipo", "earnings call", "quarterly results", "dividend",
     "market cap", "wall street", "ps5", "xbox", "nintendo", "game review",
-    "netflix", "movie review", "box office", "trailer", "tesla stock",
-    "bitcoin", "crypto", "blockchain", "nft", "ethereum", "election",
-    "trump", "biden", "congress", "senate"
+    "netflix", "movie review", "box office", "bitcoin", "crypto", "blockchain",
+    "nft", "ethereum", "election", "trump", "biden", "congress"
 ]
 
 BAD_PHRASES = ["sponsored", "partner content", "advertisement", "black friday", "deal alert"]
 
-# ====================== РАСШИРЕННЫЕ СУЩНОСТИ ======================
+# ====================== KEY ENTITIES ======================
 KEY_ENTITIES = [
-    # Компании
     "openai", "google", "meta", "microsoft", "anthropic", "nvidia", "apple",
     "amazon", "deepmind", "hugging face", "stability ai", "midjourney",
-    "mistral", "cohere", "perplexity", "runway", "pika", "character ai",
-    "inflection", "xai", "baidu", "alibaba", "tencent", "bytedance",
-    "01.ai", "moonshot ai", "zhipu ai", "ai21 labs", "adept", "adept ai",
-    "elevenlabs", "heygen", "synthesia", "jasper", "copy.ai", "replika",
-    
-    # Модели и продукты
-    "gpt-4", "gpt-5", "gpt-4o", "gpt-4.5", "chatgpt", "claude", "claude 3",
-    "claude 3.5", "claude 3.5 sonnet", "claude 3 opus", "gemini", "gemini 2",
-    "gemini 2.0", "gemini 1.5", "llama", "llama 3", "llama 3.3", "llama 3.2",
-    "llama 3.1", "mistral", "mixtral", "mixtral 8x7b", "mixtral 8x22b",
-    "copilot", "github copilot", "microsoft copilot", "dall-e", "dall-e 3",
-    "dall-e 2", "sora", "stable diffusion", "stable diffusion 3", "flux",
-    "midjourney v6", "midjourney v7", "runway gen", "runway gen-3", "firefly",
-    "adobe firefly", "imagen", "imagen 3", "grok", "grok 2", "grok 3",
-    "deepseek", "deepseek-v3", "deepseek-v2", "deepseek-r1", "qwen",
-    "qwen 2", "qwen 2.5", "yi", "yi-34b", "command r", "command r+",
-    "o3", "o3 mini", "o1", "o1 mini", "o1 preview", "gpt-4o mini",
-    
-    # Инструменты и платформы
-    "cursor", "cursor ai", "replit", "replit agent", "v0", "v0.dev",
-    "vercel v0", "bolt", "bolt.new", "lovable", "temporal", "langchain",
-    "llamaindex", "crewai", "autogen", "semantic kernel", "haystack",
-    "weaviate", "pinecone", "chroma", "qdrant", "milvus", "modal",
-    "replicate", "together ai", "fireworks ai", "baseten", "banana dev",
-    
-    # Ключевые темы
-    "linux foundation", "agentic", "ai agent", "ai agents", "agi", "asi",
-    "artificial general intelligence", "regulation", "safety", "alignment",
-    "ai safety", "ai alignment", "open source", "open-source", "open weights",
-    "robotics", "humanoid", "boston dynamics", "figure", "figure ai",
-    "optimus", "tesla bot", "unitree", "agility robotics", "digit",
-    "apptronik", "1x technologies", "sanctuary ai", "covariant",
-    
-    # Технологии
-    "transformer", "transformers", "diffusion", "diffusion model",
-    "multimodal", "multimodal ai", "reasoning", "chain of thought",
-    "cot", "fine-tuning", "rlhf", "inference", "training", "benchmark",
-    "rag", "retrieval augmented generation", "vector database", "embedding",
-    "token", "context window", "prompt engineering", "jailbreak",
-    "hallucination", "ai hallucination", "synthetic data",
+    "mistral", "cohere", "perplexity", "xai", "inflection",
+    "gpt-4", "gpt-5", "gpt-4o", "chatgpt", "claude", "claude 3", "claude 3.5",
+    "gemini", "gemini 2", "llama", "llama 3", "mistral", "mixtral",
+    "copilot", "dall-e", "sora", "stable diffusion", "flux", "grok",
+    "deepseek", "qwen", "o1", "o3",
+    "linux foundation", "agentic", "ai agent", "agi", "regulation", "safety",
+    "alignment", "open source", "robotics", "humanoid",
+    "transformer", "diffusion", "multimodal", "reasoning", "fine-tuning",
+    "rlhf", "rag", "vector database", "embedding"
 ]
 
 # ====================== DATACLASS ======================
@@ -185,477 +132,372 @@ class Article:
     source: str
     published: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
-# ====================== TOPIC & HASHTAGS ======================
+# ====================== TOPIC ======================
 class Topic:
     LLM = "llm"
     IMAGE_GEN = "image_gen"
     ROBOTICS = "robotics"
     HARDWARE = "hardware"
-    REGULATION = "regulation"
-    RESEARCH = "research"
-    AGENTS = "agents"
-    CODING = "coding"
     GENERAL = "general"
     
     HASHTAGS = {
         LLM: "#ChatGPT #LLM #OpenAI #нейросети",
-        IMAGE_GEN: "#Midjourney #StableDiffusion #ImageGen #ИИАрт",
-        ROBOTICS: "#ИИ #роботы #робототехника #автоматизация",
-        HARDWARE: "#NVIDIA #чипы #GPU #железо",
-        REGULATION: "#регулирование #законы #этика #безопасность",
-        RESEARCH: "#исследования #наука #ML #DeepLearning",
-        AGENTS: "#агенты #автономность #AutoGPT #AI",
-        CODING: "#программирование #код #разработка #DevTools",
-        GENERAL: "#ИИ #технологии #инновации #AI"
+        IMAGE_GEN: "#Midjourney #StableDiffusion #ИИАрт",
+        ROBOTICS: "#роботы #робототехника #автоматизация",
+        HARDWARE: "#NVIDIA #чипы #GPU",
+        GENERAL: "#ИИ #технологии #AI"
     }
-    
-    IMAGE_STYLES = {
-        LLM: "futuristic digital brain, circuit patterns, neural network visualization, blue purple gradient",
-        IMAGE_GEN: "creative art studio, digital canvas, vibrant colors, artistic AI generation",
-        ROBOTICS: "sleek humanoid robot, high-tech laboratory, metallic surfaces, dramatic lighting",
-        HARDWARE: "advanced computer chips, circuit boards, neon lights, technological precision",
-        REGULATION: "digital scales of justice, government building, legal documents, professional",
-        RESEARCH: "scientific laboratory, data visualization, graphs and charts, academic",
-        AGENTS: "autonomous systems, interconnected nodes, workflow automation, modern tech",
-        CODING: "code editor interface, programming environment, dark theme, developer workspace",
-        GENERAL: "abstract technology, digital innovation, modern tech aesthetic, clean design"
-    }
-    
+
     @staticmethod
     def detect(text: str) -> str:
-        text_lower = text.lower()
-        
-        llm_terms = ["gpt", "claude", "gemini", "llm", "chatbot", "language model", 
-                     "chatgpt", "llama", "mistral", "deepseek", "qwen", "reasoning"]
-        if any(term in text_lower for term in llm_terms):
+        t = text.lower()
+        if any(x in t for x in ["gpt", "claude", "gemini", "llm", "chatgpt", "llama"]):
             return Topic.LLM
-        
-        image_terms = ["dall-e", "midjourney", "stable diffusion", "image generation",
-                      "text-to-image", "imagen", "firefly", "flux", "sora", "video generation"]
-        if any(term in text_lower for term in image_terms):
+        if any(x in t for x in ["dall-e", "midjourney", "stable diffusion", "sora", "image"]):
             return Topic.IMAGE_GEN
-        
-        robot_terms = ["robot", "humanoid", "automation", "robotic", "boston dynamics",
-                      "figure ai", "optimus", "tesla bot"]
-        if any(term in text_lower for term in robot_terms):
+        if any(x in t for x in ["robot", "humanoid", "boston dynamics"]):
             return Topic.ROBOTICS
-        
-        hw_terms = ["nvidia", "chip", "gpu", "hardware", "semiconductor", "processor",
-                   "tpu", "asic", "groq chip"]
-        if any(term in text_lower for term in hw_terms):
+        if any(x in t for x in ["nvidia", "chip", "gpu", "hardware"]):
             return Topic.HARDWARE
-        
-        reg_terms = ["regulation", "policy", "law", "government", "ethical", "ban",
-                    "restriction", "compliance", "legal"]
-        if any(term in text_lower for term in reg_terms):
-            return Topic.REGULATION
-        
-        research_terms = ["research", "paper", "study", "breakthrough", "discovery",
-                         "scientific", "experiment", "arxiv"]
-        if any(term in text_lower for term in research_terms):
-            return Topic.RESEARCH
-        
-        agent_terms = ["agent", "autonomous", "autogpt", "workflow", "automation tool",
-                      "ai assistant", "personal ai"]
-        if any(term in text_lower for term in agent_terms):
-            return Topic.AGENTS
-        
-        code_terms = ["coding", "copilot", "cursor", "programming", "developer",
-                     "ide", "code generation", "replit", "v0"]
-        if any(term in text_lower for term in code_terms):
-            return Topic.CODING
-        
         return Topic.GENERAL
-    
-    @staticmethod
-    def get_image_style(topic: str) -> str:
-        return Topic.IMAGE_STYLES.get(topic, Topic.IMAGE_STYLES[Topic.GENERAL])
 
-# ====================== GROQ МОДЕЛИ ======================
-GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-70b-versatile",
-]
 
-# ====================== UTILITY FUNCTIONS ======================
+# ====================== UTILITIES ======================
 def normalize_url(url: str) -> str:
-    """Нормализация URL для поиска дубликатов"""
-    parsed = urlparse(url.lower())
-    
-    # Убираем query параметры для трекинга
-    if parsed.query:
-        query_params = parse_qs(parsed.query)
-        tracking_params = {'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 
-                          'fbclid', 'gclid', 'ref', 'source'}
-        clean_params = {k: v for k, v in query_params.items() if k not in tracking_params}
-        clean_query = urlencode(clean_params, doseq=True) if clean_params else ''
-    else:
-        clean_query = ''
-    
-    # Убираем trailing slash
-    path = parsed.path.rstrip('/')
-    
-    # Формируем нормализованный URL
-    norm = f"{parsed.netloc}{path}"
-    if clean_query:
-        norm += f"?{clean_query}"
-    
-    return norm
+    """Агрессивная нормализация URL"""
+    try:
+        parsed = urlparse(url.lower().strip())
+        domain = parsed.netloc.replace("www.", "")
+        path = parsed.path.rstrip("/")
+        
+        if parsed.query:
+            params = parse_qs(parsed.query)
+            tracking = {'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 
+                       'fbclid', 'gclid', 'ref', 'source', 'mc_cid', 'mc_eid'}
+            clean = {k: v for k, v in params.items() if k.lower() not in tracking}
+            query = urlencode(clean, doseq=True) if clean else ""
+        else:
+            query = ""
+        
+        result = f"{domain}{path}"
+        if query:
+            result += f"?{query}"
+        return result
+    except:
+        return url.lower().strip()
+
 
 def get_domain(url: str) -> str:
-    """Извлекает домен из URL"""
-    parsed = urlparse(url.lower())
-    domain = parsed.netloc
-    # Убираем www.
-    if domain.startswith('www.'):
-        domain = domain[4:]
-    return domain
+    try:
+        domain = urlparse(url.lower()).netloc
+        return domain.replace("www.", "")
+    except:
+        return ""
 
-def get_title_signature(title: str) -> str:
-    """Создаёт сигнатуру заголовка (первые 4 значимых слова)"""
-    words = re.findall(r'\b[a-zA-Z]{4,}\b', title.lower())
-    return ' '.join(words[:4]) if words else title.lower()[:30]
 
-def get_summary_hash(summary: str) -> str:
-    """Хеш summary для быстрой проверки"""
-    clean = re.sub(r'\s+', ' ', summary.lower().strip())
-    return hashlib.md5(clean.encode('utf-8')).hexdigest()
+def normalize_title(title: str) -> str:
+    """
+    Нормализация заголовка для сравнения:
+    - lowercase
+    - убираем пунктуацию
+    - нормализуем пробелы
+    - нормализуем числа в названиях (GPT-4 -> gpt4)
+    """
+    t = title.lower().strip()
+    # Убираем пунктуацию кроме важных символов
+    t = re.sub(r'[^\w\s]', ' ', t)
+    # Нормализуем пробелы
+    t = re.sub(r'\s+', ' ', t).strip()
+    # Нормализуем версии: "gpt 4" -> "gpt4", "claude 3.5" -> "claude35"
+    t = re.sub(r'(\w+)\s*[-.]?\s*(\d+(?:\.\d+)?)', lambda m: m.group(1) + m.group(2).replace('.', ''), t)
+    return t
 
-def get_content_hash(text: str, length: int = 200) -> Optional[str]:
-    """Хеш первых N символов контента"""
-    if not text or len(text) < 50:
-        return None
-    clean = re.sub(r'\s+', ' ', text.lower().strip())[:length]
-    return hashlib.md5(clean.encode('utf-8')).hexdigest()
+
+def get_title_words(title: str) -> Set[str]:
+    """Извлекает значимые слова из заголовка"""
+    words = re.findall(r'\b[a-zA-Z0-9]+\b', title.lower())
+    stop_words = {
+        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+        'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+        'should', 'may', 'might', 'must', 'shall', 'can', 'need', 'to', 'of',
+        'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through',
+        'during', 'before', 'after', 'above', 'below', 'between', 'under',
+        'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where',
+        'why', 'how', 'all', 'each', 'few', 'more', 'most', 'other', 'some',
+        'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too',
+        'very', 'just', 'and', 'but', 'if', 'or', 'because', 'until', 'while',
+        'about', 'against', 'its', 'new', 'says', 'said', 'get', 'got', 'gets',
+        'make', 'made', 'makes', 'now', 'also', 'first', 'using', 'used', 'use',
+        'out', 'up', 'what', 'which', 'who', 'this', 'that', 'these', 'those',
+        'it', 'its', 'you', 'your', 'we', 'our', 'they', 'their', 'he', 'she',
+        'him', 'her', 'his', 'hers', 'my', 'mine', 'yours', 'ours', 'theirs'
+    }
+    return {w for w in words if len(w) > 2 and w not in stop_words}
+
+
+def get_sorted_word_signature(title: str) -> str:
+    """
+    Создаёт сигнатуру из отсортированных значимых слов.
+    "OpenAI launches GPT-5" и "GPT-5 launched by OpenAI" -> одинаковая сигнатура
+    """
+    words = get_title_words(title)
+    return ' '.join(sorted(words))
+
 
 def calculate_similarity(str1: str, str2: str) -> float:
-    """SequenceMatcher similarity"""
     return difflib.SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
 
-def ngram_similarity(str1: str, str2: str, n: int = 3) -> float:
-    """N-gram similarity для обнаружения перефразированных заголовков"""
-    def get_ngrams(text: str, n: int) -> Set[str]:
-        words = text.lower().split()
-        return set(' '.join(words[i:i+n]) for i in range(len(words) - n + 1))
-    
-    if len(str1.split()) < n or len(str2.split()) < n:
+
+def jaccard_similarity(set1: Set[str], set2: Set[str]) -> float:
+    if not set1 or not set2:
         return 0.0
-    
-    ngrams1 = get_ngrams(str1, n)
-    ngrams2 = get_ngrams(str2, n)
-    
-    if not ngrams1 or not ngrams2:
-        return 0.0
-    
-    intersection = len(ngrams1 & ngrams2)
-    union = len(ngrams1 | ngrams2)
-    
+    intersection = len(set1 & set2)
+    union = len(set1 | set2)
     return intersection / union if union > 0 else 0.0
 
-def extract_key_entities(text: str) -> Set[str]:
-    """Извлекает ключевые сущности из текста"""
-    text_lower = text.lower()
+
+def ngram_similarity(str1: str, str2: str, n: int = 2) -> float:
+    """Bigram Jaccard similarity"""
+    def get_ngrams(text: str, n: int) -> Set[str]:
+        words = text.lower().split()
+        if len(words) < n:
+            return set(words)
+        return set(' '.join(words[i:i+n]) for i in range(len(words) - n + 1))
+    
+    ng1 = get_ngrams(str1, n)
+    ng2 = get_ngrams(str2, n)
+    
+    if not ng1 or not ng2:
+        return 0.0
+    
+    intersection = len(ng1 & ng2)
+    union = len(ng1 | ng2)
+    return intersection / union if union > 0 else 0.0
+
+
+def extract_entities(text: str) -> Set[str]:
+    """Извлекает ключевые сущности с нормализацией"""
+    # Нормализуем текст
+    text_normalized = normalize_title(text)
     found = set()
     
     for entity in KEY_ENTITIES:
-        # Точное совпадение или как отдельное слово
-        if entity in text_lower:
-            # Проверяем что это не часть другого слова
-            pattern = r'\b' + re.escape(entity) + r'\b'
-            if re.search(pattern, text_lower):
-                found.add(entity)
+        entity_normalized = normalize_title(entity)
+        if entity_normalized in text_normalized:
+            found.add(entity_normalized)
     
     return found
 
-def fuzzy_entity_match(entities1: Set[str], entities2: Set[str], threshold: float = 0.85) -> float:
-    """Fuzzy matching сущностей для обнаружения вариаций (GPT-4 vs GPT4)"""
-    if not entities1 or not entities2:
-        return 0.0
-    
-    matches = 0
-    for e1 in entities1:
-        for e2 in entities2:
-            sim = calculate_similarity(e1, e2)
-            if sim >= threshold:
-                matches += 1
-                break
-    
-    max_size = max(len(entities1), len(entities2))
-    return matches / max_size if max_size > 0 else 0.0
 
-def tfidf_cosine_similarity(docs: List[str]) -> List[List[float]]:
-    """TF-IDF косинусная близость между документами"""
-    if len(docs) < 2:
-        return [[1.0]]
-    
-    # Tokenize
-    all_words = set()
-    tokenized_docs = []
-    for doc in docs:
-        words = re.findall(r'\b\w+\b', doc.lower())
-        tokenized_docs.append(words)
-        all_words.update(words)
-    
-    # Term frequency
-    tf_docs = []
-    for words in tokenized_docs:
-        word_count = Counter(words)
-        total = len(words)
-        tf = {word: count / total for word, count in word_count.items()}
-        tf_docs.append(tf)
-    
-    # Inverse document frequency
-    idf = {}
-    num_docs = len(docs)
-    for word in all_words:
-        doc_count = sum(1 for tf in tf_docs if word in tf)
-        idf[word] = math.log(num_docs / doc_count) if doc_count > 0 else 0
-    
-    # TF-IDF vectors
-    tfidf_vectors = []
-    for tf in tf_docs:
-        vector = {word: tf.get(word, 0) * idf.get(word, 0) for word in all_words}
-        tfidf_vectors.append(vector)
-    
-    # Cosine similarity
-    similarity_matrix = []
-    for i, vec1 in enumerate(tfidf_vectors):
-        row = []
-        for j, vec2 in enumerate(tfidf_vectors):
-            if i == j:
-                row.append(1.0)
-            else:
-                dot_product = sum(vec1.get(word, 0) * vec2.get(word, 0) for word in all_words)
-                mag1 = math.sqrt(sum(v**2 for v in vec1.values()))
-                mag2 = math.sqrt(sum(v**2 for v in vec2.values()))
-                cos_sim = dot_product / (mag1 * mag2) if mag1 > 0 and mag2 > 0 else 0.0
-                row.append(cos_sim)
-        similarity_matrix.append(row)
-    
-    return similarity_matrix
+def get_content_hash(text: str) -> str:
+    if not text:
+        return ""
+    normalized = re.sub(r'\s+', ' ', text.lower().strip())[:300]
+    return hashlib.md5(normalized.encode()).hexdigest()
 
-import threading
 
-# ====================== POSTED MANAGER (SQLite) ======================
+# ====================== DUPLICATE RESULT ======================
+@dataclass
+class DuplicateCheckResult:
+    """Результат проверки на дубликат с накоплением всех причин"""
+    is_duplicate: bool
+    reasons: List[str]
+    max_similarity: float = 0.0
+    matched_title: str = ""
+    
+    def add_reason(self, reason: str, similarity: float = 0.0, matched: str = ""):
+        self.reasons.append(reason)
+        if similarity > self.max_similarity:
+            self.max_similarity = similarity
+            self.matched_title = matched
+        self.is_duplicate = True
+
+
+# ====================== POSTED MANAGER ======================
 class PostedManager:
-    """SQLite-based менеджер с атомарными операциями и advisory locks"""
-    
     def __init__(self, db_file: str = "posted_articles.db"):
         self.db_file = db_file
         self._lock = threading.Lock()
         self._conn = None
         self._init_db()
-    
+
     def _get_conn(self) -> sqlite3.Connection:
-        """Получает единое соединение с базой данных"""
         if self._conn is None:
             self._conn = sqlite3.connect(self.db_file, timeout=30.0, check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
-            # Настройки для предотвращения блокировок
             self._conn.execute('PRAGMA journal_mode=WAL')
             self._conn.execute('PRAGMA busy_timeout=30000')
         return self._conn
-    
+
     def _init_db(self):
-        """Инициализация базы данных"""
         conn = self._get_conn()
         cursor = conn.cursor()
         
-        # Основная таблица posted_articles
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS posted_articles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                url TEXT NOT NULL UNIQUE,
-                norm_url TEXT NOT NULL,
+                url TEXT NOT NULL,
+                norm_url TEXT NOT NULL UNIQUE,
                 domain TEXT NOT NULL,
                 title TEXT NOT NULL,
-                title_signature TEXT NOT NULL,
+                title_normalized TEXT NOT NULL,
+                title_words TEXT,
+                title_word_signature TEXT,
                 summary TEXT,
                 content_hash TEXT,
-                summary_hash TEXT NOT NULL,
-                entities TEXT,  -- JSON список
+                entities TEXT,
                 topic TEXT DEFAULT 'general',
                 source TEXT,
-                published_date TEXT,
-                posted_date TEXT DEFAULT CURRENT_TIMESTAMP,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                posted_date TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
-        # Таблица для отклонённых статей (логирование)
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS rejected_articles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                url TEXT NOT NULL,
-                norm_url TEXT,
-                title TEXT NOT NULL,
-                summary TEXT,
-                source TEXT,
-                rejection_reason TEXT NOT NULL,
-                duplicate_of TEXT,  -- URL дубликата если есть
-                similarity_score REAL,
-                checked_at TEXT DEFAULT CURRENT_TIMESTAMP
+            CREATE TABLE IF NOT EXISTS rejected_urls (
+                norm_url TEXT PRIMARY KEY,
+                title TEXT,
+                reason TEXT,
+                rejected_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
-        # Индексы для быстрого поиска
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_norm_url ON posted_articles(norm_url)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_content_hash ON posted_articles(content_hash)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_summary_hash ON posted_articles(summary_hash)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_domain ON posted_articles(domain)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_title_signature ON posted_articles(title_signature)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_posted_date ON posted_articles(posted_date)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_topic ON posted_articles(topic)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_rejected_url ON rejected_articles(url)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_rejected_reason ON rejected_articles(rejection_reason)')
+        # Индексы
+        indices = [
+            ('idx_norm_url', 'norm_url'),
+            ('idx_content_hash', 'content_hash'),
+            ('idx_domain', 'domain'),
+            ('idx_posted_date', 'posted_date'),
+            ('idx_title_normalized', 'title_normalized'),
+            ('idx_title_word_signature', 'title_word_signature'),
+        ]
+        for idx_name, column in indices:
+            cursor.execute(f'CREATE INDEX IF NOT EXISTS {idx_name} ON posted_articles({column})')
         
         conn.commit()
-        logger.info("📚 База данных инициализирована")
-    
-    def is_duplicate(self, url: str, title: str, summary: str = "") -> Tuple[bool, str]:
+        logger.info("📚 База данных готова")
+
+    def _was_rejected(self, norm_url: str) -> bool:
+        cursor = self._get_conn().cursor()
+        cursor.execute('SELECT 1 FROM rejected_urls WHERE norm_url = ?', (norm_url,))
+        return cursor.fetchone() is not None
+
+    def _add_rejected(self, norm_url: str, title: str, reason: str):
+        try:
+            cursor = self._get_conn().cursor()
+            cursor.execute(
+                'INSERT OR REPLACE INTO rejected_urls (norm_url, title, reason) VALUES (?, ?, ?)',
+                (norm_url, title[:200], reason)
+            )
+            self._get_conn().commit()
+        except:
+            pass
+
+    def is_duplicate(self, url: str, title: str, summary: str = "") -> DuplicateCheckResult:
         """
-        Многоуровневая проверка на дубликат:
-        1. URL (нормализованный)
-        2. Хеш summary
-        3. Хеш контента
-        4. Похожесть заголовка (n-gram + SequenceMatcher)
-        5. Домен + сигнатура заголовка (ловит mirror-сайты)
-        6. Пересечение сущностей
+        ПОЛНАЯ многоуровневая проверка на дубликат.
+        Проходит ВСЕ проверки и накапливает причины.
+        """
+        result = DuplicateCheckResult(is_duplicate=False, reasons=[])
         
-        Returns: (is_duplicate, reason)
-        """
         with self._lock:
             conn = self._get_conn()
             cursor = conn.cursor()
             
             norm_url = normalize_url(url)
             domain = get_domain(url)
-            title_sig = get_title_signature(title)
-            summary_hash = get_summary_hash(summary)
-            content_hash = get_content_hash(summary)
+            title_normalized = normalize_title(title)
+            title_words = get_title_words(title)
+            word_signature = get_sorted_word_signature(title)
+            content_hash = get_content_hash(f"{title} {summary}")
+            entities = extract_entities(f"{title} {summary}")
             
-            # 1. Проверка по нормализованному URL
+            # ===== 0. Ранее отклонённые =====
+            if self._was_rejected(norm_url):
+                result.add_reason("PREVIOUSLY_REJECTED")
+                return result
+            
+            # ===== 1. Точное совпадение URL =====
             cursor.execute('SELECT title FROM posted_articles WHERE norm_url = ?', (norm_url,))
-            if cursor.fetchone():
-                return True, f"URL_DUPLICATE: {norm_url[:60]}"
+            row = cursor.fetchone()
+            if row:
+                result.add_reason(f"URL_EXACT: {norm_url[:50]}", 1.0, row[0])
+                return result  # URL — железный дубликат
             
-            # 2. Проверка по хешу summary
-            cursor.execute('SELECT title FROM posted_articles WHERE summary_hash = ?', (summary_hash,))
-            if cursor.fetchone():
-                return True, f"SUMMARY_HASH_DUPLICATE"
-            
-            # 3. Проверка по хешу контента
+            # ===== 2. Точное совпадение хеша контента =====
             if content_hash:
                 cursor.execute('SELECT title FROM posted_articles WHERE content_hash = ?', (content_hash,))
-                if cursor.fetchone():
-                    return True, f"CONTENT_HASH_DUPLICATE"
+                row = cursor.fetchone()
+                if row:
+                    result.add_reason(f"CONTENT_HASH_EXACT", 1.0, row[0])
+                    return result
             
-            # 4. Проверка по домену + сигнатуре заголовка (mirror-сайты)
-            cursor.execute('SELECT title FROM posted_articles WHERE domain = ? AND title_signature = ?',
-                          (domain, title_sig))
-            if cursor.fetchone():
-                return True, f"DOMAIN_TITLE_SIGNATURE: {domain}"
+            # ===== 3. Точное совпадение нормализованного заголовка =====
+            cursor.execute('SELECT title FROM posted_articles WHERE title_normalized = ?', (title_normalized,))
+            row = cursor.fetchone()
+            if row:
+                result.add_reason(f"TITLE_EXACT_NORMALIZED", 1.0, row[0])
+                return result
             
-            # 5. Проверка похожести заголовков
-            cursor.execute('SELECT title FROM posted_articles WHERE posted_date > datetime("now", "-7 days")')
-            recent_titles = [row[0] for row in cursor.fetchall()]
+            # ===== 4. Совпадение сигнатуры слов (ловит перестановки) =====
+            cursor.execute('SELECT title FROM posted_articles WHERE title_word_signature = ?', (word_signature,))
+            row = cursor.fetchone()
+            if row:
+                result.add_reason(f"WORD_SIGNATURE_MATCH", 0.95, row[0])
+                return result
             
-            for existing_title in recent_titles:
-                # SequenceMatcher
-                sim = calculate_similarity(title, existing_title)
-                if sim > config.similarity_threshold:
-                    return True, f"TITLE_SIMILARITY: {sim:.2f}"
+            # ===== 5. Проверка всех заголовков на похожесть =====
+            cursor.execute('SELECT id, title, title_normalized, title_words, entities, domain FROM posted_articles')
+            all_posts = cursor.fetchall()
+            
+            for row in all_posts:
+                existing_id, existing_title, existing_normalized, existing_words_json, existing_entities_json, existing_domain = row
                 
-                # N-gram similarity
+                # 5a. SequenceMatcher на нормализованных заголовках
+                seq_sim = calculate_similarity(title_normalized, existing_normalized)
+                if seq_sim > config.title_similarity_threshold:
+                    result.add_reason(f"TITLE_SEQ_SIM ({seq_sim:.0%})", seq_sim, existing_title)
+                
+                # 5b. N-gram similarity
                 ngram_sim = ngram_similarity(title, existing_title)
-                if ngram_sim > config.similarity_threshold:
-                    return True, f"TITLE_NGRAM_SIMILARITY: {ngram_sim:.2f}"
-            
-            # 6. Проверка пересечения сущностей
-            full_text = f"{title} {summary}".strip()
-            new_entities = extract_key_entities(full_text)
-            
-            if len(new_entities) >= 2:
-                cursor.execute('SELECT title, entities FROM posted_articles WHERE posted_date > datetime("now", "-14 days")')
-                for row in cursor.fetchall():
-                    existing_title, saved_entities_json = row
-                    if saved_entities_json:
-                        existing_entities = set(json.loads(saved_entities_json))
-                    else:
-                        existing_entities = extract_key_entities(existing_title)
-                    
-                    if len(existing_entities) < 2:
-                        continue
-                    
-                    # Fuzzy matching сущностей
-                    entity_sim = fuzzy_entity_match(new_entities, existing_entities)
-                    if entity_sim >= config.entity_overlap_threshold:
-                        return True, f"ENTITY_OVERLAP: {entity_sim:.2f}"
-                    
-                    # Прямое пересечение
-                    common = new_entities & existing_entities
-                    min_size = min(len(new_entities), len(existing_entities))
-                    overlap_ratio = len(common) / min_size if min_size > 0 else 0
-                    
-                    if len(common) >= 2 and overlap_ratio >= config.entity_overlap_threshold:
-                        return True, f"ENTITY_COMMON: {len(common)} entities"
-            
-            return False, ""
-    
-    def is_too_similar_to_recent(self, title: str, summary: str) -> Tuple[bool, str]:
-        """
-        Проверяет, не слишком ли похожа статья на последние N постов
-        Использует TF-IDF cosine similarity
-        """
-        with self._lock:
-            conn = self._get_conn()
-            cursor = conn.cursor()
-            
-            cursor.execute('SELECT title, summary, topic, entities FROM posted_articles '
-                          'ORDER BY posted_date DESC LIMIT ?', (config.recent_posts_check,))
-            recent_posts = cursor.fetchall()
-            
-            if len(recent_posts) < 2:
-                return False, ""
-            
-            full_text = f"{title} {summary}".strip()
-            new_entities = extract_key_entities(full_text)
-            detected_topic = Topic.detect(full_text)
-            
-            # Собираем контекст для TF-IDF
-            docs = [full_text]
-            for row in recent_posts:
-                docs.append(f"{row[0]} {row[1]}")
-            
-            # Вычисляем TF-IDF similarity
-            similarity_matrix = tfidf_cosine_similarity(docs)
-            
-            # Проверяем похожесть с каждым недавним постом
-            for idx, row in enumerate(recent_posts, start=1):
-                sim_score = similarity_matrix[0][idx]
+                if ngram_sim > config.ngram_similarity_threshold:
+                    result.add_reason(f"TITLE_NGRAM ({ngram_sim:.0%})", ngram_sim, existing_title)
                 
-                if sim_score > config.tfidf_similarity_threshold:
-                    return True, f"TFIDF_SIMILARITY: {sim_score:.2f} with '{row[0][:40]}...'"
+                # 5c. Jaccard similarity по словам
+                if existing_words_json:
+                    try:
+                        existing_words = set(json.loads(existing_words_json))
+                        jaccard = jaccard_similarity(title_words, existing_words)
+                        if jaccard > config.jaccard_threshold:
+                            result.add_reason(f"JACCARD ({jaccard:.0%})", jaccard, existing_title)
+                    except:
+                        pass
                 
-                # Дополнительная проверка по сущностям
-                if row[3]:  # entities
-                    existing_entities = set(json.loads(row[3]))
-                    common = new_entities & existing_entities
-                    
-                    if len(common) >= 3:
-                        return True, f"TOO_MANY_COMMON_ENTITIES: {len(common)}"
+                # 5d. Пересечение сущностей
+                if entities and existing_entities_json:
+                    try:
+                        existing_entities = set(json.loads(existing_entities_json))
+                        if len(entities) >= 2 and len(existing_entities) >= 2:
+                            common = entities & existing_entities
+                            min_size = min(len(entities), len(existing_entities))
+                            overlap = len(common) / min_size if min_size > 0 else 0
+                            
+                            if len(common) >= 2 and overlap >= config.entity_overlap_threshold:
+                                result.add_reason(f"ENTITY_OVERLAP ({len(common)}: {common})", overlap, existing_title)
+                    except:
+                        pass
+                
+                # 5e. Тот же домен + похожий заголовок (строже)
+                if domain == existing_domain:
+                    same_domain_sim = calculate_similarity(title_normalized, existing_normalized)
+                    if same_domain_sim > config.same_domain_similarity:
+                        result.add_reason(f"SAME_DOMAIN ({same_domain_sim:.0%})", same_domain_sim, existing_title)
             
-            return False, ""
-    
-    def check_diversity_requirement(self, topic: str) -> Tuple[bool, str]:
-        """
-        Проверяет требования по разнообразию контента
-        Не публикуем подряд посты из одной темы
-        """
+            return result
+
+    def check_diversity(self, topic: str) -> Tuple[bool, str]:
+        """Проверяет разнообразие тем"""
         with self._lock:
-            conn = self._get_conn()
-            cursor = conn.cursor()
-            
+            cursor = self._get_conn().cursor()
             cursor.execute(
                 'SELECT topic FROM posted_articles ORDER BY posted_date DESC LIMIT ?',
                 (config.diversity_window,)
@@ -665,55 +507,15 @@ class PostedManager:
             if not recent_topics:
                 return True, ""
             
-            # Если последний пост такой же темы — отклоняем
             if recent_topics[0] == topic:
-                return False, f"DIVERSITY: последний пост был {topic}"
+                return False, f"SAME_AS_LAST: {topic}"
             
-            # Если 2 из 3 последних — такая же тема, отклоняем
-            if len(recent_topics) >= config.diversity_window:
-                same_topic_count = sum(1 for t in recent_topics[:config.diversity_window] if t == topic)
-                if same_topic_count >= 2:
-                    return False, f"DIVERSITY: {same_topic_count}/{config.diversity_window} последних — {topic}"
+            same_count = sum(1 for t in recent_topics if t == topic)
+            if same_count >= config.same_topic_limit:
+                return False, f"TOO_MANY: {same_count}/{config.diversity_window} = {topic}"
             
             return True, ""
-    
-    def llm_duplicate_check(self, article: Article, recent_posts: List[dict]) -> Tuple[bool, str]:
-        """
-        LLM-проверка: действительно ли это дубликат/похожая новость
-        """
-        if not recent_posts:
-            return False, ""
-        
-        # Формируем контекст для LLM
-        context = "НЕДАВНИЕ ПОСТЫ:\n"
-        for i, post in enumerate(recent_posts[:3], 1):
-            context += f"{i}. {post['title']}\n"
-        
-        new_article_text = f"НОВАЯ СТАТЬЯ:\n{article.title}\n{article.summary[:300]}"
-        
-        prompt = f"""{context}
 
-{new_article_text}
-
-Является ли новая статья дубликатом или очень похожей на недавние посты?
-Отвечай ТОЛЬКО: YES или NO"""
-        
-        try:
-            resp = groq_client.chat.completions.create(
-                model=GROQ_MODELS[0],
-                temperature=0.3,
-                max_tokens=10,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            answer = resp.choices[0].message.content.strip().upper()
-            
-            if "YES" in answer:
-                return True, "LLM_DUPLICATE_DETECTION"
-        except Exception as e:
-            logger.warning(f"⚠️ LLM duplicate check failed: {e}")
-        
-        return False, ""
-    
     def add(self, article: Article, topic: str = Topic.GENERAL):
         """Добавляет статью в базу"""
         with self._lock:
@@ -722,447 +524,307 @@ class PostedManager:
             
             norm_url = normalize_url(article.link)
             domain = get_domain(article.link)
-            title_sig = get_title_signature(article.title)
-            summary_hash = get_summary_hash(article.summary)
-            content_hash = get_content_hash(article.summary)
+            title_normalized = normalize_title(article.title)
+            title_words = list(get_title_words(article.title))
+            word_signature = get_sorted_word_signature(article.title)
+            content_hash = get_content_hash(f"{article.title} {article.summary}")
+            entities = list(extract_entities(f"{article.title} {article.summary}"))
             
-            full_text = f"{article.title} {article.summary}".strip()
-            entities = list(extract_key_entities(full_text))
-            
-            cursor.execute('''
-                INSERT OR IGNORE INTO posted_articles 
-                (url, norm_url, domain, title, title_signature, summary, 
-                 content_hash, summary_hash, entities, topic, source, published_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                article.link, norm_url, domain, article.title, title_sig, article.summary,
-                content_hash, summary_hash, json.dumps(entities), topic, article.source,
-                article.published.isoformat()
-            ))
-            
-            conn.commit()
-    
-    def log_rejected(self, article: Article, reason: str, duplicate_of: str = None, similarity: float = None):
+            try:
+                cursor.execute('''
+                    INSERT INTO posted_articles 
+                    (url, norm_url, domain, title, title_normalized, title_words, 
+                     title_word_signature, summary, content_hash, entities, topic, source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    article.link, norm_url, domain, article.title, title_normalized,
+                    json.dumps(title_words), word_signature, article.summary[:1000],
+                    content_hash, json.dumps(entities), topic, article.source
+                ))
+                conn.commit()
+                logger.info(f"💾 Сохранено: {article.title[:50]}...")
+            except sqlite3.IntegrityError:
+                logger.warning(f"⚠️ Уже существует: {article.title[:40]}")
+
+    def log_rejected(self, article: Article, reason: str):
         """Логирует отклонённую статью"""
+        norm_url = normalize_url(article.link)
+        self._add_rejected(norm_url, article.title, reason)
+        logger.info(f"🚫 [{reason}]: {article.title[:50]}")
+
+    def cleanup(self, days: int = 90):
         with self._lock:
             conn = self._get_conn()
             cursor = conn.cursor()
             
-            norm_url = normalize_url(article.link)
-            
-            cursor.execute('''
-                INSERT INTO rejected_articles 
-                (url, norm_url, title, summary, source, rejection_reason, duplicate_of, similarity_score)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                article.link, norm_url, article.title, article.summary[:500],
-                article.source, reason, duplicate_of, similarity
-            ))
-            
-            conn.commit()
-    
-    def get_recent_posts(self, limit: int = 5) -> List[dict]:
-        """Возвращает последние N постов с метаданными"""
-        with self._lock:
-            conn = self._get_conn()
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                SELECT title, summary, topic, entities, url
-                FROM posted_articles
-                ORDER BY posted_date DESC
-                LIMIT ?
-            ''', (limit,))
-            
-            posts = []
-            for row in cursor.fetchall():
-                posts.append({
-                    'title': row[0],
-                    'summary': row[1],
-                    'topic': row[2],
-                    'entities': json.loads(row[3]) if row[3] else [],
-                    'url': row[4]
-                })
-            return posts
-    
-    def get_recent_topics_stats(self) -> dict:
-        """Возвращает статистику по темам последних постов"""
-        with self._lock:
-            conn = self._get_conn()
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                SELECT topic, COUNT(*) as count 
-                FROM posted_articles 
-                WHERE posted_date > datetime("now", "-7 days")
-                GROUP BY topic
-            ''')
-            
-            return {row[0]: row[1] for row in cursor.fetchall()}
-    
-    def cleanup(self, days: int = 60):
-        """Удаляет записи старше N дней"""
-        with self._lock:
-            conn = self._get_conn()
-            cursor = conn.cursor()
-            
-            cursor.execute(f'''
-                DELETE FROM posted_articles 
-                WHERE posted_date < datetime('now', '-{days} days')
-            ''')
-            
+            cursor.execute(f"DELETE FROM posted_articles WHERE posted_date < datetime('now', '-{days} days')")
             deleted = cursor.rowcount
-            conn.commit()
             
-            # Очищаем старые rejected тоже
-            cursor.execute('''
-                DELETE FROM rejected_articles 
-                WHERE checked_at < datetime("now", "-30 days")
-            ''')
+            cursor.execute("DELETE FROM rejected_urls WHERE rejected_at < datetime('now', '-30 days')")
             rejected_deleted = cursor.rowcount
+            
             conn.commit()
             
             if deleted > 0 or rejected_deleted > 0:
-                logger.info(f"🧹 Очистка: удалено {deleted} posted, {rejected_deleted} rejected")
-            
-            # VACUUM для оптимизации
-            if deleted > 100:
-                cursor.execute('VACUUM')
-                conn.commit()
-    
+                logger.info(f"🧹 Очищено: {deleted} posted, {rejected_deleted} rejected")
+
     def get_stats(self) -> dict:
-        """Возвращает статистику базы данных"""
         with self._lock:
-            conn = self._get_conn()
-            cursor = conn.cursor()
-            
+            cursor = self._get_conn().cursor()
             cursor.execute('SELECT COUNT(*) FROM posted_articles')
-            total_posted = cursor.fetchone()[0]
-            
-            cursor.execute('SELECT COUNT(*) FROM rejected_articles')
-            total_rejected = cursor.fetchone()[0]
-            
-            cursor.execute('''
-                SELECT rejection_reason, COUNT(*) as count 
-                FROM rejected_articles 
-                GROUP BY rejection_reason
-                ORDER BY count DESC
-            ''')
-            rejection_reasons = {row[0]: row[1] for row in cursor.fetchall()}
-            
-            return {
-                'total_posted': total_posted,
-                'total_rejected': total_rejected,
-                'rejection_reasons': rejection_reasons
-            }
-    
+            total = cursor.fetchone()[0]
+            cursor.execute('SELECT COUNT(*) FROM rejected_urls')
+            rejected = cursor.fetchone()[0]
+            return {'total_posted': total, 'total_rejected': rejected}
+
     def close(self):
-        """Закрывает соединение с базой данных"""
         if self._conn:
             self._conn.close()
             self._conn = None
-            logger.info("🔒 База данных закрыта")
+
 
 # ====================== RSS LOADING ======================
-async def fetch_feed(url: str, source: str, posted: PostedManager) -> List[Article]:
-    """Загружает один RSS feed"""
-    logger.info(f"📥 Загрузка: {source}")
-    
+async def fetch_feed(url: str, source: str) -> List[Article]:
     try:
-        jitter = random.uniform(0, config.rss_jitter)
-        await asyncio.sleep(jitter)
+        await asyncio.sleep(random.uniform(0.5, 2))
         
         async with aiohttp.ClientSession() as sess:
-            async with sess.get(url, headers=HEADERS, timeout=aiohttp.ClientTimeout(total=config.rss_timeout)) as resp:
+            async with sess.get(url, headers=HEADERS, timeout=aiohttp.ClientTimeout(total=20)) as resp:
                 if resp.status != 200:
-                    logger.warning(f"  ⚠️ HTTP {resp.status}")
                     return []
-                
                 content = await resp.text()
         
         feed = await asyncio.to_thread(feedparser.parse, content)
         
-        if not feed.entries:
-            logger.warning(f"  ⚠️ Нет записей")
-            return []
-        
         articles = []
         for entry in feed.entries[:15]:
-            link = entry.get('link', '')
+            link = entry.get('link', '').strip()
             title = entry.get('title', '').strip()
-            summary = entry.get('summary', entry.get('description', '')).strip()
+            summary = re.sub(r'<[^>]+>', '', entry.get('summary', entry.get('description', '')).strip())
             
-            if not link or not title:
+            if not link or not title or len(title) < 20:
                 continue
             
-            # Удаляем HTML теги из summary
-            summary = re.sub(r'<[^>]+>', '', summary)
-            
-            # Парсим дату публикации
             pub_date = entry.get('published_parsed') or entry.get('updated_parsed')
-            if pub_date:
-                published = datetime(*pub_date[:6], tzinfo=timezone.utc)
-            else:
-                published = datetime.now(timezone.utc)
+            published = datetime(*pub_date[:6], tzinfo=timezone.utc) if pub_date else datetime.now(timezone.utc)
             
-            articles.append(Article(
-                title=title,
-                summary=summary,
-                link=link,
-                source=source,
-                published=published
-            ))
+            articles.append(Article(title=title, summary=summary, link=link, source=source, published=published))
         
-        logger.info(f"  ✅ {len(articles)} статей")
+        logger.info(f"  ✅ {source}: {len(articles)}")
         return articles
         
-    except asyncio.TimeoutError:
-        logger.warning(f"  ⏱️ Таймаут")
-        return []
     except Exception as e:
-        logger.warning(f"  ❌ Ошибка: {e}")
+        logger.warning(f"  ⚠️ {source}: {e}")
         return []
 
-async def load_all_feeds(posted: PostedManager) -> List[Article]:
-    """Загружает все RSS feeds параллельно"""
-    tasks = [fetch_feed(url, source, posted) for url, source in RSS_FEEDS]
+
+async def load_all_feeds() -> List[Article]:
+    logger.info("📥 Загрузка RSS...")
+    tasks = [fetch_feed(url, source) for url, source in RSS_FEEDS]
     results = await asyncio.gather(*tasks)
     
     all_articles = []
     for feed_articles in results:
         all_articles.extend(feed_articles)
     
-    logger.info(f"📦 Всего загружено: {len(all_articles)} статей")
+    logger.info(f"📦 Всего: {len(all_articles)}")
     return all_articles
 
-# ====================== ФИЛЬТРАЦИЯ ======================
+
+# ====================== FILTERING ======================
 def is_relevant(article: Article) -> bool:
-    """Проверка релевантности статьи"""
-    text_lower = f"{article.title} {article.summary}".lower()
+    text = f"{article.title} {article.summary}".lower()
     
-    # Исключаем по плохим фразам
-    if any(bad in text_lower for bad in BAD_PHRASES):
+    if any(bad in text for bad in BAD_PHRASES):
+        return False
+    if any(ex in text for ex in EXCLUDE_KEYWORDS):
+        return False
+    if not any(kw in text for kw in AI_KEYWORDS):
         return False
     
-    # Исключаем по ключевым словам
-    if any(ex in text_lower for ex in EXCLUDE_KEYWORDS):
-        return False
-    
-    # Проверяем наличие AI ключевых слов
-    has_ai_keyword = any(kw in text_lower for kw in AI_KEYWORDS)
-    if not has_ai_keyword:
-        return False
-    
-    # Проверка возраста статьи
     age_hours = (datetime.now(timezone.utc) - article.published).total_seconds() / 3600
     if age_hours > config.max_article_age_hours:
         return False
     
     return True
 
-def filter_articles(articles: List[Article], posted: PostedManager) -> List[Article]:
-    """Фильтрует и сортирует статьи"""
-    logger.info("🔍 Фильтрация статей...")
+
+def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Article]:
+    """
+    Фильтрация с ПОЛНОЙ дедупликацией:
+    1. Проверка релевантности
+    2. Дедупликация внутри текущей загрузки
+    3. Дедупликация по БД
+    4. Проверка разнообразия тем
+    """
+    logger.info("🔍 Фильтрация...")
     
     candidates = []
+    
+    # Дедупликация внутри текущей загрузки
+    seen_normalized_titles: Set[str] = set()
+    seen_word_signatures: Set[str] = set()
+    seen_content_hashes: Set[str] = set()
+    
     for article in articles:
-        # Проверка релевантности
+        # 1. Релевантность
         if not is_relevant(article):
             continue
         
-        # Проверка на дубликаты
-        is_dup, reason = posted.is_duplicate(article.link, article.title, article.summary)
-        if is_dup:
+        # 2. Дедупликация внутри batch
+        title_normalized = normalize_title(article.title)
+        if title_normalized in seen_normalized_titles:
+            logger.debug(f"  Пропуск (batch title): {article.title[:40]}")
+            continue
+        
+        word_sig = get_sorted_word_signature(article.title)
+        if word_sig in seen_word_signatures:
+            logger.debug(f"  Пропуск (batch sig): {article.title[:40]}")
+            continue
+        
+        content_hash = get_content_hash(f"{article.title} {article.summary}")
+        if content_hash in seen_content_hashes:
+            logger.debug(f"  Пропуск (batch hash): {article.title[:40]}")
+            continue
+        
+        # 3. Проверка в БД
+        dup_result = posted.is_duplicate(article.link, article.title, article.summary)
+        if dup_result.is_duplicate:
+            reason = "; ".join(dup_result.reasons[:3])  # Первые 3 причины
             posted.log_rejected(article, reason)
             continue
         
-        # Проверка на похожесть с недавними
-        is_similar, reason = posted.is_too_similar_to_recent(article.title, article.summary)
-        if is_similar:
-            posted.log_rejected(article, reason)
+        # 4. Проверка разнообразия (ДО генерации!)
+        topic = Topic.detect(f"{article.title} {article.summary}")
+        div_ok, div_reason = posted.check_diversity(topic)
+        if not div_ok:
+            posted.log_rejected(article, div_reason)
             continue
+        
+        # Добавляем в seen
+        seen_normalized_titles.add(title_normalized)
+        seen_word_signatures.add(word_sig)
+        if content_hash:
+            seen_content_hashes.add(content_hash)
         
         candidates.append(article)
     
-    # Сортировка по свежести и наличию сущностей
-    def score_article(art: Article) -> float:
-        text = f"{art.title} {art.summary}".lower()
-        entities = extract_key_entities(text)
-        entity_score = len(entities) * 0.5
-        
-        # Бонус за свежесть
-        age_hours = (datetime.now(timezone.utc) - art.published).total_seconds() / 3600
-        freshness_score = max(0, 24 - age_hours) / 24
-        
-        return entity_score + freshness_score
+    # Сортировка
+    def score(art: Article) -> float:
+        entities = extract_entities(f"{art.title} {art.summary}")
+        age = (datetime.now(timezone.utc) - art.published).total_seconds() / 3600
+        return len(entities) * 2 + max(0, 48 - age) / 48
     
-    candidates.sort(key=score_article, reverse=True)
-    
-    logger.info(f"✅ Отфильтровано: {len(candidates)} кандидатов")
+    candidates.sort(key=score, reverse=True)
+    logger.info(f"✅ Кандидатов: {len(candidates)}")
     return candidates
 
-# ====================== EXPONENTIAL BACKOFF ======================
-def exponential_backoff(attempt: int) -> float:
-    """Экспоненциальная задержка с jitter"""
-    delay = min(config.groq_base_delay * (2 ** attempt), config.groq_max_delay)
-    jitter = random.uniform(0, delay * 0.1)
-    return delay + jitter
 
-# ====================== ГЕНЕРАЦИЯ САММАРИ ======================
+# ====================== GENERATION ======================
+GROQ_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-70b-versatile"]
+
 async def generate_summary(article: Article) -> Optional[str]:
-    """Генерирует пост через Groq"""
-    logger.info(f"📝 Обработка: {article.title[:60]}...")
+    logger.info(f"📝 Генерация: {article.title[:55]}...")
     
-    prompt = f"""Превратите эту AI-новость в вирусный пост для Telegram-канала про нейросети.
+    prompt = f"""Превратите AI-новость в пост для Telegram.
 
 НОВОСТЬ:
 {article.title}
-{article.summary[:800]}
+{article.summary[:700]}
 
-СТРУКТУРА ПОСТА:
-1. Взрывной заголовок (5-8 слов) — никакой воды, сразу к делу
-2. Главная суть одним предложением (что случилось?)
-3. Почему это важно (2-3 предложения без клише)
-4. Краткий контекст или прогноз (1-2 предложения)
+СТРУКТУРА:
+1. Заголовок (5-8 слов, с эмодзи)
+2. Суть (1 предложение)  
+3. Почему важно (2-3 предложения)
+4. Вывод/вопрос
 
-ВАЖНО:
-× Никаких банальностей вроде "интересно отметить", "стоит сказать", "примечательно, что"
-× Без очевидных вещей типа "ИИ развивается", "компании соревнуются"
-× Только конкретика, цифры, факты, последствия
-× Эмодзи в меру (1-2 максимум в начале)
-× Пиши на русском, простым языком, без хайпа ради хайпа
+ТРЕБОВАНИЯ:
+- 500-800 символов
+- Без воды ("стоит отметить", "интересно")
+- Только факты
+- Русский язык
 
-ХОРОШИЕ ПРИМЕРЫ ПОДАЧИ:
-✓ "DeepMind обучила ИИ предсказывать погоду точнее метеорологов"
-✓ "Новая модель обходит GPT-4 в математике при 10x меньших затратах"
-✓ "Google снова догоняет — или на этот раз обгонит?"
-✓ "Сколько стартапов похоронит это обновление?"
-
-Если новость — мусор/реклама/не про технологии, ответь: SKIP
+Если мусор — ответь: SKIP
 
 ПОСТ:"""
 
     for attempt in range(config.groq_max_retries):
         try:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1)
             
             resp = await asyncio.to_thread(
                 groq_client.chat.completions.create,
                 model=random.choice(GROQ_MODELS),
                 temperature=0.7,
-                max_tokens=1100,
+                max_tokens=1000,
                 messages=[{"role": "user", "content": prompt}],
             )
             text = resp.choices[0].message.content.strip()
 
-            if "SKIP" in text.upper()[:15]:
-                logger.info("  ⏭️ LLM: SKIP")
+            if "SKIP" in text.upper()[:10]:
+                logger.info("  ⏭️ SKIP")
                 return None
 
             if len(text) < config.min_post_length:
-                logger.warning(f"  ⚠️ Короткий текст ({len(text)} симв.), повтор...")
                 continue
 
-            water = ["стоит отметить", "важно понимать", "интересно, что", 
-                    "давайте разберёмся", "не секрет", "очевидно, что"]
+            water = ["стоит отметить", "важно понимать", "интересно, что", "давайте разберёмся"]
             if any(w in text.lower() for w in water):
-                logger.warning("  ⚠️ Обнаружена вода, повтор...")
                 continue
 
             topic = Topic.detect(f"{article.title} {article.summary}")
             hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
             
-            cta = "\n\n🔥 — огонь  |  🗿 — ну такое  |  ⚡ — интересно"
+            cta = "\n\n🔥 — огонь  |  🗿 — мимо  |  ⚡ — интересно"
             source_link = f'\n\n🔗 <a href="{article.link}">Источник</a>'
             
             final = f"{text}{cta}\n\n{hashtags}{source_link}"
 
             if len(final) > config.caption_limit:
-                excess = len(final) - config.caption_limit + 20
-                text = text[:-excess]
+                text = text[:config.caption_limit - 150]
                 for p in ['. ', '! ', '? ']:
                     idx = text.rfind(p)
-                    if idx > len(text) * 0.6:
+                    if idx > len(text) * 0.5:
                         text = text[:idx+1]
                         break
                 final = f"{text}{cta}\n\n{hashtags}{source_link}"
 
-            logger.info(f"  ✅ Готово: {len(text)} символов | Тема: {topic}")
+            logger.info(f"  ✅ Готово: {len(text)} симв.")
             return final
             
         except Exception as e:
-            delay = exponential_backoff(attempt)
-            logger.error(f"  ❌ Groq ошибка (попытка {attempt+1}/{config.groq_max_retries}): {e}")
-            logger.info(f"  ⏳ Повтор через {delay:.1f}s...")
-            await asyncio.sleep(delay)
+            logger.error(f"  ❌ Ошибка ({attempt+1}): {e}")
+            await asyncio.sleep(config.groq_base_delay * (2 ** attempt))
 
     return None
 
-# ====================== КАРТИНКИ ======================
-async def generate_image(title: str, topic: str = Topic.GENERAL) -> Optional[str]:
-    logger.info(f"  🎨 Генерация картинки для темы: {topic}")
+
+# ====================== IMAGE ======================
+async def generate_image(title: str) -> Optional[str]:
+    clean = re.sub(r'[^\w\s]', '', title)[:40]
+    prompt = f"tech illustration {clean} neon blue purple dark 4k"
+    url = f"https://image.pollinations.ai/prompt/{quote(prompt)}?width=1024&height=1024&nologo=true&seed={random.randint(1,99999)}"
     
-    clean_title = re.sub(r'[^\w\s]', '', title)[:50]
-    style = Topic.get_image_style(topic)
-    prompt = f"{style}, {clean_title}, high quality, 4k, sharp focus"
-    
-    url = (
-        f"https://image.pollinations.ai/prompt/{quote(prompt)}"
-        f"?width=1024&height=1024&nologo=true&seed={random.randint(1,99999)}"
-    )
-    
-    for attempt in range(3):
-        try:
-            async with aiohttp.ClientSession() as sess:
-                async with sess.get(url, timeout=aiohttp.ClientTimeout(total=45)) as resp:
-                    if resp.status != 200:
-                        logger.warning(f"  ⚠️ HTTP {resp.status}, попытка {attempt+1}")
-                        continue
-                    
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(url, timeout=aiohttp.ClientTimeout(total=40)) as resp:
+                if resp.status == 200:
                     data = await resp.read()
-                    
-                    if len(data) < 10000:
-                        logger.warning(f"  ⚠️ Слишком маленький файл ({len(data)} bytes)")
-                        continue
-                    
-                    fname = f"img_{random.randint(1000,9999)}.jpg"
-                    with open(fname, "wb") as f:
-                        f.write(data)
-                    
-                    logger.info(f"  ✅ Картинка сохранена: {fname} ({len(data)//1024}KB)")
-                    return fname
-                    
-        except asyncio.TimeoutError:
-            logger.warning(f"  ⚠️ Таймаут, попытка {attempt+1}/3")
-            await asyncio.sleep(2)
-        except Exception as e:
-            logger.warning(f"  ⚠️ Ошибка генерации ({attempt+1}/3): {e}")
-            await asyncio.sleep(2)
-    
-    logger.warning("  ❌ Не удалось сгенерировать картинку")
+                    if len(data) > 10000:
+                        fname = f"img_{random.randint(1000,9999)}.jpg"
+                        with open(fname, "wb") as f:
+                            f.write(data)
+                        return fname
+    except:
+        pass
     return None
 
-# ====================== ПУБЛИКАЦИЯ ======================
+
+# ====================== POSTING ======================
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
     topic = Topic.detect(f"{article.title} {article.summary}")
     
-    # Проверка разнообразия
-    diversity_ok, diversity_reason = posted.check_diversity_requirement(topic)
-    if not diversity_ok:
-        posted.log_rejected(article, diversity_reason)
-        logger.info(f"  ⏭️ Пропуск (требуется разнообразие): {diversity_reason}")
-        return False
-    
-    # LLM-проверка дубликатов
-    recent_posts = posted.get_recent_posts(3)
-    is_llm_dup, llm_reason = posted.llm_duplicate_check(article, recent_posts)
-    if is_llm_dup:
-        posted.log_rejected(article, llm_reason)
-        logger.info(f"  ⏭️ LLM определил как дубликат")
-        return False
-    
-    # Генерация изображения
-    img = await generate_image(article.title, topic)
+    img = await generate_image(article.title)
     
     try:
         if img and os.path.exists(img):
@@ -1172,71 +834,61 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
             await bot.send_message(config.channel_id, text, disable_web_page_preview=False)
         
         posted.add(article, topic)
-        
-        logger.info(f"✅ ОПУБЛИКОВАНО [{topic.upper()}]: {article.title[:50]}")
+        logger.info(f"✅ ОПУБЛИКОВАНО [{topic}]: {article.title[:50]}")
         return True
         
     except Exception as e:
-        logger.error(f"❌ Telegram ошибка: {e}")
+        logger.error(f"❌ Telegram: {e}")
         if img and os.path.exists(img):
-            try:
-                os.remove(img)
-            except:
-                pass
+            os.remove(img)
         return False
+
 
 # ====================== MAIN ======================
 async def main():
     logger.info("=" * 50)
-    logger.info("🚀 ЗАПУСК AI-POSTER v3.0 (SQLite + Усиленная дедупликация)")
+    logger.info("🚀 AI-POSTER v5.0 (Полная дедупликация)")
     logger.info("=" * 50)
     
     posted = PostedManager(config.db_file)
     
     try:
         posted.cleanup(config.retention_days)
-        
-        # Выводим статистику
         stats = posted.get_stats()
-        logger.info(f"📊 Статистика БД: {stats['total_posted']} posted, {stats['total_rejected']} rejected")
+        logger.info(f"📊 БД: {stats['total_posted']} posted, {stats['total_rejected']} rejected")
         
-        raw_articles = await load_all_feeds(posted)
-        candidates = filter_articles(raw_articles, posted)
+        raw = await load_all_feeds()
+        # Разнообразие проверяется ВНУТРИ filter_and_dedupe
+        candidates = filter_and_dedupe(raw, posted)
         
         if not candidates:
             logger.info("📭 Нет подходящих новостей")
             return
 
-        for article in candidates[:20]:
-            # Финальная проверка на дубликат перед обработкой
-            is_dup, reason = posted.is_duplicate(article.link, article.title, article.summary)
-            if is_dup:
-                posted.log_rejected(article, f"FINAL_CHECK: {reason}")
-                logger.debug(f"  Пропуск (финальная проверка): {article.title[:40]}")
-                continue
-            
-            is_similar, reason = posted.is_too_similar_to_recent(article.title, article.summary)
-            if is_similar:
-                posted.log_rejected(article, f"FINAL_RECENT: {reason}")
-                logger.debug(f"  Пропуск (похоже на недавние): {article.title[:40]}")
+        for article in candidates[:25]:
+            # Финальная проверка (на случай race condition)
+            dup_result = posted.is_duplicate(article.link, article.title, article.summary)
+            if dup_result.is_duplicate:
+                posted.log_rejected(article, f"FINAL: {'; '.join(dup_result.reasons[:2])}")
                 continue
             
             summary = await generate_summary(article)
             if not summary:
-                posted.log_rejected(article, "LLM_GENERATION_FAILED")
+                posted.log_rejected(article, "GENERATION_FAILED")
                 continue
             
             if await post_article(article, summary, posted):
-                logger.info("\n🏁 Готово! Скрипт завершён.")
+                logger.info("\n🏁 Готово!")
                 break
             
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
         else:
-            logger.info("😔 Не удалось опубликовать ни одной статьи")
+            logger.info("😔 Не удалось опубликовать")
     
     finally:
         posted.close()
         await bot.session.close()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

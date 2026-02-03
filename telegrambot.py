@@ -57,7 +57,7 @@ class Config:
         self.same_topic_limit = 2
         
         # Groq
-        self.groq_max_retries = 3
+        self.groq_retries_per_model = 2
         self.groq_base_delay = 2.0
 
         missing = []
@@ -75,6 +75,14 @@ bot = Bot(token=config.telegram_token, default=DefaultBotProperties(parse_mode=P
 groq_client = Groq(api_key=config.groq_api_key)
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+# ====================== GROQ МОДЕЛИ (актуальные на февраль 2025) ======================
+GROQ_MODELS = [
+    "llama-3.3-70b-versatile",      # Основная
+    "llama-3.2-90b-text-preview",   # Запасная (мощная)
+    "mixtral-8x7b-32768",           # Стабильная
+    "gemma2-9b-it",                 # Быстрая (fallback)
+]
 
 # ====================== RSS ======================
 RSS_FEEDS = [
@@ -164,7 +172,6 @@ class Topic:
 
 # ====================== UTILITIES ======================
 def normalize_url(url: str) -> str:
-    """Агрессивная нормализация URL"""
     try:
         parsed = urlparse(url.lower().strip())
         domain = parsed.netloc.replace("www.", "")
@@ -196,25 +203,14 @@ def get_domain(url: str) -> str:
 
 
 def normalize_title(title: str) -> str:
-    """
-    Нормализация заголовка для сравнения:
-    - lowercase
-    - убираем пунктуацию
-    - нормализуем пробелы
-    - нормализуем числа в названиях (GPT-4 -> gpt4)
-    """
     t = title.lower().strip()
-    # Убираем пунктуацию кроме важных символов
     t = re.sub(r'[^\w\s]', ' ', t)
-    # Нормализуем пробелы
     t = re.sub(r'\s+', ' ', t).strip()
-    # Нормализуем версии: "gpt 4" -> "gpt4", "claude 3.5" -> "claude35"
     t = re.sub(r'(\w+)\s*[-.]?\s*(\d+(?:\.\d+)?)', lambda m: m.group(1) + m.group(2).replace('.', ''), t)
     return t
 
 
 def get_title_words(title: str) -> Set[str]:
-    """Извлекает значимые слова из заголовка"""
     words = re.findall(r'\b[a-zA-Z0-9]+\b', title.lower())
     stop_words = {
         'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
@@ -236,10 +232,6 @@ def get_title_words(title: str) -> Set[str]:
 
 
 def get_sorted_word_signature(title: str) -> str:
-    """
-    Создаёт сигнатуру из отсортированных значимых слов.
-    "OpenAI launches GPT-5" и "GPT-5 launched by OpenAI" -> одинаковая сигнатура
-    """
     words = get_title_words(title)
     return ' '.join(sorted(words))
 
@@ -257,7 +249,6 @@ def jaccard_similarity(set1: Set[str], set2: Set[str]) -> float:
 
 
 def ngram_similarity(str1: str, str2: str, n: int = 2) -> float:
-    """Bigram Jaccard similarity"""
     def get_ngrams(text: str, n: int) -> Set[str]:
         words = text.lower().split()
         if len(words) < n:
@@ -276,8 +267,6 @@ def ngram_similarity(str1: str, str2: str, n: int = 2) -> float:
 
 
 def extract_entities(text: str) -> Set[str]:
-    """Извлекает ключевые сущности с нормализацией"""
-    # Нормализуем текст
     text_normalized = normalize_title(text)
     found = set()
     
@@ -299,7 +288,6 @@ def get_content_hash(text: str) -> str:
 # ====================== DUPLICATE RESULT ======================
 @dataclass
 class DuplicateCheckResult:
-    """Результат проверки на дубликат с накоплением всех причин"""
     is_duplicate: bool
     reasons: List[str]
     max_similarity: float = 0.0
@@ -361,7 +349,6 @@ class PostedManager:
             )
         ''')
         
-        # Индексы
         indices = [
             ('idx_norm_url', 'norm_url'),
             ('idx_content_hash', 'content_hash'),
@@ -393,10 +380,6 @@ class PostedManager:
             pass
 
     def is_duplicate(self, url: str, title: str, summary: str = "") -> DuplicateCheckResult:
-        """
-        ПОЛНАЯ многоуровневая проверка на дубликат.
-        Проходит ВСЕ проверки и накапливает причины.
-        """
         result = DuplicateCheckResult(is_duplicate=False, reasons=[])
         
         with self._lock:
@@ -411,58 +394,58 @@ class PostedManager:
             content_hash = get_content_hash(f"{title} {summary}")
             entities = extract_entities(f"{title} {summary}")
             
-            # ===== 0. Ранее отклонённые =====
+            # 0. Ранее отклонённые
             if self._was_rejected(norm_url):
                 result.add_reason("PREVIOUSLY_REJECTED")
                 return result
             
-            # ===== 1. Точное совпадение URL =====
+            # 1. Точное совпадение URL
             cursor.execute('SELECT title FROM posted_articles WHERE norm_url = ?', (norm_url,))
             row = cursor.fetchone()
             if row:
-                result.add_reason(f"URL_EXACT: {norm_url[:50]}", 1.0, row[0])
-                return result  # URL — железный дубликат
+                result.add_reason(f"URL_EXACT", 1.0, row[0])
+                return result
             
-            # ===== 2. Точное совпадение хеша контента =====
+            # 2. Точное совпадение хеша
             if content_hash:
                 cursor.execute('SELECT title FROM posted_articles WHERE content_hash = ?', (content_hash,))
                 row = cursor.fetchone()
                 if row:
-                    result.add_reason(f"CONTENT_HASH_EXACT", 1.0, row[0])
+                    result.add_reason(f"CONTENT_HASH", 1.0, row[0])
                     return result
             
-            # ===== 3. Точное совпадение нормализованного заголовка =====
+            # 3. Точное совпадение нормализованного заголовка
             cursor.execute('SELECT title FROM posted_articles WHERE title_normalized = ?', (title_normalized,))
             row = cursor.fetchone()
             if row:
-                result.add_reason(f"TITLE_EXACT_NORMALIZED", 1.0, row[0])
+                result.add_reason(f"TITLE_EXACT", 1.0, row[0])
                 return result
             
-            # ===== 4. Совпадение сигнатуры слов (ловит перестановки) =====
+            # 4. Совпадение сигнатуры слов
             cursor.execute('SELECT title FROM posted_articles WHERE title_word_signature = ?', (word_signature,))
             row = cursor.fetchone()
             if row:
-                result.add_reason(f"WORD_SIGNATURE_MATCH", 0.95, row[0])
+                result.add_reason(f"WORD_SIGNATURE", 0.95, row[0])
                 return result
             
-            # ===== 5. Проверка всех заголовков на похожесть =====
+            # 5. Проверка похожести со всеми записями
             cursor.execute('SELECT id, title, title_normalized, title_words, entities, domain FROM posted_articles')
             all_posts = cursor.fetchall()
             
             for row in all_posts:
                 existing_id, existing_title, existing_normalized, existing_words_json, existing_entities_json, existing_domain = row
                 
-                # 5a. SequenceMatcher на нормализованных заголовках
+                # 5a. SequenceMatcher
                 seq_sim = calculate_similarity(title_normalized, existing_normalized)
                 if seq_sim > config.title_similarity_threshold:
-                    result.add_reason(f"TITLE_SEQ_SIM ({seq_sim:.0%})", seq_sim, existing_title)
+                    result.add_reason(f"TITLE_SIM ({seq_sim:.0%})", seq_sim, existing_title)
                 
-                # 5b. N-gram similarity
+                # 5b. N-gram
                 ngram_sim = ngram_similarity(title, existing_title)
                 if ngram_sim > config.ngram_similarity_threshold:
-                    result.add_reason(f"TITLE_NGRAM ({ngram_sim:.0%})", ngram_sim, existing_title)
+                    result.add_reason(f"NGRAM ({ngram_sim:.0%})", ngram_sim, existing_title)
                 
-                # 5c. Jaccard similarity по словам
+                # 5c. Jaccard
                 if existing_words_json:
                     try:
                         existing_words = set(json.loads(existing_words_json))
@@ -472,7 +455,7 @@ class PostedManager:
                     except:
                         pass
                 
-                # 5d. Пересечение сущностей
+                # 5d. Entities
                 if entities and existing_entities_json:
                     try:
                         existing_entities = set(json.loads(existing_entities_json))
@@ -482,20 +465,19 @@ class PostedManager:
                             overlap = len(common) / min_size if min_size > 0 else 0
                             
                             if len(common) >= 2 and overlap >= config.entity_overlap_threshold:
-                                result.add_reason(f"ENTITY_OVERLAP ({len(common)}: {common})", overlap, existing_title)
+                                result.add_reason(f"ENTITY ({len(common)})", overlap, existing_title)
                     except:
                         pass
                 
-                # 5e. Тот же домен + похожий заголовок (строже)
+                # 5e. Same domain
                 if domain == existing_domain:
-                    same_domain_sim = calculate_similarity(title_normalized, existing_normalized)
-                    if same_domain_sim > config.same_domain_similarity:
-                        result.add_reason(f"SAME_DOMAIN ({same_domain_sim:.0%})", same_domain_sim, existing_title)
+                    same_sim = calculate_similarity(title_normalized, existing_normalized)
+                    if same_sim > config.same_domain_similarity:
+                        result.add_reason(f"SAME_DOMAIN ({same_sim:.0%})", same_sim, existing_title)
             
             return result
 
     def check_diversity(self, topic: str) -> Tuple[bool, str]:
-        """Проверяет разнообразие тем"""
         with self._lock:
             cursor = self._get_conn().cursor()
             cursor.execute(
@@ -517,7 +499,6 @@ class PostedManager:
             return True, ""
 
     def add(self, article: Article, topic: str = Topic.GENERAL):
-        """Добавляет статью в базу"""
         with self._lock:
             conn = self._get_conn()
             cursor = conn.cursor()
@@ -544,10 +525,9 @@ class PostedManager:
                 conn.commit()
                 logger.info(f"💾 Сохранено: {article.title[:50]}...")
             except sqlite3.IntegrityError:
-                logger.warning(f"⚠️ Уже существует: {article.title[:40]}")
+                logger.warning(f"⚠️ Уже есть: {article.title[:40]}")
 
     def log_rejected(self, article: Article, reason: str):
-        """Логирует отклонённую статью"""
         norm_url = normalize_url(article.link)
         self._add_rejected(norm_url, article.title, reason)
         logger.info(f"🚫 [{reason}]: {article.title[:50]}")
@@ -650,58 +630,41 @@ def is_relevant(article: Article) -> bool:
 
 
 def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Article]:
-    """
-    Фильтрация с ПОЛНОЙ дедупликацией:
-    1. Проверка релевантности
-    2. Дедупликация внутри текущей загрузки
-    3. Дедупликация по БД
-    4. Проверка разнообразия тем
-    """
     logger.info("🔍 Фильтрация...")
     
     candidates = []
-    
-    # Дедупликация внутри текущей загрузки
     seen_normalized_titles: Set[str] = set()
     seen_word_signatures: Set[str] = set()
     seen_content_hashes: Set[str] = set()
     
     for article in articles:
-        # 1. Релевантность
         if not is_relevant(article):
             continue
         
-        # 2. Дедупликация внутри batch
         title_normalized = normalize_title(article.title)
         if title_normalized in seen_normalized_titles:
-            logger.debug(f"  Пропуск (batch title): {article.title[:40]}")
             continue
         
         word_sig = get_sorted_word_signature(article.title)
         if word_sig in seen_word_signatures:
-            logger.debug(f"  Пропуск (batch sig): {article.title[:40]}")
             continue
         
         content_hash = get_content_hash(f"{article.title} {article.summary}")
         if content_hash in seen_content_hashes:
-            logger.debug(f"  Пропуск (batch hash): {article.title[:40]}")
             continue
         
-        # 3. Проверка в БД
         dup_result = posted.is_duplicate(article.link, article.title, article.summary)
         if dup_result.is_duplicate:
-            reason = "; ".join(dup_result.reasons[:3])  # Первые 3 причины
+            reason = "; ".join(dup_result.reasons[:3])
             posted.log_rejected(article, reason)
             continue
         
-        # 4. Проверка разнообразия (ДО генерации!)
         topic = Topic.detect(f"{article.title} {article.summary}")
         div_ok, div_reason = posted.check_diversity(topic)
         if not div_ok:
             posted.log_rejected(article, div_reason)
             continue
         
-        # Добавляем в seen
         seen_normalized_titles.add(title_normalized)
         seen_word_signatures.add(word_sig)
         if content_hash:
@@ -709,7 +672,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         
         candidates.append(article)
     
-    # Сортировка
     def score(art: Article) -> float:
         entities = extract_entities(f"{art.title} {art.summary}")
         age = (datetime.now(timezone.utc) - art.published).total_seconds() / 3600
@@ -721,8 +683,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
 
 # ====================== GENERATION ======================
-GROQ_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-70b-versatile"]
-
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     
@@ -748,54 +708,66 @@ async def generate_summary(article: Article) -> Optional[str]:
 
 ПОСТ:"""
 
-    for attempt in range(config.groq_max_retries):
-        try:
-            await asyncio.sleep(1)
-            
-            resp = await asyncio.to_thread(
-                groq_client.chat.completions.create,
-                model=random.choice(GROQ_MODELS),
-                temperature=0.7,
-                max_tokens=1000,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            text = resp.choices[0].message.content.strip()
+    # Пробуем каждую модель по очереди
+    for model in GROQ_MODELS:
+        for attempt in range(config.groq_retries_per_model):
+            try:
+                await asyncio.sleep(1)
+                
+                resp = await asyncio.to_thread(
+                    groq_client.chat.completions.create,
+                    model=model,
+                    temperature=0.7,
+                    max_tokens=1000,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                text = resp.choices[0].message.content.strip()
 
-            if "SKIP" in text.upper()[:10]:
-                logger.info("  ⏭️ SKIP")
-                return None
+                if "SKIP" in text.upper()[:10]:
+                    logger.info("  ⏭️ SKIP")
+                    return None
 
-            if len(text) < config.min_post_length:
-                continue
+                if len(text) < config.min_post_length:
+                    logger.warning(f"  ⚠️ Короткий ({len(text)}), повтор...")
+                    continue
 
-            water = ["стоит отметить", "важно понимать", "интересно, что", "давайте разберёмся"]
-            if any(w in text.lower() for w in water):
-                continue
+                water = ["стоит отметить", "важно понимать", "интересно, что", "давайте разберёмся"]
+                if any(w in text.lower() for w in water):
+                    logger.warning("  ⚠️ Вода, повтор...")
+                    continue
 
-            topic = Topic.detect(f"{article.title} {article.summary}")
-            hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
-            
-            cta = "\n\n🔥 — огонь  |  🗿 — мимо  |  ⚡ — интересно"
-            source_link = f'\n\n🔗 <a href="{article.link}">Источник</a>'
-            
-            final = f"{text}{cta}\n\n{hashtags}{source_link}"
-
-            if len(final) > config.caption_limit:
-                text = text[:config.caption_limit - 150]
-                for p in ['. ', '! ', '? ']:
-                    idx = text.rfind(p)
-                    if idx > len(text) * 0.5:
-                        text = text[:idx+1]
-                        break
+                topic = Topic.detect(f"{article.title} {article.summary}")
+                hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
+                
+                cta = "\n\n🔥 — огонь  |  🗿 — мимо  |  ⚡ — интересно"
+                source_link = f'\n\n🔗 <a href="{article.link}">Источник</a>'
+                
                 final = f"{text}{cta}\n\n{hashtags}{source_link}"
 
-            logger.info(f"  ✅ Готово: {len(text)} симв.")
-            return final
-            
-        except Exception as e:
-            logger.error(f"  ❌ Ошибка ({attempt+1}): {e}")
-            await asyncio.sleep(config.groq_base_delay * (2 ** attempt))
+                if len(final) > config.caption_limit:
+                    text = text[:config.caption_limit - 150]
+                    for p in ['. ', '! ', '? ']:
+                        idx = text.rfind(p)
+                        if idx > len(text) * 0.5:
+                            text = text[:idx+1]
+                            break
+                    final = f"{text}{cta}\n\n{hashtags}{source_link}"
 
+                logger.info(f"  ✅ Готово [{model}]: {len(text)} симв.")
+                return final
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                
+                # Если модель устарела — переходим к следующей
+                if "decommissioned" in error_str or "deprecated" in error_str or "not found" in error_str:
+                    logger.warning(f"  ⚠️ Модель {model} недоступна, пробую следующую...")
+                    break
+                
+                logger.error(f"  ❌ {model} ошибка ({attempt+1}): {e}")
+                await asyncio.sleep(config.groq_base_delay * (2 ** attempt))
+    
+    logger.error("  ❌ Все модели не сработали")
     return None
 
 
@@ -847,7 +819,7 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 # ====================== MAIN ======================
 async def main():
     logger.info("=" * 50)
-    logger.info("🚀 AI-POSTER v5.0 (Полная дедупликация)")
+    logger.info("🚀 AI-POSTER v5.1")
     logger.info("=" * 50)
     
     posted = PostedManager(config.db_file)
@@ -858,7 +830,6 @@ async def main():
         logger.info(f"📊 БД: {stats['total_posted']} posted, {stats['total_rejected']} rejected")
         
         raw = await load_all_feeds()
-        # Разнообразие проверяется ВНУТРИ filter_and_dedupe
         candidates = filter_and_dedupe(raw, posted)
         
         if not candidates:
@@ -866,7 +837,6 @@ async def main():
             return
 
         for article in candidates[:25]:
-            # Финальная проверка (на случай race condition)
             dup_result = posted.is_duplicate(article.link, article.title, article.summary)
             if dup_result.is_duplicate:
                 posted.log_rejected(article, f"FINAL: {'; '.join(dup_result.reasons[:2])}")
@@ -892,6 +862,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

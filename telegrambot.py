@@ -49,7 +49,8 @@ class Config:
         self.jaccard_threshold = 0.50
         self.same_domain_similarity = 0.40
         
-        self.min_post_length = 500
+        # Длина поста (УВЕЛИЧЕНО)
+        self.min_post_length = 600  # Было 500
         self.max_article_age_hours = 48
         
         # Разнообразие
@@ -76,13 +77,21 @@ groq_client = Groq(api_key=config.groq_api_key)
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
-# ====================== GROQ МОДЕЛИ (актуальные на февраль 2025) ======================
+# ====================== GROQ МОДЕЛИ (актуальные) ======================
 GROQ_MODELS = [
-    "llama-3.3-70b-versatile",      # Основная
-    "llama-3.2-90b-text-preview",   # Запасная (мощная)
-    "mixtral-8x7b-32768",           # Стабильная
-    "gemma2-9b-it",                 # Быстрая (fallback)
+    "llama-3.3-70b-versatile",  # Основная
+    "mixtral-8x7b-32768",       # Стабильная
+    "gemma2-9b-it",             # Быстрая (fallback)
 ]
+
+# ====================== СТИЛИ ИЗОБРАЖЕНИЙ ======================
+IMAGE_STYLES = {
+    "llm": "modern AI brain visualization, neural network connections, glowing blue and purple gradient, digital consciousness, futuristic",
+    "image_gen": "creative digital art studio, colorful palette, artistic AI creation, vibrant neon colors, abstract",
+    "robotics": "sleek humanoid robot, high-tech laboratory, metallic chrome surfaces, dramatic lighting, futuristic factory",
+    "hardware": "advanced computer chips, circuit boards closeup, neon green lights, technological precision, macro photography",
+    "general": "abstract technology concept, digital innovation, modern geometric shapes, blue purple gradient, clean minimal"
+}
 
 # ====================== RSS ======================
 RSS_FEEDS = [
@@ -686,56 +695,70 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     
-    prompt = f"""Превратите AI-новость в пост для Telegram.
+    prompt = f"""Превратите AI-новость в пост для Telegram-канала.
 
 НОВОСТЬ:
 {article.title}
-{article.summary[:700]}
+{article.summary[:800]}
 
-СТРУКТУРА:
-1. Заголовок (5-8 слов, с эмодзи)
-2. Суть (1 предложение)  
-3. Почему важно (2-3 предложения)
-4. Вывод/вопрос
+СТРУКТУРА ПОСТА:
+1. 🔥 Заголовок (5-8 слов, цепляющий, с эмодзи)
+2. Суть — что произошло (2-3 предложения, факты)
+3. Почему важно (2-3 предложения, контекст и последствия)
+4. Вывод или провокационный вопрос
 
-ТРЕБОВАНИЯ:
-- 500-800 символов
-- Без воды ("стоит отметить", "интересно")
-- Только факты
-- Русский язык
+ЖЁСТКИЕ ТРЕБОВАНИЯ:
+✅ Длина: СТРОГО 600-900 символов (меньше 600 = отклонено!)
+✅ Только факты и конкретика
+✅ Русский язык
+✅ Без воды и клише
 
-Если мусор — ответь: SKIP
+ЗАПРЕЩЕНО:
+❌ "стоит отметить", "интересно, что", "важно понимать"
+❌ "давайте разберёмся", "как мы знаем"
+❌ Общие фразы без конкретики
+
+Если новость — мусор или реклама, ответь: SKIP
 
 ПОСТ:"""
 
     # Пробуем каждую модель по очереди
-    for model in GROQ_MODELS:
+    for model_idx, model in enumerate(GROQ_MODELS):
         for attempt in range(config.groq_retries_per_model):
             try:
                 await asyncio.sleep(1)
+                
+                logger.info(f"  🤖 Модель: {model} (попытка {attempt + 1})")
                 
                 resp = await asyncio.to_thread(
                     groq_client.chat.completions.create,
                     model=model,
                     temperature=0.7,
-                    max_tokens=1000,
+                    max_tokens=1200,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 text = resp.choices[0].message.content.strip()
 
+                # Проверка на SKIP
                 if "SKIP" in text.upper()[:10]:
                     logger.info("  ⏭️ SKIP")
                     return None
 
+                # Проверка длины (СТРОГО 600+)
                 if len(text) < config.min_post_length:
-                    logger.warning(f"  ⚠️ Короткий ({len(text)}), повтор...")
+                    logger.warning(f"  ⚠️ Короткий текст ({len(text)} < {config.min_post_length}), пробую другую модель...")
+                    break  # Переходим к следующей модели
+
+                # Проверка на воду
+                water_phrases = [
+                    "стоит отметить", "важно понимать", "интересно, что", 
+                    "давайте разберёмся", "как мы знаем", "не секрет"
+                ]
+                if any(w in text.lower() for w in water_phrases):
+                    logger.warning("  ⚠️ Обнаружена вода, повтор...")
                     continue
 
-                water = ["стоит отметить", "важно понимать", "интересно, что", "давайте разберёмся"]
-                if any(w in text.lower() for w in water):
-                    logger.warning("  ⚠️ Вода, повтор...")
-                    continue
-
+                # Формируем финальный пост
                 topic = Topic.detect(f"{article.title} {article.summary}")
                 hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
                 
@@ -744,6 +767,7 @@ async def generate_summary(article: Article) -> Optional[str]:
                 
                 final = f"{text}{cta}\n\n{hashtags}{source_link}"
 
+                # Обрезка если превышает лимит
                 if len(final) > config.caption_limit:
                     text = text[:config.caption_limit - 150]
                     for p in ['. ', '! ', '? ']:
@@ -753,14 +777,14 @@ async def generate_summary(article: Article) -> Optional[str]:
                             break
                     final = f"{text}{cta}\n\n{hashtags}{source_link}"
 
-                logger.info(f"  ✅ Готово [{model}]: {len(text)} симв.")
+                logger.info(f"  ✅ Готово [{model}]: {len(text)} символов")
                 return final
                 
             except Exception as e:
                 error_str = str(e).lower()
                 
                 # Если модель устарела — переходим к следующей
-                if "decommissioned" in error_str or "deprecated" in error_str or "not found" in error_str:
+                if any(err in error_str for err in ["decommissioned", "deprecated", "not found", "does not exist"]):
                     logger.warning(f"  ⚠️ Модель {model} недоступна, пробую следующую...")
                     break
                 
@@ -771,38 +795,126 @@ async def generate_summary(article: Article) -> Optional[str]:
     return None
 
 
-# ====================== IMAGE ======================
-async def generate_image(title: str) -> Optional[str]:
-    clean = re.sub(r'[^\w\s]', '', title)[:40]
-    prompt = f"tech illustration {clean} neon blue purple dark 4k"
-    url = f"https://image.pollinations.ai/prompt/{quote(prompt)}?width=1024&height=1024&nologo=true&seed={random.randint(1,99999)}"
+# ====================== IMAGE GENERATION ======================
+async def generate_image(title: str, topic: str = None) -> Optional[str]:
+    """
+    Генерация изображения с подробным логированием
+    """
+    logger.info(f"  🎨 Начинаю генерацию изображения...")
     
-    try:
-        async with aiohttp.ClientSession() as sess:
-            async with sess.get(url, timeout=aiohttp.ClientTimeout(total=40)) as resp:
-                if resp.status == 200:
+    # Проверка и получение стиля
+    if topic is None or topic not in IMAGE_STYLES:
+        topic = "general"
+        logger.info(f"  📋 Тема не указана, использую: {topic}")
+    else:
+        logger.info(f"  📋 Тема: {topic}")
+    
+    style = IMAGE_STYLES.get(topic, IMAGE_STYLES["general"])
+    
+    # Очистка заголовка для промпта
+    clean_title = re.sub(r'[^\w\s]', '', title)[:40].strip()
+    if not clean_title:
+        clean_title = "artificial intelligence"
+    
+    # Формируем промпт
+    prompt = f"{style}, {clean_title}, high quality, 4k, sharp focus, professional"
+    seed = random.randint(1, 99999)
+    
+    url = f"https://image.pollinations.ai/prompt/{quote(prompt)}?width=1024&height=1024&nologo=true&seed={seed}"
+    
+    logger.info(f"  🔗 URL: {url[:80]}...")
+    logger.info(f"  🎯 Промпт: {prompt[:60]}...")
+    
+    # 3 попытки с задержкой
+    for attempt in range(3):
+        try:
+            logger.info(f"  📡 Попытка {attempt + 1}/3...")
+            
+            timeout = aiohttp.ClientTimeout(total=60, connect=15)
+            
+            async with aiohttp.ClientSession() as sess:
+                async with sess.get(url, timeout=timeout, headers=HEADERS) as resp:
+                    logger.info(f"  📊 HTTP статус: {resp.status}")
+                    logger.info(f"  📊 Content-Type: {resp.headers.get('Content-Type', 'unknown')}")
+                    
+                    if resp.status == 429:
+                        logger.warning(f"  ⚠️ Rate limit! Жду 10 секунд...")
+                        await asyncio.sleep(10)
+                        continue
+                    
+                    if resp.status != 200:
+                        logger.warning(f"  ⚠️ HTTP {resp.status}, пробую снова...")
+                        await asyncio.sleep(3)
+                        continue
+                    
                     data = await resp.read()
-                    if len(data) > 10000:
-                        fname = f"img_{random.randint(1000,9999)}.jpg"
-                        with open(fname, "wb") as f:
-                            f.write(data)
+                    logger.info(f"  📦 Получено: {len(data)} байт ({len(data)//1024} KB)")
+                    
+                    # Проверка минимального размера
+                    if len(data) < 5000:
+                        logger.warning(f"  ⚠️ Файл слишком маленький ({len(data)} байт), пробую снова...")
+                        await asyncio.sleep(3)
+                        seed += 1  # Меняем seed
+                        url = f"https://image.pollinations.ai/prompt/{quote(prompt)}?width=1024&height=1024&nologo=true&seed={seed}"
+                        continue
+                    
+                    # Проверка что это изображение (magic bytes)
+                    is_jpeg = data[:3] == b'\xff\xd8\xff'
+                    is_png = data[:8] == b'\x89PNG\r\n\x1a\n'
+                    
+                    if not is_jpeg and not is_png:
+                        logger.warning(f"  ⚠️ Неизвестный формат файла, первые байты: {data[:20]}")
+                        await asyncio.sleep(3)
+                        continue
+                    
+                    img_format = "JPEG" if is_jpeg else "PNG"
+                    extension = "jpg" if is_jpeg else "png"
+                    
+                    # Сохранение файла
+                    fname = f"img_{random.randint(1000, 9999)}.{extension}"
+                    with open(fname, "wb") as f:
+                        f.write(data)
+                    
+                    # Проверка что файл создан
+                    if os.path.exists(fname):
+                        file_size = os.path.getsize(fname)
+                        logger.info(f"  ✅ Сохранено: {fname} ({img_format}, {file_size//1024} KB)")
                         return fname
-    except:
-        pass
+                    else:
+                        logger.error(f"  ❌ Файл не создан: {fname}")
+                        continue
+                        
+        except asyncio.TimeoutError:
+            logger.warning(f"  ⏱️ Таймаут (попытка {attempt + 1}/3)")
+            await asyncio.sleep(3)
+        except aiohttp.ClientError as e:
+            logger.warning(f"  🌐 Сетевая ошибка: {e}")
+            await asyncio.sleep(3)
+        except Exception as e:
+            logger.error(f"  ❌ Ошибка: {type(e).__name__}: {e}")
+            await asyncio.sleep(3)
+    
+    logger.warning("  ❌ Не удалось сгенерировать картинку после 3 попыток")
     return None
 
 
 # ====================== POSTING ======================
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
+    """Публикация статьи в Telegram"""
     topic = Topic.detect(f"{article.title} {article.summary}")
     
-    img = await generate_image(article.title)
+    # Генерация изображения
+    logger.info(f"  🎨 Начинаю генерацию изображения...")
+    img = await generate_image(article.title, topic)
     
     try:
         if img and os.path.exists(img):
+            logger.info(f"  📤 Отправка с картинкой: {img}")
             await bot.send_photo(config.channel_id, FSInputFile(img), caption=text)
             os.remove(img)
+            logger.info(f"  🗑️ Картинка удалена: {img}")
         else:
+            logger.info(f"  📤 Отправка без картинки")
             await bot.send_message(config.channel_id, text, disable_web_page_preview=False)
         
         posted.add(article, topic)
@@ -810,16 +922,19 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
         return True
         
     except Exception as e:
-        logger.error(f"❌ Telegram: {e}")
+        logger.error(f"❌ Telegram ошибка: {e}")
         if img and os.path.exists(img):
-            os.remove(img)
+            try:
+                os.remove(img)
+            except:
+                pass
         return False
 
 
 # ====================== MAIN ======================
 async def main():
     logger.info("=" * 50)
-    logger.info("🚀 AI-POSTER v5.1")
+    logger.info("🚀 AI-POSTER v5.2")
     logger.info("=" * 50)
     
     posted = PostedManager(config.db_file)
@@ -837,16 +952,19 @@ async def main():
             return
 
         for article in candidates[:25]:
+            # Финальная проверка на дубликат
             dup_result = posted.is_duplicate(article.link, article.title, article.summary)
             if dup_result.is_duplicate:
                 posted.log_rejected(article, f"FINAL: {'; '.join(dup_result.reasons[:2])}")
                 continue
             
+            # Генерация текста
             summary = await generate_summary(article)
             if not summary:
                 posted.log_rejected(article, "GENERATION_FAILED")
                 continue
             
+            # Публикация
             if await post_article(article, summary, posted):
                 logger.info("\n🏁 Готово!")
                 break
@@ -862,6 +980,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

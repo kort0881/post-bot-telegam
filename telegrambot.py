@@ -144,6 +144,7 @@ EXCLUDE_KEYWORDS = [
     "controversy", "scandal", "accused", "allegations",
     "harassment", "discrimination", "lawsuit filed",
     "fired", "resigned", "stepping down",
+                "epstein", "metoo", "sexual assault", "abuse", "victim", "files defeated",
 ]
 
 BAD_PHRASES = ["sponsored", "partner content", "advertisement", "black friday", "deal alert"]
@@ -993,6 +994,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

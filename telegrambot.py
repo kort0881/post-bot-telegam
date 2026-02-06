@@ -147,6 +147,7 @@ EXCLUDE_KEYWORDS = [
                 "epstein", "metoo", "sexual assault", "abuse", "victim", "files defeated",
                 "gaming", "game", "gamer", "roblox", "baldur's gate", "tv show", "hbo", "entertainment", "celebrity",
                 "sport", "olympics", "team usa", "player", "athlete", "championship",
+    ]
 BAD_PHRASES = ["sponsored", "partner content", "advertisement", "black friday", "deal alert"]
 
 
@@ -994,6 +995,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

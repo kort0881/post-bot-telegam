@@ -147,17 +147,6 @@ EXCLUDE_KEYWORDS = [
                 "epstein", "metoo", "sexual assault", "abuse", "victim", "files defeated",
                 "gaming", "game", "gamer", "roblox", "baldur's gate", "tv show", "hbo", "entertainment", "celebrity",
                 "sport", "olympics", "team usa", "player", "athlete", "championship",
-
-        # =================== ПРИОРИТЕТНЫЕ КЛЮЧЕВЫЕ СЛОВА (Высокий приоритет) ====================
-        HIGH_PRIORITY_KEYWORDS = [
-            # VPN and Proxy
-        "vpn", "proxy", "tor", "torrent", "onion", "v2ray", "vless", "shadowsocks", "wireguard",
-        # Security & Freedom
-        "cybersecurity", "encryption", "privacy", "anonymity", "security breach", "hack", "exploit",
-        "censorship", "internet freedom", "surveillance", "firewall", "blocking",
-    ]
-]
-
 BAD_PHRASES = ["sponsored", "partner content", "advertisement", "black friday", "deal alert"]
 
 
@@ -1005,6 +994,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

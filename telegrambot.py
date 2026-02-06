@@ -144,6 +144,9 @@ EXCLUDE_KEYWORDS = [
     "controversy", "scandal", "accused", "allegations",
     "harassment", "discrimination", "lawsuit filed",
     "fired", "resigned", "stepping down",
+                "epstein", "metoo", "sexual assault", "abuse", "victim", "files defeated",
+                "gaming", "game", "gamer", "roblox", "baldur's gate", "tv show", "hbo", "entertainment", "celebrity",
+                "sport", "olympics", "team usa", "player", "athlete", "championship",
 
         # =================== ПРИОРИТЕТНЫЕ КЛЮЧЕВЫЕ СЛОВА (Высокий приоритет) ====================
         HIGH_PRIORITY_KEYWORDS = [
@@ -1002,6 +1005,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

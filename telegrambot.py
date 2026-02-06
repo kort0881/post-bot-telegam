@@ -49,7 +49,7 @@ class Config:
         self.same_domain_similarity = 0.40
         
         # Длина поста
-        self.min_post_length = 700
+        self.min_post_length = 450
         self.max_article_age_hours = 48
         
         # Разнообразие
@@ -81,8 +81,7 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 # ====================== GROQ МОДЕЛИ ======================
 GROQ_MODELS = [
     "llama-3.3-70b-versatile",
-    "mixtral-8x7b-32768",
-    "gemma2-9b-it",
+        "llama-3.1-8b-instant",
 ]
 
 
@@ -994,6 +993,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

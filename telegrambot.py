@@ -144,7 +144,15 @@ EXCLUDE_KEYWORDS = [
     "controversy", "scandal", "accused", "allegations",
     "harassment", "discrimination", "lawsuit filed",
     "fired", "resigned", "stepping down",
-                "epstein", "metoo", "sexual assault", "abuse", "victim", "files defeated",
+
+        # =================== ПРИОРИТЕТНЫЕ КЛЮЧЕВЫЕ СЛОВА (Высокий приоритет) ====================
+        HIGH_PRIORITY_KEYWORDS = [
+            # VPN and Proxy
+        "vpn", "proxy", "tor", "torrent", "onion", "v2ray", "vless", "shadowsocks", "wireguard",
+        # Security & Freedom
+        "cybersecurity", "encryption", "privacy", "anonymity", "security breach", "hack", "exploit",
+        "censorship", "internet freedom", "surveillance", "firewall", "blocking",
+    ]
 ]
 
 BAD_PHRASES = ["sponsored", "partner content", "advertisement", "black friday", "deal alert"]
@@ -994,6 +1002,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

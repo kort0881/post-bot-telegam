@@ -97,6 +97,16 @@ RSS_FEEDS = [
     ("https://openai.com/blog/rss/", "OpenAI Blog"),
     ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
     ("https://www.marktechpost.com/feed/", "MarkTechPost"),
+        ("https://feeds.bloomberg.com/markets/news.rss", "Bloomberg AI"),
+        ("https://feeds.theinformation.com/ai-and-data", "The Information AI"),
+        ("https://www.datacouncil.ai/feed", "Data Council"),
+        ("https://arxiv.org/rss/cs.AI", "arXiv AI"),
+        ("https://huggingface.co/feed.xml", "Hugging Face Hub"),
+        ("https://github.blog/changelog/feed.xml", "GitHub Blog"),
+        ("https://redirect.medium.com/feed/tag/artificial-intelligence", "Medium AI"),
+        ("https://www.anthropic.com/feed.xml", "Anthropic Blog"),
+        ("https://www.deepmind.com/feed.xml", "DeepMind Blog"),
+        ("https://www.ibm.com/cloud/blog/ai/feed", "IBM AI"),
 ]
 
 
@@ -995,6 +1005,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

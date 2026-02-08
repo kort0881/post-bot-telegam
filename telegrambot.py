@@ -101,6 +101,7 @@ RSS_FEEDS = [
     ("https://openai.com/blog/rss/", "OpenAI Blog"),
     ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
     ("https://www.marktechpost.com/feed/", "MarkTechPost"),
+    ("https://kod.ru/feed/", "Kod.ru"),
 ]
 
 
@@ -1153,6 +1154,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

@@ -803,7 +803,50 @@ class PostedManager:
                 logger.error(f"❌ Ошибка закрытия: {e}")
             finally:
                 self._conn = None
-
+                
+# ====================== AUTO-CLEANUP ECONOMICS ======================
+def auto_cleanup_economics(posted: PostedManager):
+    """Автоматически удаляет экономические посты при запуске"""
+    logger.info("🧹 Проверка экономических постов...")
+    
+    econ_terms = [
+        "inflation", "federal reserve", "fed rate", "recession", "fed",
+        "gdp", "unemployment", "stock market", "bonds", "treasury",
+        "инфляция", "фрс", "бостик", "уорша", "процентная ставка",
+        "центральный банк", "валюта", "экономический рост"
+    ]
+    
+    with posted._lock:
+        conn = posted._get_conn()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT id, title, summary FROM posted_articles")
+        all_posts = cursor.fetchall()
+        
+        deleted = 0
+        for post_id, title, summary in all_posts:
+            text = f"{title} {summary}".lower()
+            econ_count = sum(1 for term in econ_terms if term in text)
+            
+            # Если 2+ экономических термина
+            if econ_count >= 2:
+                # Проверяем AI-контекст
+                ai_keywords = ["ai", "artificial intelligence", "machine learning", 
+                              "llm", "gpt", "claude", "gemini", "нейро", "ии"]
+                has_ai = any(kw in text for kw in ai_keywords)
+                
+                # Если НЕТ AI — удаляем
+                if not has_ai:
+                    cursor.execute("DELETE FROM posted_articles WHERE id = ?", (post_id,))
+                    deleted += 1
+                    logger.debug(f"  🗑️ ID={post_id}: {title[:50]}")
+        
+        conn.commit()
+        
+        if deleted > 0:
+            logger.info(f"🗑️ Удалено {deleted} экономических постов")
+        else:
+            logger.info("✅ Экономических постов не найдено")
 
 # ====================== RSS LOADING ======================
 async def fetch_feed(url: str, source: str) -> List[Article]:
@@ -1019,9 +1062,10 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 
 
 # ====================== MAIN ======================
+# ====================== MAIN ======================
 async def main():
     logger.info("=" * 60)
-    logger.info("🚀 AI-POSTER v8.0 (12 Improvements)")
+    logger.info("🚀 AI-POSTER v8.0 (12 Improvements + Auto Economics Cleanup)")
     logger.info("=" * 60)
     
     posted = PostedManager(config.db_file)
@@ -1033,7 +1077,12 @@ async def main():
             logger.error("❌ Проблема с БД!")
             return
         
+        # Обычная очистка старых постов
         posted.cleanup(config.retention_days)
+        
+        # НОВОЕ: Автоочистка экономических постов
+        auto_cleanup_economics(posted)
+        
         stats = posted.get_stats()
         logger.info(f"📊 Статистика: {stats['total_posted']} posted, {stats['total_rejected']} rejected")
         
@@ -1076,6 +1125,29 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+```
+
+---
+
+## ✅ Что это даст:
+
+1. **При каждом запуске** бот автоматически проверит БД
+2. Найдёт все посты с 2+ экономическими терминами БЕЗ AI-контекста
+3. Удалит их из `posted_articles`
+4. Покажет в логе: `🗑️ Удалено X экономических постов`
+
+---
+
+## 🚀 После обновления:
+
+1. Сохраните изменения в `telegrambot.py` на GitHub
+2. Запустите бота снова
+3. В логе увидите что-то вроде:
+```
+🧹 Проверка экономических постов...
+🗑️ Удалено 1 экономических постов
+📊 Статистика: 19 posted, 49 rejected
+
 
 
 

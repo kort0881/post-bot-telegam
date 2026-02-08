@@ -1083,7 +1083,7 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 # ====================== MAIN ======================
 async def main():
     logger.info("=" * 60)
-    logger.info("🚀 AI-POSTER v9.0 (Fixed Filtering + Visible Logging)")
+    logger.info("🚀 AI-POSTER v9.1 (Clean Logging)")
     logger.info("=" * 60)
 
     posted = PostedManager(config.db_file)
@@ -1110,16 +1110,11 @@ async def main():
         # Загрузка
         raw = await load_all_feeds()
 
-        # ===== ДЕБАГ: показать все загруженные статьи =====
-        logger.info("=" * 50)
-        logger.info("📋 ВСЕ ЗАГРУЖЕННЫЕ СТАТЬИ:")
-        for i, art in enumerate(raw[:30]):  # Первые 30
-            ai_score = ai_relevance_score(f"{art.title} {art.summary}")
-            age_h = (datetime.now(timezone.utc) - art.published).total_seconds() / 3600
-            logger.info(f"  {i + 1}. [ai={ai_score}][{age_h:.0f}h][{art.source}] {art.title[:70]}")
-        if len(raw) > 30:
-            logger.info(f"  ... и ещё {len(raw) - 30} статей")
-        logger.info("=" * 50)
+        # Краткая сводка по источникам
+        sources_count = {}
+        for art in raw:
+            sources_count[art.source] = sources_count.get(art.source, 0) + 1
+        logger.info(f"📰 Источники: {sources_count}")
 
         # Фильтрация
         candidates = filter_and_dedupe(raw, posted)
@@ -1158,6 +1153,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

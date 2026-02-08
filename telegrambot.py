@@ -102,7 +102,6 @@ RSS_FEEDS = [
 
 
 # ====================== KEYWORDS ======================
-# СТРОГИЕ AI KEYWORDS (обязательно хотя бы 1)
 AI_KEYWORDS = [
     "ai", "artificial intelligence", "machine learning", "deep learning",
     "neural network", "llm", "large language model", "gpt", "chatgpt", "claude",
@@ -114,9 +113,7 @@ AI_KEYWORDS = [
     "reinforcement learning", "supervised learning", "unsupervised learning",
 ]
 
-# ПОЛНЫЙ СПИСОК ИСКЛЮЧЕНИЙ (расширенный)
 EXCLUDE_KEYWORDS = [
-    # ========== ЭКОНОМИКА И ФИНАНСЫ ==========
     "inflation", "interest rate", "federal reserve", "fed rate", "recession",
     "gdp", "unemployment", "jobs report", "economic growth", "tariff",
     "trade war", "stock market", "nasdaq", "dow jones", "s&p 500",
@@ -126,22 +123,14 @@ EXCLUDE_KEYWORDS = [
     "stock price", "ipo", "earnings call", "quarterly results", "dividend",
     "market cap", "wall street", "sec filing", "shareholders",
     "earnings report", "revenue growth", "profit margin", "valuation",
-    
-    # ========== РАЗВЛЕЧЕНИЯ ==========
     "ps5", "xbox", "nintendo", "game review", "netflix", "movie review",
     "box office", "trailer", "streaming", "gaming", "game", "gamer", 
     "roblox", "baldur's gate", "tv show", "hbo", "entertainment", "celebrity",
     "video game", "esports", "twitch", "youtube",
-    
-    # ========== КРИПТО ==========
     "bitcoin", "crypto", "blockchain", "nft", "ethereum", "cryptocurrency",
     "web3", "defi", "token", "mining",
-    
-    # ========== ПОЛИТИКА США ==========
     "election", "trump", "biden", "congress", "senate", "white house",
     "republican", "democrat", "supreme court", "governor", "campaign",
-    
-    # ========== МЕСТЕЧКОВЫЕ АМЕРИКАНСКИЕ ТЕМЫ ==========
     "fbi", "cia", "nsa", "dhs", "homeland security", "ice", "cbp",
     "federal government", "federal agency", "us government",
     "executive order", "state department", "pentagon", "tsa", "irs",
@@ -154,14 +143,10 @@ EXCLUDE_KEYWORDS = [
     "gun", "shooting", "police", "crime",
     "school", "university", "college", "student",
     "local news", "city council", "mayor",
-    
-    # ========== СКАНДАЛЫ И ДРАМА ==========
     "controversy", "scandal", "accused", "allegations",
     "harassment", "discrimination", "lawsuit filed",
     "fired", "resigned", "stepping down", "fired ceo",
     "epstein", "metoo", "sexual assault", "abuse", "victim",
-    
-    # ========== СПОРТ ==========
     "sport", "olympics", "team usa", "player", "athlete", "championship",
     "nfl", "nba", "soccer", "football",
 ]
@@ -174,19 +159,14 @@ BAD_PHRASES = [
 
 # ====================== KEY ENTITIES ======================
 KEY_ENTITIES = [
-    # AI компании
     "openai", "google", "meta", "microsoft", "anthropic", "nvidia", "apple",
     "amazon", "deepmind", "hugging face", "stability ai", "midjourney",
     "mistral", "cohere", "perplexity", "xai", "inflection",
     "baidu", "alibaba", "tencent", "yandex", "sber",
-    
-    # AI модели и продукты
     "gpt-4", "gpt-5", "gpt-4o", "chatgpt", "claude", "claude 3", "claude 3.5",
     "gemini", "gemini 2", "llama", "llama 3", "mistral", "mixtral",
     "copilot", "dall-e", "sora", "stable diffusion", "flux", "grok",
     "deepseek", "qwen", "o1", "o3", "gigachat", "yandexgpt",
-    
-    # Технологии
     "transformer", "diffusion", "multimodal", "reasoning", "fine-tuning",
     "rlhf", "rag", "vector database", "embedding", "inference",
     "agi", "asi", "ai safety", "alignment", "robotics", "humanoid",
@@ -269,7 +249,6 @@ def get_domain(url: str) -> str:
 
 @lru_cache(maxsize=1000)
 def normalize_title(title: str) -> str:
-    """Кэшированная нормализация заголовка"""
     t = title.lower().strip()
     t = re.sub(r'[^\w\s]', ' ', t)
     t = re.sub(r'\s+', ' ', t).strip()
@@ -279,7 +258,6 @@ def normalize_title(title: str) -> str:
 
 @lru_cache(maxsize=1000)
 def get_title_words(title: str) -> frozenset:
-    """Кэшированное извлечение слов (возвращаем frozenset для хэширования)"""
     words = re.findall(r'\b[a-zA-Z0-9]+\b', title.lower())
     stop_words = {
         'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
@@ -354,21 +332,14 @@ def get_content_hash(text: str) -> str:
     return hashlib.md5(normalized.encode()).hexdigest()
 
 
-# ====================== ФИЛЬТРЫ (ОПТИМИЗИРОВАННЫЕ) ======================
+# ====================== ФИЛЬТРЫ ======================
 
 def is_economics_news(text: str) -> bool:
-    """
-    УЛУЧШЕНИЕ 1: Детектит чистую экономику БЕЗ AI-контекста
-    УЛУЧШЕНИЕ 8: Логирование причин отсева
-    УЛУЧШЕНИЕ 12: Ранний выход при обнаружении AI-контекста
-    """
     text_lower = text.lower()
     
-    # Ранний выход: если есть AI — это не чистая экономика
     if any(kw in text_lower for kw in AI_KEYWORDS):
         return False
     
-    # Экономические термины
     econ_keywords = [
         "inflation", "interest rate", "federal reserve", "fed rate", "recession",
         "gdp", "unemployment", "jobs report", "economic growth", "tariff",
@@ -379,10 +350,8 @@ def is_economics_news(text: str) -> bool:
         "earnings", "revenue", "profit", "quarterly results",
     ]
     
-    # Считаем экономические термины
     econ_count = sum(1 for kw in econ_keywords if kw in text_lower)
     
-    # Если 2+ экономических термина БЕЗ AI — фильтруем
     if econ_count >= 2:
         logger.debug(f"  💵 PURE_ECONOMICS: {econ_count} терминов")
         return True
@@ -391,18 +360,12 @@ def is_economics_news(text: str) -> bool:
 
 
 def is_local_us_news(text: str) -> bool:
-    """
-    УЛУЧШЕНИЕ 3: Расширенная проверка федеральных органов США
-    УЛУЧШЕНИЕ 12: Ранний выход при глобальном контексте
-    """
     text_lower = text.lower()
     
-    # Ранний выход: если есть глобальный контекст — не локальная новость
     global_markers = ["global", "worldwide", "international", "launch", "release", "announce"]
     if any(marker in text_lower for marker in global_markers):
         return False
     
-    # УЛУЧШЕНИЕ 3: Федеральные органы США
     us_gov_keywords = [
         "fbi", "cia", "nsa", "dhs", "homeland security", "pentagon",
         "white house", "congress", "senate", "supreme court",
@@ -412,16 +375,13 @@ def is_local_us_news(text: str) -> bool:
         "irs", "fema", "usps", "democrats", "republicans",
     ]
     
-    # Проверка на госорганы
     for kw in us_gov_keywords:
         if kw in text_lower:
-            # Исключение: AI безопасность — глобальная тема
             if any(ai in text_lower for ai in ["ai safety", "ai regulation", "artificial intelligence"]):
                 continue
             logger.debug(f"  🇺🇸 US_GOV: {kw}")
             return True
     
-    # Американские штаты и города
     us_locations = [
         "california", "texas", "new york", "florida", "washington dc",
         "los angeles", "san francisco", "seattle", "boston", "chicago",
@@ -433,7 +393,6 @@ def is_local_us_news(text: str) -> bool:
         logger.debug(f"  🇺🇸 US_LOCATION: {us_location_count} мест")
         return True
     
-    # Американские суды
     us_legal = [
         "us court", "federal court", "district court", "appeals court",
         "antitrust lawsuit", "class action", "sec investigation",
@@ -449,42 +408,29 @@ def is_local_us_news(text: str) -> bool:
 
 
 def is_relevant(article: Article) -> bool:
-    """
-    УЛУЧШЕНИЕ 4: Обязательная проверка AI_KEYWORDS
-    УЛУЧШЕНИЕ 5: Двойная фильтрация экономики
-    УЛУЧШЕНИЕ 6: Оптимизированный порядок проверок
-    УЛУЧШЕНИЕ 7: Debug-логи
-    УЛУЧШЕНИЕ 12: Ранние выходы
-    """
     text = f"{article.title} {article.summary}".lower()
     
-    # 1. Быстрая проверка: возраст статьи (самая дешёвая)
     age_hours = (datetime.now(timezone.utc) - article.published).total_seconds() / 3600
     if age_hours > config.max_article_age_hours:
         logger.debug(f"  ⏰ TOO_OLD ({age_hours:.1f}h): {article.title[:40]}")
         return False
     
-    # 2. УЛУЧШЕНИЕ 4: ОБЯЗАТЕЛЬНАЯ проверка AI ключевых слов
     if not any(kw in text for kw in AI_KEYWORDS):
         logger.debug(f"  🚫 NO_AI: {article.title[:40]}")
         return False
     
-    # 3. Проверка на плохие фразы (рекламу)
     if any(bad in text for bad in BAD_PHRASES):
         logger.debug(f"  🚫 AD: {article.title[:40]}")
         return False
     
-    # 4. УЛУЧШЕНИЕ 2: Проверка на расширенные EXCLUDE_KEYWORDS
     if any(ex in text for ex in EXCLUDE_KEYWORDS):
         logger.debug(f"  🚫 EXCLUDE: {article.title[:40]}")
         return False
     
-    # 5. УЛУЧШЕНИЕ 5: Двойная проверка экономики
     if is_economics_news(text):
         logger.debug(f"  💵 ECON: {article.title[:40]}")
         return False
     
-    # 6. УЛУЧШЕНИЕ 3: Проверка на местечковые американские новости
     if is_local_us_news(text):
         logger.debug(f"  🇺🇸 LOCAL_US: {article.title[:40]}")
         return False
@@ -596,12 +542,11 @@ class PostedManager:
             norm_url = normalize_url(url)
             domain = get_domain(url)
             title_normalized = normalize_title(title)
-            title_words = set(get_title_words(title))  # Конвертируем frozenset в set
+            title_words = set(get_title_words(title))
             word_signature = get_sorted_word_signature(title)
             content_hash = get_content_hash(f"{title} {summary}")
             entities = extract_entities(f"{title} {summary}")
             
-            # УЛУЧШЕНИЕ 12: Ранние выходы при обнаружении дубликатов
             if self._was_rejected(norm_url):
                 result.add_reason("PREVIOUSLY_REJECTED")
                 return result
@@ -803,10 +748,10 @@ class PostedManager:
                 logger.error(f"❌ Ошибка закрытия: {e}")
             finally:
                 self._conn = None
-                
+
+
 # ====================== AUTO-CLEANUP ECONOMICS ======================
 def auto_cleanup_economics(posted: PostedManager):
-    """Автоматически удаляет экономические посты при запуске"""
     logger.info("🧹 Проверка экономических постов...")
     
     econ_terms = [
@@ -828,14 +773,11 @@ def auto_cleanup_economics(posted: PostedManager):
             text = f"{title} {summary}".lower()
             econ_count = sum(1 for term in econ_terms if term in text)
             
-            # Если 2+ экономических термина
             if econ_count >= 2:
-                # Проверяем AI-контекст
                 ai_keywords = ["ai", "artificial intelligence", "machine learning", 
                               "llm", "gpt", "claude", "gemini", "нейро", "ии"]
                 has_ai = any(kw in text for kw in ai_keywords)
                 
-                # Если НЕТ AI — удаляем
                 if not has_ai:
                     cursor.execute("DELETE FROM posted_articles WHERE id = ?", (post_id,))
                     deleted += 1
@@ -847,6 +789,7 @@ def auto_cleanup_economics(posted: PostedManager):
             logger.info(f"🗑️ Удалено {deleted} экономических постов")
         else:
             logger.info("✅ Экономических постов не найдено")
+
 
 # ====================== RSS LOADING ======================
 async def fetch_feed(url: str, source: str) -> List[Article]:
@@ -898,9 +841,6 @@ async def load_all_feeds() -> List[Article]:
 
 # ====================== FILTERING ======================
 def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Article]:
-    """
-    УЛУЧШЕНИЕ 11: Кэширование через set для быстрого поиска
-    """
     logger.info("🔍 Фильтрация...")
     
     candidates = []
@@ -909,11 +849,9 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     seen_content_hashes: Set[str] = set()
     
     for article in articles:
-        # УЛУЧШЕНИЕ 6: Ранний выход если не релевантно
         if not is_relevant(article):
             continue
         
-        # УЛУЧШЕНИЕ 11: Кэшированная проверка
         title_normalized = normalize_title(article.title)
         if title_normalized in seen_normalized_titles:
             continue
@@ -1040,7 +978,6 @@ async def generate_summary(article: Article) -> Optional[str]:
 
 # ====================== POSTING ======================
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
-    """Публикация поста"""
     topic = Topic.detect(f"{article.title} {article.summary}")
     
     try:
@@ -1062,7 +999,6 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 
 
 # ====================== MAIN ======================
-# ====================== MAIN ======================
 async def main():
     logger.info("=" * 60)
     logger.info("🚀 AI-POSTER v8.0 (12 Improvements + Auto Economics Cleanup)")
@@ -1077,10 +1013,7 @@ async def main():
             logger.error("❌ Проблема с БД!")
             return
         
-        # Обычная очистка старых постов
         posted.cleanup(config.retention_days)
-        
-        # НОВОЕ: Автоочистка экономических постов
         auto_cleanup_economics(posted)
         
         stats = posted.get_stats()
@@ -1125,28 +1058,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-```
-
----
-
-## ✅ Что это даст:
-
-1. **При каждом запуске** бот автоматически проверит БД
-2. Найдёт все посты с 2+ экономическими терминами БЕЗ AI-контекста
-3. Удалит их из `posted_articles`
-4. Покажет в логе: `🗑️ Удалено X экономических постов`
-
----
-
-## 🚀 После обновления:
-
-1. Сохраните изменения в `telegrambot.py` на GitHub
-2. Запустите бота снова
-3. В логе увидите что-то вроде:
-```
-🧹 Проверка экономических постов...
-🗑️ Удалено 1 экономических постов
-📊 Статистика: 19 posted, 49 rejected
 
 
 

@@ -81,7 +81,7 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 # ====================== GROQ МОДЕЛИ ======================
 GROQ_MODELS = [
     "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
+    "llama-3.1-8b-instant",
 ]
 
 
@@ -97,40 +97,41 @@ RSS_FEEDS = [
     ("https://openai.com/blog/rss/", "OpenAI Blog"),
     ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
     ("https://www.marktechpost.com/feed/", "MarkTechPost"),
-        ("https://feeds.bloomberg.com/markets/news.rss", "Bloomberg AI"),
-        ("https://feeds.theinformation.com/ai-and-data", "The Information AI"),
-        ("https://www.datacouncil.ai/feed", "Data Council"),
-        ("https://arxiv.org/rss/cs.AI", "arXiv AI"),
-        ("https://huggingface.co/feed.xml", "Hugging Face Hub"),
-        ("https://github.blog/changelog/feed.xml", "GitHub Blog"),
-        ("https://redirect.medium.com/feed/tag/artificial-intelligence", "Medium AI"),
-        ("https://www.anthropic.com/feed.xml", "Anthropic Blog"),
-        ("https://www.deepmind.com/feed.xml", "DeepMind Blog"),
-        ("https://www.ibm.com/cloud/blog/ai/feed", "IBM AI"),
+    # ВНИМАНИЕ: Bloomberg, Medium, GitHub дают много нерелевантных новостей
+    # Оставляйте только если они фильтруются по AI-тегам
 ]
 
 
 # ====================== KEYWORDS ======================
+# СТРОГИЕ AI KEYWORDS - минимум 1 должно быть
 AI_KEYWORDS = [
     "ai", "artificial intelligence", "machine learning", "deep learning",
     "neural network", "llm", "large language model", "gpt", "chatgpt", "claude",
     "gemini", "grok", "llama", "mistral", "deepseek", "midjourney",
     "dall-e", "stable diffusion", "sora", "openai", "anthropic",
-    "deepmind", "nvidia", "agi", "transformer", "generative"
+    "deepmind", "nvidia", "agi", "transformer", "generative",
+    "computer vision", "nlp", "natural language processing", "diffusion model",
+    "text-to-image", "text-to-video", "copilot", "ai model", "ai training",
 ]
 
-# Расширенный список исключений
+# РАСШИРЕННЫЙ СПИСОК ИСКЛЮЧЕНИЙ
 EXCLUDE_KEYWORDS = [
-    # Финансы
+    # Финансы и экономика (УСИЛЕНО)
     "stock price", "ipo", "earnings call", "quarterly results", "dividend",
     "market cap", "wall street", "sec filing", "shareholders",
+    "inflation", "interest rate", "federal reserve", "fed rate", "recession",
+    "gdp", "unemployment", "jobs report", "economic growth", "tariff",
+    "trade war", "stock market", "nasdaq", "dow jones", "s&p 500",
+    "bonds", "treasury", "fiscal policy", "monetary policy", "budget deficit",
+    "central bank", "currency", "forex", "commodities", "oil price",
     
     # Развлечения
     "ps5", "xbox", "nintendo", "game review", "netflix", "movie review",
-    "box office", "trailer", "streaming",
+    "box office", "trailer", "streaming", "gaming", "game", "gamer", 
+    "roblox", "baldur's gate", "tv show", "hbo", "entertainment", "celebrity",
     
     # Крипта
-    "bitcoin", "crypto", "blockchain", "nft", "ethereum",
+    "bitcoin", "crypto", "blockchain", "nft", "ethereum", "cryptocurrency",
     
     # Политика США
     "election", "trump", "biden", "congress", "senate", "white house",
@@ -154,10 +155,12 @@ EXCLUDE_KEYWORDS = [
     "controversy", "scandal", "accused", "allegations",
     "harassment", "discrimination", "lawsuit filed",
     "fired", "resigned", "stepping down",
-                "epstein", "metoo", "sexual assault", "abuse", "victim", "files defeated",
-                "gaming", "game", "gamer", "roblox", "baldur's gate", "tv show", "hbo", "entertainment", "celebrity",
-                "sport", "olympics", "team usa", "player", "athlete", "championship",
-    ]
+    "epstein", "metoo", "sexual assault", "abuse", "victim",
+    
+    # Спорт
+    "sport", "olympics", "team usa", "player", "athlete", "championship",
+]
+
 BAD_PHRASES = ["sponsored", "partner content", "advertisement", "black friday", "deal alert"]
 
 
@@ -342,6 +345,39 @@ def get_content_hash(text: str) -> str:
     return hashlib.md5(normalized.encode()).hexdigest()
 
 
+def is_economics_news(text: str) -> bool:
+    """
+    НОВАЯ ФУНКЦИЯ: Проверяет, является ли новость чисто экономической (без AI).
+    Возвращает True если это экономика БЕЗ AI-контекста (нужно отфильтровать).
+    """
+    text_lower = text.lower()
+    
+    # Экономические термины
+    econ_keywords = [
+        "inflation", "interest rate", "federal reserve", "fed rate", "recession",
+        "gdp", "unemployment", "jobs report", "economic growth", "tariff",
+        "trade war", "stock market", "nasdaq", "dow jones", "s&p 500",
+        "bonds", "treasury", "fiscal policy", "monetary policy", "budget deficit",
+        "central bank", "currency", "forex", "commodities", "oil price",
+        "economic outlook", "consumer spending", "retail sales", "housing market",
+    ]
+    
+    # Считаем экономические упоминания
+    econ_count = sum(1 for kw in econ_keywords if kw in text_lower)
+    
+    # Если есть 2+ экономических термина
+    if econ_count >= 2:
+        # Проверяем, есть ли AI-контекст
+        ai_context = any(kw in text_lower for kw in AI_KEYWORDS)
+        
+        # Если НЕТ AI-контекста — это чистая экономика, фильтруем
+        if not ai_context:
+            logger.debug(f"  💵 Чистая экономика: {econ_count} терминов, AI не упоминается")
+            return True
+    
+    return False
+
+
 def is_local_us_news(text: str) -> bool:
     """
     Проверяет, является ли новость местечковой американской.
@@ -349,15 +385,15 @@ def is_local_us_news(text: str) -> bool:
     """
     text_lower = text.lower()
     
-    # Американские госорганы и политика (ОБНОВЛЕНО)
+    # Американские госорганы и политика
     us_gov_keywords = [
         "fbi", "cia", "nsa", "dhs", "homeland security", "pentagon",
         "white house", "congress", "senate", "supreme court",
         "federal government", "federal agency", "us government",
         "executive order", "state department", "doj", "ftc", "fcc",
         "us military", "us army", "us navy",
-        "ice", "cbp", "tsa", "irs", "fema", "usps",  # НОВОЕ
-        "democrats", "republicans",  # НОВОЕ
+        "ice", "cbp", "tsa", "irs", "fema", "usps",
+        "democrats", "republicans",
     ]
     
     # Американские штаты и города (в контексте новостей)
@@ -757,31 +793,40 @@ async def load_all_feeds() -> List[Article]:
     return all_articles
 
 
-# ====================== FILTERING ======================
+# ====================== FILTERING (ОБНОВЛЕНО) ======================
 def is_relevant(article: Article) -> bool:
-    """Проверяет релевантность статьи для глобальной аудитории"""
+    """Проверяет релевантность статьи для AI-канала"""
     text = f"{article.title} {article.summary}".lower()
     
-    # Проверка на плохие фразы
+    # 1. Проверка на плохие фразы
     if any(bad in text for bad in BAD_PHRASES):
+        logger.debug(f"  🚫 BAD_PHRASE: {article.title[:40]}")
         return False
     
-    # Проверка на исключённые темы
+    # 2. Проверка на исключённые темы
     if any(ex in text for ex in EXCLUDE_KEYWORDS):
+        logger.debug(f"  🚫 EXCLUDE_KEYWORD: {article.title[:40]}")
         return False
     
-    # Проверка на AI ключевые слова
+    # 3. ОБЯЗАТЕЛЬНАЯ проверка на AI ключевые слова
     if not any(kw in text for kw in AI_KEYWORDS):
+        logger.debug(f"  🚫 NO_AI_KEYWORD: {article.title[:40]}")
         return False
     
-    # Проверка на местечковые американские новости
+    # 4. НОВАЯ проверка: фильтр чистой экономики
+    if is_economics_news(text):
+        logger.debug(f"  💵 PURE_ECONOMICS: {article.title[:40]}")
+        return False
+    
+    # 5. Проверка на местечковые американские новости
     if is_local_us_news(text):
-        logger.debug(f"  🇺🇸 Местечковая новость: {article.title[:40]}")
+        logger.debug(f"  🇺🇸 US_LOCAL: {article.title[:40]}")
         return False
     
-    # Проверка возраста
+    # 6. Проверка возраста
     age_hours = (datetime.now(timezone.utc) - article.published).total_seconds() / 3600
     if age_hours > config.max_article_age_hours:
+        logger.debug(f"  ⏰ TOO_OLD: {article.title[:40]}")
         return False
     
     return True
@@ -840,11 +885,10 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     return candidates
 
 
-# ====================== TEXT GENERATION (ОБНОВЛЁННЫЙ ПРОМПТ) ======================
+# ====================== TEXT GENERATION ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     
-    # ОБНОВЛЁННЫЙ ПРОМПТ — для российской аудитории
     prompt = f"""Ты — редактор Telegram-канала про технологии для аудитории из РФ и СНГ.
 
 НОВОСТЬ:
@@ -924,7 +968,7 @@ async def generate_summary(article: Article) -> Optional[str]:
     return None
 
 
-# ====================== POSTING (БЕЗ КАРТИНОК) ======================
+# ====================== POSTING ======================
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
     """Публикация поста БЕЗ картинки"""
     topic = Topic.detect(f"{article.title} {article.summary}")
@@ -934,7 +978,7 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
         await bot.send_message(
             config.channel_id, 
             text, 
-            disable_web_page_preview=False  # Превью ссылки будет показано
+            disable_web_page_preview=False
         )
         
         saved = posted.add(article, topic)
@@ -950,7 +994,7 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 # ====================== MAIN ======================
 async def main():
     logger.info("=" * 50)
-    logger.info("🚀 AI-POSTER v7.1 (Updated Filters + RU Focus)")
+    logger.info("🚀 AI-POSTER v7.2 (Economics Filter)")
     logger.info("=" * 50)
     
     posted = PostedManager(config.db_file)
@@ -1005,6 +1049,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

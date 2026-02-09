@@ -102,11 +102,13 @@ RSS_FEEDS = [
     ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
     ("https://www.marktechpost.com/feed/", "MarkTechPost"),
     ("https://kod.ru/feed/", "Kod.ru"),
+    ("https://durov.com/feed/", "Kod Durova"),
 ]
 
 
 # ====================== KEYWORDS ======================
 AI_KEYWORDS = [
+    # English
     "ai", "artificial intelligence", "machine learning", "deep learning",
     "neural network", "llm", "large language model", "gpt", "chatgpt", "claude",
     "gemini", "grok", "llama", "mistral", "deepseek", "midjourney",
@@ -120,9 +122,36 @@ AI_KEYWORDS = [
     "ai safety", "alignment", "robotics", "humanoid",
     "hugging face", "stability ai", "cohere", "perplexity",
     "inflection", "xai",
+
+    # Русские
+    "нейросеть", "нейросети", "нейросетей", "нейросетью", "нейронная сеть",
+    "искусственный интеллект", "машинное обучение", "глубокое обучение",
+    "генеративный", "языковая модель", "большая языковая модель",
+    "чат-бот", "чатбот", "чат бот",
+    "обучение модели", "дообучение", "файн-тюнинг",
+    "компьютерное зрение", "обработка языка",
+    "робототехника", "робот", "роботы",
+    "беспилотник", "автопилот", "самоуправляем",
+    "распознавание", "генерация изображений", "генерация текста",
+    "голосовой помощник", "умная колонка",
+    "дипфейк", "deepfake",
+
+    # Telegram/мессенджеры + AI
+    "telegram", "телеграм", "телеграмм",
+    "бот", "боты", "ботов",
 ]
 
-# Жёсткий exclude — ТОЛЬКО то, что НИКОГДА не связано с AI
+# Ключевые слова для предпочтительных тем (Telegram, боты, мессенджеры)
+PRIORITY_KEYWORDS = [
+    "telegram", "телеграм", "телеграмм",
+    "бот", "боты", "ботов", "bot", "bots",
+    "мессенджер", "messenger",
+    "канал", "каналы", "channel",
+    "durov", "дуров",
+    "signal", "whatsapp", "viber",
+]
+
+# Жёсткий exclude — ТОЛЬКО то, что НИКОГДА не связано с AI/tech
 HARD_EXCLUDE_KEYWORDS = [
     # Крипто
     "bitcoin", "crypto", "blockchain", "nft", "ethereum", "cryptocurrency",
@@ -169,6 +198,17 @@ BAD_PHRASES = [
     "black friday", "deal alert", "promo code",
 ]
 
+# Фильтр промо/рекламных "новостей" (рассылки, подписки, newsletter)
+PROMO_PATTERNS = [
+    "newsletter", "рассылка", "рассылку", "подпишитесь", "подписаться",
+    "subscribe", "sign up for", "join our", "get our",
+    "new podcast", "новый подкаст", "запустил рассылку", "запустила рассылку",
+    "наш новый", "our new newsletter", "mailing list",
+    "free trial", "бесплатный период", "скидка на подписку",
+    "вебинар", "webinar", "register now", "зарегистрируйтесь",
+    "buy now", "купить сейчас", "special offer", "limited time",
+]
+
 
 # ====================== KEY ENTITIES ======================
 KEY_ENTITIES = [
@@ -183,6 +223,7 @@ KEY_ENTITIES = [
     "transformer", "diffusion", "multimodal", "reasoning", "fine-tuning",
     "rlhf", "rag", "vector database", "embedding", "inference",
     "agi", "asi", "ai safety", "alignment", "robotics", "humanoid",
+    "telegram", "durov", "дуров", "телеграм",
 ]
 
 
@@ -202,6 +243,7 @@ class Topic:
     IMAGE_GEN = "image_gen"
     ROBOTICS = "robotics"
     HARDWARE = "hardware"
+    MESSENGER = "messenger"
     GENERAL = "general"
 
     HASHTAGS = {
@@ -209,17 +251,20 @@ class Topic:
         IMAGE_GEN: "#Midjourney #StableDiffusion #ИИАрт",
         ROBOTICS: "#роботы #робототехника #автоматизация",
         HARDWARE: "#NVIDIA #чипы #GPU",
+        MESSENGER: "#Telegram #мессенджеры #боты",
         GENERAL: "#ИИ #технологии #AI"
     }
 
     @staticmethod
     def detect(text: str) -> str:
         t = text.lower()
+        if any(x in t for x in ["telegram", "телеграм", "мессенджер", "messenger", "бот ", "боты", "durov", "дуров"]):
+            return Topic.MESSENGER
         if any(x in t for x in ["gpt", "claude", "gemini", "llm", "chatgpt", "llama"]):
             return Topic.LLM
         if any(x in t for x in ["dall-e", "midjourney", "stable diffusion", "sora", "image generat"]):
             return Topic.IMAGE_GEN
-        if any(x in t for x in ["robot", "humanoid", "boston dynamics"]):
+        if any(x in t for x in ["robot", "humanoid", "boston dynamics", "робот"]):
             return Topic.ROBOTICS
         if any(x in t for x in ["nvidia", "chip", "gpu", "hardware", "tpu"]):
             return Topic.HARDWARE
@@ -272,7 +317,7 @@ def normalize_title(title: str) -> str:
 
 @lru_cache(maxsize=1000)
 def get_title_words(title: str) -> frozenset:
-    words = re.findall(r'\b[a-zA-Z0-9]+\b', title.lower())
+    words = re.findall(r'\b[a-zA-Zа-яА-ЯёЁ0-9]+\b', title.lower())
     stop_words = {
         'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
         'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
@@ -287,7 +332,13 @@ def get_title_words(title: str) -> frozenset:
         'make', 'made', 'makes', 'now', 'also', 'first', 'using', 'used', 'use',
         'out', 'up', 'what', 'which', 'who', 'this', 'that', 'these', 'those',
         'it', 'its', 'you', 'your', 'we', 'our', 'they', 'their', 'he', 'she',
-        'him', 'her', 'his', 'hers', 'my', 'mine', 'yours', 'ours', 'theirs'
+        'him', 'her', 'his', 'hers', 'my', 'mine', 'yours', 'ours', 'theirs',
+        # Русские стоп-слова
+        'и', 'в', 'на', 'с', 'по', 'для', 'от', 'из', 'за', 'до', 'не',
+        'что', 'как', 'это', 'все', 'его', 'она', 'они', 'мы', 'вы', 'он',
+        'но', 'то', 'так', 'уже', 'или', 'ещё', 'еще', 'при', 'без',
+        'тоже', 'также', 'будет', 'была', 'были', 'быть', 'может',
+        'этот', 'эта', 'эти', 'тот', 'того', 'этого', 'свой', 'свои',
     }
     return frozenset(w for w in words if len(w) > 2 and w not in stop_words)
 
@@ -348,7 +399,7 @@ def get_content_hash(text: str) -> str:
 
 # ====================== AI STRENGTH SCORE ======================
 def ai_relevance_score(text: str) -> int:
-    """Считает сколько AI-ключевых слов в тексте. Чем больше — тем сильнее AI-контент."""
+    """Считает сколько AI-ключевых слов в тексте."""
     text_lower = text.lower()
     score = 0
     for kw in AI_KEYWORDS:
@@ -357,12 +408,43 @@ def ai_relevance_score(text: str) -> int:
     return score
 
 
+def priority_score(text: str) -> int:
+    """Бонус за приоритетные темы (Telegram, боты и т.д.)"""
+    text_lower = text.lower()
+    score = 0
+    for kw in PRIORITY_KEYWORDS:
+        if kw in text_lower:
+            score += 3
+    return score
+
+
 # ====================== ФИЛЬТРЫ ======================
+def is_promo_content(text: str) -> bool:
+    """Фильтр промо-контента: рассылки, newsletter, подписки."""
+    text_lower = text.lower()
+
+    promo_count = sum(1 for p in PROMO_PATTERNS if p in text_lower)
+
+    if promo_count >= 2:
+        return True
+
+    # Если заголовок — чисто про рассылку/newsletter
+    promo_title_patterns = [
+        "запустил рассылку", "запустила рассылку", "новая рассылка",
+        "new newsletter", "launches newsletter", "sign up",
+        "подпишитесь на", "subscribe to our",
+    ]
+    for pattern in promo_title_patterns:
+        if pattern in text_lower:
+            return True
+
+    return False
+
+
 def is_economics_news(text: str) -> bool:
     """Чистая экономика БЕЗ AI контекста."""
     text_lower = text.lower()
 
-    # Если есть сильный AI-контекст — НЕ экономика
     if ai_relevance_score(text_lower) >= 2:
         return False
 
@@ -389,7 +471,6 @@ def is_local_us_news(text: str) -> bool:
     """Чисто внутренние американские новости без AI-значимости."""
     text_lower = text.lower()
 
-    # AI-related government/policy — ВСЕГДА пропускаем
     ai_policy_phrases = [
         "ai regulation", "ai safety", "ai policy", "ai executive order",
         "ai legislation", "artificial intelligence act", "ai governance",
@@ -401,11 +482,9 @@ def is_local_us_news(text: str) -> bool:
     if any(phrase in text_lower for phrase in ai_policy_phrases):
         return False
 
-    # Если есть AI ключевые слова — это не «локальная» новость
     if ai_relevance_score(text_lower) >= 2:
         return False
 
-    # Глобальные маркеры — не локальная новость
     global_markers = [
         "global", "worldwide", "international", "launch", "release",
         "announce", "research", "open source", "api", "platform",
@@ -414,7 +493,6 @@ def is_local_us_news(text: str) -> bool:
     if any(marker in text_lower for marker in global_markers):
         return False
 
-    # Чисто внутренние US дела
     us_internal = [
         "fbi investigation", "cia operation", "homeland security alert",
         "us military operation", "border patrol", "ice raid",
@@ -433,51 +511,57 @@ def is_local_us_news(text: str) -> bool:
 
 
 def is_relevant(article: Article) -> bool:
-    """Главный фильтр релевантности. Логирует ВСЕ причины отказа."""
+    """Главный фильтр релевантности."""
     text = f"{article.title} {article.summary}".lower()
 
-    # 1. Проверка возраста
+    # 1. Возраст
     age_hours = (datetime.now(timezone.utc) - article.published).total_seconds() / 3600
     if age_hours > config.max_article_age_hours:
         logger.info(f"  ⏰ TOO_OLD ({age_hours:.0f}h): {article.title[:50]}")
         return False
 
-    # 2. Должны быть AI ключевые слова
+    # 2. AI ключевые слова
     ai_score = ai_relevance_score(text)
     if ai_score == 0:
         logger.info(f"  🚫 NO_AI_KW: {article.title[:60]}")
         return False
 
-    # 3. Реклама — всегда блок
+    # 3. Промо/реклама рассылок
+    if is_promo_content(text):
+        logger.info(f"  📢 PROMO: {article.title[:50]}")
+        return False
+
+    # 4. Реклама
     for bad in BAD_PHRASES:
         if bad in text:
             logger.info(f"  🚫 AD ({bad}): {article.title[:50]}")
             return False
 
-    # 4. HARD exclude — блокируется ВСЕГДА, даже если есть AI
+    # 5. HARD exclude
     for ex in HARD_EXCLUDE_KEYWORDS:
         if ex in text:
             logger.info(f"  🚫 HARD_EXCLUDE ({ex}): {article.title[:50]}")
             return False
 
-    # 5. SOFT exclude — блокируется ТОЛЬКО если AI-контекст слабый (0-1 слово)
+    # 6. SOFT exclude — только при слабом AI-контексте
     if ai_score <= 1:
         for ex in SOFT_EXCLUDE_KEYWORDS:
             if ex in text:
-                logger.info(f"  🚫 SOFT_EXCLUDE ({ex}, ai_score={ai_score}): {article.title[:50]}")
+                logger.info(f"  🚫 SOFT_EXCLUDE ({ex}, ai={ai_score}): {article.title[:50]}")
                 return False
 
-    # 6. Чистая экономика
+    # 7. Экономика
     if is_economics_news(text):
         logger.info(f"  💵 ECON: {article.title[:50]}")
         return False
 
-    # 7. Локальные US новости
+    # 8. Локальные US
     if is_local_us_news(text):
         logger.info(f"  🇺🇸 LOCAL_US: {article.title[:50]}")
         return False
 
-    logger.info(f"  ✅ PASS (ai={ai_score}): {article.title[:60]}")
+    p_score = priority_score(text)
+    logger.info(f"  ✅ PASS (ai={ai_score}, prio={p_score}): {article.title[:60]}")
     return True
 
 
@@ -590,19 +674,16 @@ class PostedManager:
             entities = extract_entities(f"{title} {summary}")
             domain = get_domain(url)
 
-            # Проверка rejected — только по URL, не по заголовку
             if self._was_rejected(norm_url):
                 result.add_reason("PREVIOUSLY_REJECTED")
                 return result
 
-            # Точное совпадение URL
             cursor.execute('SELECT title FROM posted_articles WHERE norm_url = ?', (norm_url,))
             row = cursor.fetchone()
             if row:
                 result.add_reason("URL_EXACT", 1.0, row[0])
                 return result
 
-            # Content hash
             if content_hash:
                 cursor.execute('SELECT title FROM posted_articles WHERE content_hash = ?', (content_hash,))
                 row = cursor.fetchone()
@@ -610,21 +691,18 @@ class PostedManager:
                     result.add_reason("CONTENT_HASH", 1.0, row[0])
                     return result
 
-            # Точное совпадение нормализованного заголовка
             cursor.execute('SELECT title FROM posted_articles WHERE title_normalized = ?', (title_normalized,))
             row = cursor.fetchone()
             if row:
                 result.add_reason("TITLE_EXACT", 1.0, row[0])
                 return result
 
-            # Word signature
             cursor.execute('SELECT title FROM posted_articles WHERE title_word_signature = ?', (word_signature,))
             row = cursor.fetchone()
             if row:
                 result.add_reason("WORD_SIGNATURE", 0.95, row[0])
                 return result
 
-            # Fuzzy сравнение с существующими постами
             cursor.execute(
                 'SELECT id, title, title_normalized, title_words, entities, domain FROM posted_articles')
             all_posts = cursor.fetchall()
@@ -632,17 +710,14 @@ class PostedManager:
             for row in all_posts:
                 existing_id, existing_title, existing_normalized, existing_words_json, existing_entities_json, existing_domain = row
 
-                # Sequence similarity
                 seq_sim = calculate_similarity(title_normalized, existing_normalized)
                 if seq_sim > config.title_similarity_threshold:
                     result.add_reason(f"TITLE_SIM ({seq_sim:.0%})", seq_sim, existing_title)
 
-                # N-gram similarity
                 ngram_sim = ngram_similarity(title, existing_title)
                 if ngram_sim > config.ngram_similarity_threshold:
                     result.add_reason(f"NGRAM ({ngram_sim:.0%})", ngram_sim, existing_title)
 
-                # Jaccard
                 if existing_words_json:
                     try:
                         existing_words = set(json.loads(existing_words_json))
@@ -652,7 +727,6 @@ class PostedManager:
                     except Exception:
                         pass
 
-                # Entity overlap
                 if entities and existing_entities_json:
                     try:
                         existing_entities = set(json.loads(existing_entities_json))
@@ -666,7 +740,6 @@ class PostedManager:
                     except Exception:
                         pass
 
-                # Same domain — stricter
                 if domain == existing_domain:
                     same_sim = calculate_similarity(title_normalized, existing_normalized)
                     if same_sim > config.same_domain_similarity:
@@ -767,7 +840,6 @@ class PostedManager:
             cursor.execute(f"DELETE FROM posted_articles WHERE posted_date < datetime('now', '-{days} days')")
             deleted = cursor.rowcount
 
-            # Rejected чистим чаще — через 7 дней, чтобы не копились
             cursor.execute(
                 f"DELETE FROM rejected_urls WHERE rejected_at < datetime('now', '-{config.rejected_retention_days} days')")
             rejected_deleted = cursor.rowcount
@@ -832,7 +904,8 @@ def auto_cleanup_economics(posted: PostedManager):
 
             if econ_count >= 2:
                 ai_kw = ["ai", "artificial intelligence", "machine learning",
-                         "llm", "gpt", "claude", "gemini", "нейро", "ии"]
+                         "llm", "gpt", "claude", "gemini", "нейро", "ии",
+                         "нейросет", "искусственный интеллект"]
                 has_ai = any(kw in text for kw in ai_kw)
 
                 if not has_ai:
@@ -869,7 +942,7 @@ async def fetch_feed(url: str, source: str) -> List[Article]:
             summary = re.sub(r'<[^>]+>', '',
                              entry.get('summary', entry.get('description', '')).strip())
 
-            if not link or not title or len(title) < 20:
+            if not link or not title or len(title) < 15:
                 continue
 
             pub_date = entry.get('published_parsed') or entry.get('updated_parsed')
@@ -909,15 +982,14 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     seen_word_signatures: Set[str] = set()
     seen_content_hashes: Set[str] = set()
 
-    # Счётчики для итоговой статистики
     stats = {
-        "too_old": 0, "no_ai": 0, "ad": 0, "hard_exclude": 0,
-        "soft_exclude": 0, "econ": 0, "us_local": 0,
-        "batch_dup": 0, "db_dup": 0, "diversity": 0, "passed": 0
+        "batch_dup": 0, "db_dup": 0, "diversity": 0, "passed": 0,
+        "filtered_out": 0
     }
 
     for article in articles:
         if not is_relevant(article):
+            stats["filtered_out"] += 1
             continue
 
         title_normalized = normalize_title(article.title)
@@ -961,16 +1033,19 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         stats["passed"] += 1
 
     def score(art: Article) -> float:
-        entities = extract_entities(f"{art.title} {art.summary}")
+        text = f"{art.title} {art.summary}"
+        entities = extract_entities(text)
         age = (datetime.now(timezone.utc) - art.published).total_seconds() / 3600
-        ai_score = ai_relevance_score(f"{art.title} {art.summary}")
-        return len(entities) * 2 + ai_score * 1.5 + max(0, 48 - age) / 48
+        ai_sc = ai_relevance_score(text)
+        prio_sc = priority_score(text)
+        # Приоритетные темы получают большой бонус
+        return prio_sc * 3 + len(entities) * 2 + ai_sc * 1.5 + max(0, 48 - age) / 48
 
     candidates.sort(key=score, reverse=True)
 
     logger.info(f"📊 Итоги фильтрации:")
-    logger.info(f"   batch_dup={stats['batch_dup']}, db_dup={stats['db_dup']}, "
-                f"diversity={stats['diversity']}, passed={stats['passed']}")
+    logger.info(f"   filtered={stats['filtered_out']}, batch_dup={stats['batch_dup']}, "
+                f"db_dup={stats['db_dup']}, diversity={stats['diversity']}, passed={stats['passed']}")
     logger.info(f"✅ Кандидатов: {len(candidates)} из {len(articles)}")
 
     return candidates
@@ -980,30 +1055,33 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
 
-    prompt = f"""Ты — редактор Telegram-канала про технологии для аудитории из РФ и СНГ.
+    prompt = f"""Ты — редактор Telegram-канала про AI и технологии для аудитории из РФ и СНГ.
 
 НОВОСТЬ:
-{article.title}
-{article.summary[:800]}
+Заголовок: {article.title}
+Содержание: {article.summary[:800]}
+Источник: {article.source}
 
-ЗАДАЧА: Адаптируй новость для российского читателя.
+ЗАДАЧА: Напиши пост для Telegram-канала.
 
 СТРУКТУРА:
-1. 🔥 Заголовок (цепляющий, на русском, без "США")
-2. Суть — что произошло (факты)
-3. Взгляд из РФ — почему это важно нам? (Если новость про блокировки/санкции/глобальные тренды — подчеркни это. Если это чисто внутренняя политика США — напиши SKIP).
-4. Вывод
+1. 🔥 Цепляющий заголовок на русском
+2. Суть — что произошло (конкретные факты, цифры, названия)
+3. Почему это важно — как это влияет на пользователей/разработчиков/рынок
+4. Короткий вывод (1-2 предложения)
 
 ТРЕБОВАНИЯ:
-✅ Если новость про суды в Техасе, забастовки в Нью-Йорке или локальные разборки с полицией США — ответь ТОЛЬКО: SKIP
-✅ Убирай чисто американский контекст (названия местных законов, имена сенаторов), оставляй суть технологии.
-✅ Длина: 700-900 символов.
+✅ Пиши для аудитории из РФ/СНГ
+✅ Если новость про внутреннюю политику США без связи с технологиями — ответь ТОЛЬКО: SKIP
+✅ Длина: 700-1000 символов
+✅ Конкретика: цифры, названия, даты
+✅ Живой разговорный стиль, без канцелярита
 
 ЗАПРЕЩЕНО:
-❌ Упоминать узко-американские детали без объяснения
-❌ Писать так, будто читатель живёт в США
-❌ Фразы: "стоит отметить", "интересно, что", "важно понимать"
-❌ Общие фразы без конкретики
+❌ Фразы: "стоит отметить", "интересно, что", "важно понимать", "давайте разберёмся"
+❌ Общие фразы без конкретики ("это может повлиять на многие сферы")
+❌ Пересказ пресс-релиза. Нужен анализ и мнение.
+❌ Писать про рассылки, подписки, newsletter как новость
 
 ПОСТ:"""
 
@@ -1023,7 +1101,7 @@ async def generate_summary(article: Article) -> Optional[str]:
                 text = resp.choices[0].message.content.strip()
 
                 if "SKIP" in text.upper()[:10]:
-                    logger.info("  ⏭️ SKIP (локальная новость)")
+                    logger.info("  ⏭️ SKIP (не подходит)")
                     return None
 
                 if len(text) < config.min_post_length:
@@ -1031,7 +1109,8 @@ async def generate_summary(article: Article) -> Optional[str]:
                     break
 
                 water_phrases = ["стоит отметить", "важно понимать", "интересно, что",
-                                 "давайте разберёмся", "как мы знаем", "не секрет"]
+                                 "давайте разберёмся", "как мы знаем", "не секрет",
+                                 "нельзя не отметить", "следует подчеркнуть"]
                 if any(w in text.lower() for w in water_phrases):
                     logger.warning("  ⚠️ Вода, повтор...")
                     continue
@@ -1084,7 +1163,7 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 # ====================== MAIN ======================
 async def main():
     logger.info("=" * 60)
-    logger.info("🚀 AI-POSTER v9.1 (Clean Logging)")
+    logger.info("🚀 AI-POSTER v9.2 (Priority + Promo Filter + RU Keywords)")
     logger.info("=" * 60)
 
     posted = PostedManager(config.db_file)
@@ -1108,16 +1187,13 @@ async def main():
             for p in recent:
                 logger.info(f"   • [{p['topic']}] {p['title'][:60]}...")
 
-        # Загрузка
         raw = await load_all_feeds()
 
-        # Краткая сводка по источникам
         sources_count = {}
         for art in raw:
             sources_count[art.source] = sources_count.get(art.source, 0) + 1
         logger.info(f"📰 Источники: {sources_count}")
 
-        # Фильтрация
         candidates = filter_and_dedupe(raw, posted)
 
         if not candidates:
@@ -1126,7 +1202,10 @@ async def main():
 
         logger.info(f"🎯 Топ кандидаты:")
         for i, c in enumerate(candidates[:5]):
-            logger.info(f"  {i + 1}. [{c.source}] {c.title[:70]}")
+            text = f"{c.title} {c.summary}"
+            prio = priority_score(text)
+            ai_sc = ai_relevance_score(text)
+            logger.info(f"  {i + 1}. [prio={prio}, ai={ai_sc}] [{c.source}] {c.title[:65]}")
 
         for article in candidates[:25]:
             dup_result = posted.is_duplicate(article.link, article.title, article.summary)

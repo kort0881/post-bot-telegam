@@ -53,6 +53,9 @@ class Config:
         self.min_post_length = 450
         self.max_article_age_hours = 48
 
+        # Минимальный AI-score для публикации
+        self.min_ai_score = 2
+
         # Разнообразие
         self.diversity_window = 5
         self.same_topic_limit = 2
@@ -91,101 +94,100 @@ GROQ_MODELS = [
 
 # ====================== RSS ======================
 RSS_FEEDS = [
+    # Англоязычные AI-специализированные
     ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch AI"),
     ("https://venturebeat.com/category/ai/feed/", "VentureBeat AI"),
     ("https://www.technologyreview.com/topic/artificial-intelligence/feed", "MIT Tech Review AI"),
-    ("https://www.theverge.com/rss/index.xml", "The Verge"),
     ("https://arstechnica.com/tag/artificial-intelligence/feed/", "Ars Technica AI"),
     ("https://www.wired.com/feed/tag/ai/latest/rss", "WIRED AI"),
-    ("https://www.artificialintelligence-news.com/feed/", "AI News"),
-    ("https://openai.com/blog/rss/", "OpenAI Blog"),
     ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
-    ("https://www.marktechpost.com/feed/", "MarkTechPost"),
-    ("https://kod.ru/feed/", "Kod.ru"),
-    ("https://durov.com/feed/", "Kod Durova"),
+    ("https://www.theverge.com/rss/index.xml", "The Verge"),
+    ("https://the-decoder.com/feed/", "The Decoder"),
+    ("https://www.unite.ai/feed/", "Unite.AI"),
+    ("https://analyticsindiamag.com/feed/", "Analytics India"),
+
+    # Русскоязычный
+    ("https://kod.ru/rss", "Kod.ru"),
 ]
 
 
 # ====================== KEYWORDS ======================
-AI_KEYWORDS = [
-    # English
-    "ai", "artificial intelligence", "machine learning", "deep learning",
-    "neural network", "llm", "large language model", "gpt", "chatgpt", "claude",
-    "gemini", "grok", "llama", "mistral", "deepseek", "midjourney",
-    "dall-e", "stable diffusion", "sora", "openai", "anthropic",
-    "deepmind", "nvidia", "agi", "transformer", "generative",
-    "computer vision", "nlp", "natural language processing", "diffusion model",
-    "text-to-image", "text-to-video", "copilot", "ai model", "ai training",
-    "reinforcement learning", "supervised learning", "unsupervised learning",
-    "foundation model", "multimodal", "reasoning", "fine-tuning",
-    "rlhf", "rag", "vector database", "embedding", "inference",
-    "ai safety", "alignment", "robotics", "humanoid",
-    "hugging face", "stability ai", "cohere", "perplexity",
-    "inflection", "xai",
-
-    # Русские
-    "нейросеть", "нейросети", "нейросетей", "нейросетью", "нейронная сеть",
+AI_KEYWORDS_STRONG = [
+    # Сильные — однозначно про AI (каждое даёт 2 очка)
+    "artificial intelligence", "machine learning", "deep learning",
+    "neural network", "llm", "large language model",
+    "chatgpt", "openai", "anthropic", "deepmind",
+    "gpt-4", "gpt-5", "gpt-4o", "claude", "gemini",
+    "midjourney", "dall-e", "stable diffusion", "sora",
+    "deepseek", "mistral", "llama", "grok",
+    "transformer", "diffusion model", "foundation model",
+    "generative ai", "gen ai",
+    "computer vision", "natural language processing",
+    "text-to-image", "text-to-video",
+    "reinforcement learning", "supervised learning",
+    "ai safety", "ai alignment", "agi",
+    "rlhf", "fine-tuning", "rag",
+    # Русские сильные
+    "нейросеть", "нейросети", "нейросетей", "нейронная сеть",
     "искусственный интеллект", "машинное обучение", "глубокое обучение",
-    "генеративный", "языковая модель", "большая языковая модель",
-    "чат-бот", "чатбот", "чат бот",
-    "обучение модели", "дообучение", "файн-тюнинг",
-    "компьютерное зрение", "обработка языка",
-    "робототехника", "робот", "роботы",
-    "беспилотник", "автопилот", "самоуправляем",
-    "распознавание", "генерация изображений", "генерация текста",
-    "голосовой помощник", "умная колонка",
+    "большая языковая модель", "генеративный ии",
+    "обучение модели", "дообучение",
+    "компьютерное зрение",
     "дипфейк", "deepfake",
-
-    # Telegram/мессенджеры + AI
-    "telegram", "телеграм", "телеграмм",
-    "бот", "боты", "ботов",
 ]
 
-# Ключевые слова для предпочтительных тем (Telegram, боты, мессенджеры)
+AI_KEYWORDS_WEAK = [
+    # Слабые — могут быть в неAI-контексте (каждое даёт 1 очко)
+    "ai", "nvidia", "copilot", "generative",
+    "multimodal", "reasoning", "inference", "embedding",
+    "robotics", "humanoid", "automation",
+    "nlp", "ai model", "ai training",
+    "hugging face", "stability ai", "cohere", "perplexity",
+    "vector database",
+    # Русские слабые
+    "бот", "боты", "ботов",
+    "автоматизация", "робот", "роботы", "робототехника",
+    "распознавание", "генерация",
+    "голосовой помощник", "умная колонка",
+    "нейро", "ии",
+]
+
+# Приоритетные темы — получают бонус в scoring
 PRIORITY_KEYWORDS = [
     "telegram", "телеграм", "телеграмм",
-    "бот", "боты", "ботов", "bot", "bots",
     "мессенджер", "messenger",
-    "канал", "каналы", "channel",
     "durov", "дуров",
-    "signal", "whatsapp", "viber",
+    "signal", "whatsapp",
 ]
 
-# Жёсткий exclude — ТОЛЬКО то, что НИКОГДА не связано с AI/tech
+# Жёсткий exclude — НИКОГДА не связано с AI/tech
 HARD_EXCLUDE_KEYWORDS = [
     # Крипто
     "bitcoin", "crypto", "blockchain", "nft", "ethereum", "cryptocurrency",
     "web3", "defi", "token sale", "mining rig",
-
     # Чистый гейминг
     "ps5", "xbox", "nintendo", "game review", "baldur's gate",
     "roblox", "esports", "twitch streamer", "fortnite",
-
     # Развлечения
     "box office", "movie review", "tv show review", "hbo series",
     "netflix series", "celebrity gossip", "trailer release",
     "reality show", "award ceremony",
-
     # Спорт
     "nfl", "nba", "mlb", "nhl", "fifa", "olympics",
     "championship game", "player trade", "sports betting",
-    "touchdown", "slam dunk",
-
+    "touchdown", "slam dunk", "super bowl",
     # Реклама
     "sponsored content", "partner content", "advertisement",
     "black friday deal", "deal alert", "promo code", "coupon",
 ]
 
-# Мягкий exclude — блокируется ТОЛЬКО если нет AI-контекста
+# Мягкий exclude — блокируется ТОЛЬКО если AI-контекст слабый
 SOFT_EXCLUDE_KEYWORDS = [
-    # Чистая макроэкономика
     "federal reserve", "fed rate", "interest rate cut", "interest rate hike",
     "recession fears", "gdp growth", "unemployment rate", "jobs report nonfarm",
     "consumer spending index", "housing market crash",
     "forex trading", "commodities futures", "oil price barrel",
     "bond yields", "treasury yields",
-
-    # Чистая внутренняя политика
     "election results", "campaign trail", "voter turnout",
     "campaign donation", "primary election", "midterm election",
     "gun control debate", "mass shooting",
@@ -198,15 +200,27 @@ BAD_PHRASES = [
     "black friday", "deal alert", "promo code",
 ]
 
-# Фильтр промо/рекламных "новостей" (рассылки, подписки, newsletter)
+# Фильтр промо/рекламных "новостей"
 PROMO_PATTERNS = [
     "newsletter", "рассылка", "рассылку", "подпишитесь", "подписаться",
     "subscribe", "sign up for", "join our", "get our",
     "new podcast", "новый подкаст", "запустил рассылку", "запустила рассылку",
-    "наш новый", "our new newsletter", "mailing list",
+    "mailing list",
     "free trial", "бесплатный период", "скидка на подписку",
     "вебинар", "webinar", "register now", "зарегистрируйтесь",
     "buy now", "купить сейчас", "special offer", "limited time",
+]
+
+# Фильтр товарных/ценовых новостей (не про AI)
+SHOPPING_PATTERNS = [
+    "cheapest price", "lowest price", "best price", "price drop",
+    "on sale", "save $", "save up to", "discount",
+    "best deal", "deals on", "deals for",
+    "back down to $", "drops to $", "now $", "only $",
+    "where to buy", "buy it now", "order now",
+    "review:", "hands-on:", "unboxing",
+    "лучшая цена", "скидка", "распродажа", "купить",
+    "обзор:", "характеристики",
 ]
 
 
@@ -258,9 +272,9 @@ class Topic:
     @staticmethod
     def detect(text: str) -> str:
         t = text.lower()
-        if any(x in t for x in ["telegram", "телеграм", "мессенджер", "messenger", "бот ", "боты", "durov", "дуров"]):
+        if any(x in t for x in ["telegram", "телеграм", "мессенджер", "messenger", "durov", "дуров"]):
             return Topic.MESSENGER
-        if any(x in t for x in ["gpt", "claude", "gemini", "llm", "chatgpt", "llama"]):
+        if any(x in t for x in ["gpt", "claude", "gemini", "llm", "chatgpt", "llama", "chatbot"]):
             return Topic.LLM
         if any(x in t for x in ["dall-e", "midjourney", "stable diffusion", "sora", "image generat"]):
             return Topic.IMAGE_GEN
@@ -399,12 +413,18 @@ def get_content_hash(text: str) -> str:
 
 # ====================== AI STRENGTH SCORE ======================
 def ai_relevance_score(text: str) -> int:
-    """Считает сколько AI-ключевых слов в тексте."""
+    """Считает AI-релевантность. Strong=2, Weak=1."""
     text_lower = text.lower()
     score = 0
-    for kw in AI_KEYWORDS:
+
+    for kw in AI_KEYWORDS_STRONG:
+        if kw in text_lower:
+            score += 2
+
+    for kw in AI_KEYWORDS_WEAK:
         if kw in text_lower:
             score += 1
+
     return score
 
 
@@ -428,7 +448,6 @@ def is_promo_content(text: str) -> bool:
     if promo_count >= 2:
         return True
 
-    # Если заголовок — чисто про рассылку/newsletter
     promo_title_patterns = [
         "запустил рассылку", "запустила рассылку", "новая рассылка",
         "new newsletter", "launches newsletter", "sign up",
@@ -441,11 +460,43 @@ def is_promo_content(text: str) -> bool:
     return False
 
 
+def is_shopping_content(text: str) -> bool:
+    """Фильтр товарных/ценовых новостей — скидки, обзоры гаджетов, где купить."""
+    text_lower = text.lower()
+
+    # Если сильный AI-контекст — не блокируем
+    if ai_relevance_score(text_lower) >= 4:
+        return False
+
+    shopping_count = sum(1 for p in SHOPPING_PATTERNS if p in text_lower)
+
+    if shopping_count >= 1:
+        return True
+
+    # Цена в заголовке без AI-контекста
+    price_pattern = re.search(r'\$\d+', text_lower)
+    if price_pattern:
+        # Проверяем — это про AI-сделку/инвестиции или про цену товара?
+        investment_words = ["funding", "raises", "round", "valuation", "billion",
+                           "million", "investment", "инвестиции", "раунд", "оценка"]
+        if not any(w in text_lower for w in investment_words):
+            # Это цена товара, не инвестиции
+            product_words = ["price", "buy", "sale", "deal", "discount", "cheap",
+                           "review", "specs", "earbuds", "phone", "laptop", "tablet",
+                           "watch", "headphone", "speaker", "camera", "monitor",
+                           "цена", "купить", "обзор", "характеристики",
+                           "наушники", "телефон", "ноутбук", "планшет"]
+            if any(w in text_lower for w in product_words):
+                return True
+
+    return False
+
+
 def is_economics_news(text: str) -> bool:
     """Чистая экономика БЕЗ AI контекста."""
     text_lower = text.lower()
 
-    if ai_relevance_score(text_lower) >= 2:
+    if ai_relevance_score(text_lower) >= 4:
         return False
 
     econ_keywords = [
@@ -482,7 +533,7 @@ def is_local_us_news(text: str) -> bool:
     if any(phrase in text_lower for phrase in ai_policy_phrases):
         return False
 
-    if ai_relevance_score(text_lower) >= 2:
+    if ai_relevance_score(text_lower) >= 4:
         return False
 
     global_markers = [
@@ -520,10 +571,10 @@ def is_relevant(article: Article) -> bool:
         logger.info(f"  ⏰ TOO_OLD ({age_hours:.0f}h): {article.title[:50]}")
         return False
 
-    # 2. AI ключевые слова
+    # 2. AI ключевые слова (минимум 2 очка)
     ai_score = ai_relevance_score(text)
-    if ai_score == 0:
-        logger.info(f"  🚫 NO_AI_KW: {article.title[:60]}")
+    if ai_score < config.min_ai_score:
+        logger.info(f"  🚫 LOW_AI (score={ai_score}): {article.title[:60]}")
         return False
 
     # 3. Промо/реклама рассылок
@@ -531,31 +582,36 @@ def is_relevant(article: Article) -> bool:
         logger.info(f"  📢 PROMO: {article.title[:50]}")
         return False
 
-    # 4. Реклама
+    # 4. Товары/скидки/обзоры гаджетов
+    if is_shopping_content(text):
+        logger.info(f"  🛒 SHOPPING: {article.title[:50]}")
+        return False
+
+    # 5. Реклама
     for bad in BAD_PHRASES:
         if bad in text:
             logger.info(f"  🚫 AD ({bad}): {article.title[:50]}")
             return False
 
-    # 5. HARD exclude
+    # 6. HARD exclude
     for ex in HARD_EXCLUDE_KEYWORDS:
         if ex in text:
             logger.info(f"  🚫 HARD_EXCLUDE ({ex}): {article.title[:50]}")
             return False
 
-    # 6. SOFT exclude — только при слабом AI-контексте
-    if ai_score <= 1:
+    # 7. SOFT exclude — только при слабом AI-контексте
+    if ai_score <= 2:
         for ex in SOFT_EXCLUDE_KEYWORDS:
             if ex in text:
                 logger.info(f"  🚫 SOFT_EXCLUDE ({ex}, ai={ai_score}): {article.title[:50]}")
                 return False
 
-    # 7. Экономика
+    # 8. Экономика
     if is_economics_news(text):
         logger.info(f"  💵 ECON: {article.title[:50]}")
         return False
 
-    # 8. Локальные US
+    # 9. Локальные US
     if is_local_us_news(text):
         logger.info(f"  🇺🇸 LOCAL_US: {article.title[:50]}")
         return False
@@ -921,6 +977,43 @@ def auto_cleanup_economics(posted: PostedManager):
             logger.info("✅ Экономических постов не найдено")
 
 
+# ====================== AUTO-CLEANUP NON-AI ======================
+def auto_cleanup_non_ai(posted: PostedManager):
+    """Удаляет ранее опубликованные посты без AI-контента (товары, скидки и т.д.)"""
+    logger.info("🧹 Проверка не-AI постов...")
+
+    with posted._lock:
+        conn = posted._get_conn()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT id, title, summary FROM posted_articles")
+        all_posts = cursor.fetchall()
+
+        deleted = 0
+        for post_id, title, summary in all_posts:
+            text = f"{title} {summary}".lower()
+            score = 0
+
+            for kw in AI_KEYWORDS_STRONG:
+                if kw in text:
+                    score += 2
+            for kw in AI_KEYWORDS_WEAK:
+                if kw in text:
+                    score += 1
+
+            if score < 2:
+                cursor.execute("DELETE FROM posted_articles WHERE id = ?", (post_id,))
+                deleted += 1
+                logger.info(f"  🗑️ NON-AI ID={post_id} (score={score}): {title[:50]}")
+
+        conn.commit()
+
+        if deleted > 0:
+            logger.info(f"🗑️ Удалено {deleted} не-AI постов")
+        else:
+            logger.info("✅ Все посты про AI")
+
+
 # ====================== RSS LOADING ======================
 async def fetch_feed(url: str, source: str) -> List[Article]:
     try:
@@ -1038,8 +1131,8 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         age = (datetime.now(timezone.utc) - art.published).total_seconds() / 3600
         ai_sc = ai_relevance_score(text)
         prio_sc = priority_score(text)
-        # Приоритетные темы получают большой бонус
-        return prio_sc * 3 + len(entities) * 2 + ai_sc * 1.5 + max(0, 48 - age) / 48
+        # AI-score — главный фактор, потом приоритет, потом свежесть
+        return ai_sc * 3 + prio_sc * 5 + len(entities) * 1.5 + max(0, 48 - age) / 48
 
     candidates.sort(key=score, reverse=True)
 
@@ -1073,6 +1166,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 ТРЕБОВАНИЯ:
 ✅ Пиши для аудитории из РФ/СНГ
 ✅ Если новость про внутреннюю политику США без связи с технологиями — ответь ТОЛЬКО: SKIP
+✅ Если новость про скидки на гаджеты, обзоры телефонов, цены — ответь ТОЛЬКО: SKIP
 ✅ Длина: 700-1000 символов
 ✅ Конкретика: цифры, названия, даты
 ✅ Живой разговорный стиль, без канцелярита
@@ -1082,6 +1176,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 ❌ Общие фразы без конкретики ("это может повлиять на многие сферы")
 ❌ Пересказ пресс-релиза. Нужен анализ и мнение.
 ❌ Писать про рассылки, подписки, newsletter как новость
+❌ Писать про цены на гаджеты, скидки, где купить
 
 ПОСТ:"""
 
@@ -1163,7 +1258,7 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 # ====================== MAIN ======================
 async def main():
     logger.info("=" * 60)
-    logger.info("🚀 AI-POSTER v9.2 (Priority + Promo Filter + RU Keywords)")
+    logger.info("🚀 AI-POSTER v10.0 (Smart AI Scoring + Shopping Filter)")
     logger.info("=" * 60)
 
     posted = PostedManager(config.db_file)
@@ -1177,6 +1272,7 @@ async def main():
 
         posted.cleanup(config.retention_days)
         auto_cleanup_economics(posted)
+        auto_cleanup_non_ai(posted)
 
         stats = posted.get_stats()
         logger.info(f"📊 Статистика: {stats['total_posted']} posted, {stats['total_rejected']} rejected")
@@ -1205,7 +1301,7 @@ async def main():
             text = f"{c.title} {c.summary}"
             prio = priority_score(text)
             ai_sc = ai_relevance_score(text)
-            logger.info(f"  {i + 1}. [prio={prio}, ai={ai_sc}] [{c.source}] {c.title[:65]}")
+            logger.info(f"  {i + 1}. [ai={ai_sc}, prio={prio}] [{c.source}] {c.title[:65]}")
 
         for article in candidates[:25]:
             dup_result = posted.is_duplicate(article.link, article.title, article.summary)

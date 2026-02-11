@@ -49,11 +49,12 @@ class Config:
         self.same_domain_similarity = 0.40
 
         self.min_post_length = 450
-        self.max_article_age_hours = 48
+        self.max_article_age_hours = 72
         self.min_ai_score = 2
 
-        self.diversity_window = 5
+        self.diversity_window = 7
         self.same_topic_limit = 2
+        self.same_subject_hours = 24
 
         self.groq_retries_per_model = 2
         self.groq_base_delay = 2.0
@@ -87,16 +88,28 @@ GROQ_MODELS = [
 
 # ====================== RSS ======================
 RSS_FEEDS = [
+    # Основные AI
     ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch AI"),
     ("https://venturebeat.com/category/ai/feed/", "VentureBeat AI"),
-    ("https://www.technologyreview.com/topic/artificial-intelligence/feed", "MIT Tech Review AI"),
     ("https://arstechnica.com/tag/artificial-intelligence/feed/", "Ars Technica AI"),
     ("https://www.wired.com/feed/tag/ai/latest/rss", "WIRED AI"),
-    ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
-    ("https://www.theverge.com/rss/index.xml", "The Verge"),
     ("https://the-decoder.com/feed/", "The Decoder"),
     ("https://www.unite.ai/feed/", "Unite.AI"),
-    ("https://analyticsindiamag.com/feed/", "Analytics India"),
+
+    # Большие tech-издания
+    ("https://www.theverge.com/ai-artificial-intelligence/rss/index.xml", "The Verge AI"),
+    ("https://9to5google.com/guides/google-ai/feed/", "9to5Google AI"),
+    ("https://9to5mac.com/guides/apple-intelligence/feed/", "9to5Mac AI"),
+    ("https://www.zdnet.com/topic/artificial-intelligence/rss.xml", "ZDNet AI"),
+    ("https://www.cnet.com/rss/ai/", "CNET AI"),
+    ("https://www.engadget.com/ai/rss.xml", "Engadget AI"),
+    ("https://www.technologyreview.com/topic/artificial-intelligence/feed", "MIT Tech Review AI"),
+
+    # Блоги компаний
+    ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
+    ("https://engineering.fb.com/category/ml-applications/feed/", "Meta AI Blog"),
+
+    # Русскоязычный
     ("https://kod.ru/rss", "Kod.ru"),
 ]
 
@@ -216,6 +229,24 @@ KEY_ENTITIES = [
     "telegram", "durov", "дуров", "телеграм",
 ]
 
+# Субъекты новостей — для проверки "не писать про одно и то же"
+NEWS_SUBJECTS = {
+    "openai": ["openai", "chatgpt", "gpt-4", "gpt-5", "gpt-4o", "sam altman", "dall-e", "sora"],
+    "anthropic": ["anthropic", "claude", "claude 3", "dario amodei"],
+    "google": ["google", "gemini", "deepmind", "bard", "google ai"],
+    "meta": ["meta", "llama", "llama 3", "mark zuckerberg", "facebook ai"],
+    "microsoft": ["microsoft", "copilot", "bing ai", "azure ai"],
+    "nvidia": ["nvidia", "jensen huang", "cuda", "gpu", "h100", "b200"],
+    "apple": ["apple", "apple intelligence", "siri", "mlx"],
+    "midjourney": ["midjourney"],
+    "stability": ["stability ai", "stable diffusion"],
+    "deepseek": ["deepseek"],
+    "mistral": ["mistral", "mixtral"],
+    "xai": ["xai", "grok", "elon musk ai"],
+    "telegram": ["telegram", "телеграм", "durov", "дуров"],
+    "huggingface": ["hugging face", "huggingface"],
+}
+
 
 # ====================== DATACLASS ======================
 @dataclass
@@ -267,20 +298,17 @@ def normalize_url(url: str) -> str:
         u = url.lower().strip()
         u = u.replace("https://", "").replace("http://", "")
         u = u.replace("www.", "")
-
         if "?" in u:
             base, query_str = u.split("?", 1)
             params = parse_qs(query_str)
             tracking = {'utm_source', 'utm_medium', 'utm_campaign', 'utm_content',
                         'fbclid', 'gclid', 'ref', 'source', 'mc_cid', 'mc_eid'}
             clean = {k: v for k, v in params.items() if k.lower() not in tracking}
-
             if clean:
                 query = urlencode(clean, doseq=True)
                 u = f"{base}?{query}"
             else:
                 u = base
-
         u = u.rstrip("/")
         return u
     except Exception:
@@ -344,9 +372,7 @@ def calculate_similarity(str1: str, str2: str) -> float:
 def jaccard_similarity(set1: Set[str], set2: Set[str]) -> float:
     if not set1 or not set2:
         return 0.0
-    intersection = len(set1 & set2)
-    union = len(set1 | set2)
-    return intersection / union if union > 0 else 0.0
+    return len(set1 & set2) / len(set1 | set2)
 
 
 def ngram_similarity(str1: str, str2: str, n: int = 2) -> float:
@@ -355,27 +381,20 @@ def ngram_similarity(str1: str, str2: str, n: int = 2) -> float:
         if len(words) < n:
             return set(words)
         return set(' '.join(words[i:i + n]) for i in range(len(words) - n + 1))
-
     ng1 = get_ngrams(str1, n)
     ng2 = get_ngrams(str2, n)
-
     if not ng1 or not ng2:
         return 0.0
-
-    intersection = len(ng1 & ng2)
-    union = len(ng1 | ng2)
-    return intersection / union if union > 0 else 0.0
+    return len(ng1 & ng2) / len(ng1 | ng2)
 
 
 def extract_entities(text: str) -> Set[str]:
     text_normalized = normalize_title(text)
     found = set()
-
     for entity in KEY_ENTITIES:
         entity_normalized = normalize_title(entity)
         if entity_normalized in text_normalized:
             found.add(entity_normalized)
-
     return found
 
 
@@ -386,19 +405,31 @@ def get_content_hash(text: str) -> str:
     return hashlib.md5(normalized.encode()).hexdigest()
 
 
+def detect_subject(text: str) -> str:
+    """Определяет главный субъект новости (openai, google, anthropic и т.д.)"""
+    text_lower = text.lower()
+    best_subject = "other"
+    best_count = 0
+
+    for subject, keywords in NEWS_SUBJECTS.items():
+        count = sum(1 for kw in keywords if kw in text_lower)
+        if count > best_count:
+            best_count = count
+            best_subject = subject
+
+    return best_subject if best_count > 0 else "other"
+
+
 # ====================== AI STRENGTH SCORE ======================
 def ai_relevance_score(text: str) -> int:
     text_lower = text.lower()
     score = 0
-
     for kw in AI_KEYWORDS_STRONG:
         if kw in text_lower:
             score += 2
-
     for kw in AI_KEYWORDS_WEAK:
         if kw in text_lower:
             score += 1
-
     return score
 
 
@@ -414,11 +445,9 @@ def priority_score(text: str) -> int:
 # ====================== ФИЛЬТРЫ ======================
 def is_promo_content(text: str) -> bool:
     text_lower = text.lower()
-
     promo_count = sum(1 for p in PROMO_PATTERNS if p in text_lower)
     if promo_count >= 2:
         return True
-
     promo_title_patterns = [
         "запустил рассылку", "запустила рассылку", "новая рассылка",
         "new newsletter", "launches newsletter", "sign up",
@@ -427,20 +456,16 @@ def is_promo_content(text: str) -> bool:
     for pattern in promo_title_patterns:
         if pattern in text_lower:
             return True
-
     return False
 
 
 def is_shopping_content(text: str) -> bool:
     text_lower = text.lower()
-
     if ai_relevance_score(text_lower) >= 4:
         return False
-
     shopping_count = sum(1 for p in SHOPPING_PATTERNS if p in text_lower)
     if shopping_count >= 1:
         return True
-
     price_pattern = re.search(r'\$\d+', text_lower)
     if price_pattern:
         investment_words = ["funding", "raises", "round", "valuation", "billion",
@@ -453,16 +478,13 @@ def is_shopping_content(text: str) -> bool:
                            "наушники", "телефон", "ноутбук", "планшет"]
             if any(w in text_lower for w in product_words):
                 return True
-
     return False
 
 
 def is_economics_news(text: str) -> bool:
     text_lower = text.lower()
-
     if ai_relevance_score(text_lower) >= 4:
         return False
-
     econ_keywords = [
         "inflation rate", "interest rate", "federal reserve", "fed rate",
         "recession", "gdp", "unemployment rate", "jobs report",
@@ -472,33 +494,25 @@ def is_economics_news(text: str) -> bool:
         "central bank", "forex", "commodities", "oil price",
         "consumer spending", "retail sales", "housing market",
     ]
-
     econ_count = sum(1 for kw in econ_keywords if kw in text_lower)
-
     if econ_count >= 2:
-        logger.info(f"    💵 PURE_ECONOMICS: {econ_count} терминов")
         return True
-
     return False
 
 
 def is_local_us_news(text: str) -> bool:
     text_lower = text.lower()
-
     ai_policy_phrases = [
         "ai regulation", "ai safety", "ai policy", "ai executive order",
         "ai legislation", "artificial intelligence act", "ai governance",
         "ai oversight", "ai bill", "regulate ai", "ai standards",
         "ai ethics", "responsible ai", "ai framework", "ai law",
-        "ai ban", "ai restrict", "ai require", "ai compliance",
-        "tech regulation", "tech policy",
+        "ai ban", "ai restrict", "tech regulation", "tech policy",
     ]
     if any(phrase in text_lower for phrase in ai_policy_phrases):
         return False
-
     if ai_relevance_score(text_lower) >= 4:
         return False
-
     global_markers = [
         "global", "worldwide", "international", "launch", "release",
         "announce", "research", "open source", "api", "platform",
@@ -506,7 +520,6 @@ def is_local_us_news(text: str) -> bool:
     ]
     if any(marker in text_lower for marker in global_markers):
         return False
-
     us_internal = [
         "fbi investigation", "cia operation", "homeland security alert",
         "us military operation", "border patrol", "ice raid",
@@ -515,12 +528,9 @@ def is_local_us_news(text: str) -> bool:
         "voter registration", "ballot measure", "gerrymandering",
         "town hall meeting", "state governor",
     ]
-
     for kw in us_internal:
         if kw in text_lower:
-            logger.info(f"    🇺🇸 US_INTERNAL: {kw}")
             return True
-
     return False
 
 
@@ -570,7 +580,8 @@ def is_relevant(article: Article) -> bool:
         return False
 
     p_score = priority_score(text)
-    logger.info(f"  ✅ PASS (ai={ai_score}, prio={p_score}): {article.title[:60]}")
+    subject = detect_subject(text)
+    logger.info(f"  ✅ PASS (ai={ai_score}, prio={p_score}, subj={subject}): {article.title[:55]}")
     return True
 
 
@@ -624,6 +635,7 @@ class PostedManager:
                 content_hash TEXT,
                 entities TEXT,
                 topic TEXT DEFAULT 'general',
+                subject TEXT DEFAULT 'other',
                 source TEXT,
                 posted_date TEXT DEFAULT CURRENT_TIMESTAMP
             )
@@ -638,6 +650,13 @@ class PostedManager:
             )
         ''')
 
+        # Добавить subject если нет
+        try:
+            cursor.execute("ALTER TABLE posted_articles ADD COLUMN subject TEXT DEFAULT 'other'")
+            conn.commit()
+        except Exception:
+            pass
+
         indices = [
             ('idx_norm_url', 'norm_url'),
             ('idx_content_hash', 'content_hash'),
@@ -645,9 +664,13 @@ class PostedManager:
             ('idx_posted_date', 'posted_date'),
             ('idx_title_normalized', 'title_normalized'),
             ('idx_title_word_signature', 'title_word_signature'),
+            ('idx_subject', 'subject'),
         ]
         for idx_name, column in indices:
-            cursor.execute(f'CREATE INDEX IF NOT EXISTS {idx_name} ON posted_articles({column})')
+            try:
+                cursor.execute(f'CREATE INDEX IF NOT EXISTS {idx_name} ON posted_articles({column})')
+            except Exception:
+                pass
 
         conn.commit()
         logger.info("📚 База данных инициализирована")
@@ -743,7 +766,6 @@ class PostedManager:
                             common = entities & existing_entities
                             min_size = min(len(entities), len(existing_entities))
                             overlap = len(common) / min_size if min_size > 0 else 0
-
                             if len(common) >= 2 and overlap >= config.entity_overlap_threshold:
                                 result.add_reason(f"ENTITY ({len(common)})", overlap, existing_title)
                     except Exception:
@@ -756,11 +778,39 @@ class PostedManager:
 
             return result
 
-    def check_diversity(self, topic: str, source: str = "") -> Tuple[bool, str]:
+    def check_subject_freshness(self, subject: str) -> Tuple[bool, str]:
+        """Проверяет не писали ли мы про этот субъект недавно."""
+        if subject == "other":
+            return True, ""
+
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute(
+                '''SELECT title, posted_date FROM posted_articles 
+                   WHERE subject = ? 
+                   ORDER BY posted_date DESC LIMIT 1''',
+                (subject,)
+            )
+            row = cursor.fetchone()
+
+            if row:
+                try:
+                    last_date = datetime.fromisoformat(row[1].replace('Z', '+00:00'))
+                except Exception:
+                    last_date = datetime.now(timezone.utc)
+
+                hours_ago = (datetime.now(timezone.utc) - last_date).total_seconds() / 3600
+
+                if hours_ago < config.same_subject_hours:
+                    return False, f"SAME_SUBJECT ({subject}, {hours_ago:.0f}h ago): {row[0][:40]}"
+
+            return True, ""
+
+    def check_diversity(self, topic: str, source: str = "", subject: str = "") -> Tuple[bool, str]:
         with self._lock:
             cursor = self._get_conn().cursor()
 
-            # Проверка источника — не брать подряд из одного
+            # Проверка источника
             if source:
                 cursor.execute(
                     'SELECT source FROM posted_articles ORDER BY posted_date DESC LIMIT 2'
@@ -794,7 +844,7 @@ class PostedManager:
 
             return True, ""
 
-    def add(self, article: Article, topic: str = Topic.GENERAL) -> bool:
+    def add(self, article: Article, topic: str = Topic.GENERAL, subject: str = "other") -> bool:
         with self._lock:
             conn = self._get_conn()
             cursor = conn.cursor()
@@ -811,12 +861,12 @@ class PostedManager:
                 cursor.execute('''
                     INSERT INTO posted_articles 
                     (url, norm_url, domain, title, title_normalized, title_words, 
-                     title_word_signature, summary, content_hash, entities, topic, source)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     title_word_signature, summary, content_hash, entities, topic, subject, source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     article.link, norm_url, domain_val, article.title, title_normalized,
                     json.dumps(title_words), word_signature, article.summary[:1000],
-                    content_hash, json.dumps(entities), topic, article.source
+                    content_hash, json.dumps(entities), topic, subject, article.source
                 ))
 
                 conn.commit()
@@ -825,7 +875,7 @@ class PostedManager:
                 saved = cursor.fetchone()
 
                 if saved:
-                    logger.info(f"💾 Сохранено (ID={saved[0]}): {article.title[:50]}...")
+                    logger.info(f"💾 Сохранено (ID={saved[0]}, subj={subject}): {article.title[:50]}...")
                     return True
                 else:
                     logger.error(f"❌ Не сохранено: {article.title[:50]}")
@@ -847,13 +897,19 @@ class PostedManager:
         with self._lock:
             cursor = self._get_conn().cursor()
             cursor.execute('''
-                SELECT title, topic, source, posted_date 
+                SELECT title, topic, source, posted_date, subject 
                 FROM posted_articles 
                 ORDER BY posted_date DESC 
                 LIMIT ?
             ''', (limit,))
 
-            return [{'title': r[0], 'topic': r[1], 'source': r[2], 'date': r[3]} for r in cursor.fetchall()]
+            results = []
+            for r in cursor.fetchall():
+                results.append({
+                    'title': r[0], 'topic': r[1], 'source': r[2],
+                    'date': r[3], 'subject': r[4] if len(r) > 4 else 'other'
+                })
+            return results
 
     def cleanup(self, days: int = 90):
         with self._lock:
@@ -916,7 +972,6 @@ def auto_cleanup_economics(posted: PostedManager):
     with posted._lock:
         conn = posted._get_conn()
         cursor = conn.cursor()
-
         cursor.execute("SELECT id, title, summary FROM posted_articles")
         all_posts = cursor.fetchall()
 
@@ -924,20 +979,15 @@ def auto_cleanup_economics(posted: PostedManager):
         for post_id, title, summary in all_posts:
             text = f"{title} {summary}".lower()
             econ_count = sum(1 for term in econ_terms if term in text)
-
             if econ_count >= 2:
                 ai_kw = ["ai", "artificial intelligence", "machine learning",
                          "llm", "gpt", "claude", "gemini", "нейро", "ии",
                          "нейросет", "искусственный интеллект"]
-                has_ai = any(kw in text for kw in ai_kw)
-
-                if not has_ai:
+                if not any(kw in text for kw in ai_kw):
                     cursor.execute("DELETE FROM posted_articles WHERE id = ?", (post_id,))
                     deleted += 1
-                    logger.info(f"  🗑️ ID={post_id}: {title[:50]}")
 
         conn.commit()
-
         if deleted > 0:
             logger.info(f"🗑️ Удалено {deleted} экономических постов")
         else:
@@ -950,7 +1000,6 @@ def auto_cleanup_non_ai(posted: PostedManager):
     with posted._lock:
         conn = posted._get_conn()
         cursor = conn.cursor()
-
         cursor.execute("SELECT id, title, summary FROM posted_articles")
         all_posts = cursor.fetchall()
 
@@ -958,21 +1007,17 @@ def auto_cleanup_non_ai(posted: PostedManager):
         for post_id, title, summary in all_posts:
             text = f"{title} {summary}".lower()
             score = 0
-
             for kw in AI_KEYWORDS_STRONG:
                 if kw in text:
                     score += 2
             for kw in AI_KEYWORDS_WEAK:
                 if kw in text:
                     score += 1
-
             if score < 2:
                 cursor.execute("DELETE FROM posted_articles WHERE id = ?", (post_id,))
                 deleted += 1
-                logger.info(f"  🗑️ NON-AI ID={post_id} (score={score}): {title[:50]}")
 
         conn.commit()
-
         if deleted > 0:
             logger.info(f"🗑️ Удалено {deleted} не-AI постов")
         else:
@@ -982,10 +1027,10 @@ def auto_cleanup_non_ai(posted: PostedManager):
 # ====================== RSS LOADING ======================
 async def fetch_feed(url: str, source: str) -> List[Article]:
     try:
-        await asyncio.sleep(random.uniform(0.5, 2))
+        await asyncio.sleep(random.uniform(0.3, 1.5))
 
         async with aiohttp.ClientSession() as sess:
-            async with sess.get(url, headers=HEADERS, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+            async with sess.get(url, headers=HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status != 200:
                     logger.warning(f"  ⚠️ {source}: HTTP {resp.status}")
                     return []
@@ -994,7 +1039,7 @@ async def fetch_feed(url: str, source: str) -> List[Article]:
         feed = await asyncio.to_thread(feedparser.parse, content)
 
         articles = []
-        for entry in feed.entries[:15]:
+        for entry in feed.entries[:20]:
             link = entry.get('link', '').strip()
             title = entry.get('title', '').strip()
             summary = re.sub(r'<[^>]+>', '',
@@ -1039,10 +1084,11 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     seen_normalized_titles: Set[str] = set()
     seen_word_signatures: Set[str] = set()
     seen_content_hashes: Set[str] = set()
+    seen_subjects: Set[str] = set()
 
     stats = {
         "batch_dup": 0, "db_dup": 0, "diversity": 0, "passed": 0,
-        "filtered_out": 0
+        "filtered_out": 0, "same_subject": 0
     }
 
     for article in articles:
@@ -1052,21 +1098,29 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
         title_normalized = normalize_title(article.title)
         if title_normalized in seen_normalized_titles:
-            logger.info(f"  🔄 BATCH_DUP_TITLE: {article.title[:50]}")
             stats["batch_dup"] += 1
             continue
 
         word_sig = get_sorted_word_signature(article.title)
         if word_sig in seen_word_signatures:
-            logger.info(f"  🔄 BATCH_DUP_SIG: {article.title[:50]}")
             stats["batch_dup"] += 1
             continue
 
         content_hash = get_content_hash(f"{article.title} {article.summary}")
         if content_hash in seen_content_hashes:
-            logger.info(f"  🔄 BATCH_DUP_HASH: {article.title[:50]}")
             stats["batch_dup"] += 1
             continue
+
+        # Проверка субъекта внутри батча — не больше 2 про одно и то же
+        text = f"{article.title} {article.summary}"
+        subject = detect_subject(text)
+
+        if subject != "other":
+            subject_count = sum(1 for c in candidates if detect_subject(f"{c.title} {c.summary}") == subject)
+            if subject_count >= 2:
+                logger.info(f"  🔄 BATCH_SAME_SUBJECT ({subject}): {article.title[:50]}")
+                stats["same_subject"] += 1
+                continue
 
         dup_result = posted.is_duplicate(article.link, article.title, article.summary)
         if dup_result.is_duplicate:
@@ -1075,8 +1129,15 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
             stats["db_dup"] += 1
             continue
 
-        topic = Topic.detect(f"{article.title} {article.summary}")
-        div_ok, div_reason = posted.check_diversity(topic, article.source)
+        # Проверка субъекта в истории
+        subj_ok, subj_reason = posted.check_subject_freshness(subject)
+        if not subj_ok:
+            posted.log_rejected(article, subj_reason)
+            stats["same_subject"] += 1
+            continue
+
+        topic = Topic.detect(text)
+        div_ok, div_reason = posted.check_diversity(topic, article.source, subject)
         if not div_ok:
             posted.log_rejected(article, div_reason)
             stats["diversity"] += 1
@@ -1101,13 +1162,20 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         source_count = sum(1 for c in candidates if c.source == art.source)
         source_penalty = max(0, source_count - 2) * 5
 
-        return ai_sc * 3 + prio_sc * 5 + len(entities) * 1.5 + max(0, 48 - age) / 48 - source_penalty
+        # Штраф за субъект из которого уже много кандидатов
+        subj = detect_subject(text)
+        subj_count = sum(1 for c in candidates if detect_subject(f"{c.title} {c.summary}") == subj)
+        subj_penalty = max(0, subj_count - 1) * 4
+
+        return (ai_sc * 3 + prio_sc * 5 + len(entities) * 1.5
+                + max(0, 72 - age) / 72 - source_penalty - subj_penalty)
 
     candidates.sort(key=score, reverse=True)
 
     logger.info(f"📊 Итоги фильтрации:")
     logger.info(f"   filtered={stats['filtered_out']}, batch_dup={stats['batch_dup']}, "
-                f"db_dup={stats['db_dup']}, diversity={stats['diversity']}, passed={stats['passed']}")
+                f"db_dup={stats['db_dup']}, diversity={stats['diversity']}, "
+                f"same_subject={stats['same_subject']}, passed={stats['passed']}")
     logger.info(f"✅ Кандидатов: {len(candidates)} из {len(articles)}")
 
     return candidates
@@ -1205,6 +1273,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 # ====================== POSTING ======================
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
     topic = Topic.detect(f"{article.title} {article.summary}")
+    subject = detect_subject(f"{article.title} {article.summary}")
 
     try:
         logger.info(f"  📤 Отправка поста...")
@@ -1214,9 +1283,9 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
             disable_web_page_preview=False
         )
 
-        saved = posted.add(article, topic)
+        saved = posted.add(article, topic, subject)
         if saved:
-            logger.info(f"✅ ОПУБЛИКОВАНО [{topic}]: {article.title[:50]}")
+            logger.info(f"✅ ОПУБЛИКОВАНО [{topic}][{subject}][{article.source}]: {article.title[:50]}")
         return True
 
     except Exception as e:
@@ -1227,7 +1296,7 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 # ====================== MAIN ======================
 async def main():
     logger.info("=" * 60)
-    logger.info("🚀 AI-POSTER v10.1 (Source Rotation + Smart Scoring)")
+    logger.info("🚀 AI-POSTER v11.0 (Subject Diversity + Source Rotation)")
     logger.info("=" * 60)
 
     posted = PostedManager(config.db_file)
@@ -1246,11 +1315,12 @@ async def main():
         stats = posted.get_stats()
         logger.info(f"📊 Статистика: {stats['total_posted']} posted, {stats['total_rejected']} rejected")
 
-        recent = posted.get_recent_posts(3)
+        recent = posted.get_recent_posts(5)
         if recent:
             logger.info("📋 Последние посты:")
             for p in recent:
-                logger.info(f"   • [{p['topic']}] [{p.get('source', '?')}] {p['title'][:55]}...")
+                subj = p.get('subject', '?')
+                logger.info(f"   • [{p['topic']}][{subj}][{p.get('source', '?')}] {p['title'][:50]}...")
 
         raw = await load_all_feeds()
 
@@ -1259,6 +1329,10 @@ async def main():
             sources_count[art.source] = sources_count.get(art.source, 0) + 1
         logger.info(f"📰 Источники: {sources_count}")
 
+        # Показать сколько источников работает
+        working = sum(1 for v in sources_count.values() if v > 0)
+        logger.info(f"📡 Работающих источников: {working}/{len(RSS_FEEDS)}")
+
         candidates = filter_and_dedupe(raw, posted)
 
         if not candidates:
@@ -1266,11 +1340,12 @@ async def main():
             return
 
         logger.info(f"🎯 Топ кандидаты:")
-        for i, c in enumerate(candidates[:5]):
+        for i, c in enumerate(candidates[:7]):
             text = f"{c.title} {c.summary}"
             prio = priority_score(text)
             ai_sc = ai_relevance_score(text)
-            logger.info(f"  {i + 1}. [ai={ai_sc}, prio={prio}] [{c.source}] {c.title[:60]}")
+            subj = detect_subject(text)
+            logger.info(f"  {i + 1}. [ai={ai_sc}, subj={subj}] [{c.source}] {c.title[:55]}")
 
         for article in candidates[:25]:
             dup_result = posted.is_duplicate(article.link, article.title, article.summary)
@@ -1298,6 +1373,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

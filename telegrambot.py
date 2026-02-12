@@ -822,7 +822,7 @@ class PostedManager:
 
             return result
 
-    def check_subject_freshness(self, subject: str) -> Tuple[bool, str]:
+        def check_subject_freshness(self, subject: str) -> Tuple[bool, str]:
         if subject == "other":
             return True, ""
 
@@ -838,7 +838,17 @@ class PostedManager:
 
             if row:
                 try:
-                    last_date = datetime.fromisoformat(row[1].replace('Z', '+00:00'))
+                    date_str = row[1]
+                    # Парсим дату из SQLite
+                    if 'T' in date_str:
+                        last_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    else:
+                        last_date = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
+                    
+                    # Делаем aware если naive
+                    if last_date.tzinfo is None:
+                        last_date = last_date.replace(tzinfo=timezone.utc)
+                        
                 except Exception:
                     last_date = datetime.now(timezone.utc)
 
@@ -1419,6 +1429,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

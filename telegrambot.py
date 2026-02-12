@@ -428,6 +428,20 @@ def detect_subject(text: str) -> str:
     return best_subject if best_count > 0 else "other"
 
 
+def parse_db_datetime(date_str: str) -> datetime:
+    """Парсит дату из SQLite и возвращает aware datetime."""
+    try:
+        if 'T' in date_str:
+            dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+        else:
+            dt = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return datetime.now(timezone.utc)
+
+
 # ====================== AI STRENGTH SCORE ======================
 def ai_relevance_score(text: str) -> int:
     text_lower = text.lower()
@@ -822,7 +836,7 @@ class PostedManager:
 
             return result
 
-        def check_subject_freshness(self, subject: str) -> Tuple[bool, str]:
+    def check_subject_freshness(self, subject: str) -> Tuple[bool, str]:
         if subject == "other":
             return True, ""
 
@@ -837,21 +851,7 @@ class PostedManager:
             row = cursor.fetchone()
 
             if row:
-                try:
-                    date_str = row[1]
-                    # Парсим дату из SQLite
-                    if 'T' in date_str:
-                        last_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                    else:
-                        last_date = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
-                    
-                    # Делаем aware если naive
-                    if last_date.tzinfo is None:
-                        last_date = last_date.replace(tzinfo=timezone.utc)
-                        
-                except Exception:
-                    last_date = datetime.now(timezone.utc)
-
+                last_date = parse_db_datetime(row[1])
                 hours_ago = (datetime.now(timezone.utc) - last_date).total_seconds() / 3600
 
                 if hours_ago < config.same_subject_hours:
@@ -1353,7 +1353,7 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 # ====================== MAIN ======================
 async def main():
     logger.info("=" * 60)
-    logger.info("🚀 AI-POSTER v11.1 (Product Focus + Corporate Filter)")
+    logger.info("🚀 AI-POSTER v11.2 (Product Focus + DateTime Fix)")
     logger.info("=" * 60)
 
     posted = PostedManager(config.db_file)
@@ -1429,6 +1429,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 

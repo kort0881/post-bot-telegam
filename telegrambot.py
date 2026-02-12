@@ -88,15 +88,12 @@ GROQ_MODELS = [
 
 # ====================== RSS ======================
 RSS_FEEDS = [
-    # Основные AI
     ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch AI"),
     ("https://venturebeat.com/category/ai/feed/", "VentureBeat AI"),
     ("https://arstechnica.com/tag/artificial-intelligence/feed/", "Ars Technica AI"),
     ("https://www.wired.com/feed/tag/ai/latest/rss", "WIRED AI"),
     ("https://the-decoder.com/feed/", "The Decoder"),
     ("https://www.unite.ai/feed/", "Unite.AI"),
-
-    # Большие tech-издания
     ("https://www.theverge.com/ai-artificial-intelligence/rss/index.xml", "The Verge AI"),
     ("https://9to5google.com/guides/google-ai/feed/", "9to5Google AI"),
     ("https://9to5mac.com/guides/apple-intelligence/feed/", "9to5Mac AI"),
@@ -104,12 +101,8 @@ RSS_FEEDS = [
     ("https://www.cnet.com/rss/ai/", "CNET AI"),
     ("https://www.engadget.com/ai/rss.xml", "Engadget AI"),
     ("https://www.technologyreview.com/topic/artificial-intelligence/feed", "MIT Tech Review AI"),
-
-    # Блоги компаний
     ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
     ("https://engineering.fb.com/category/ml-applications/feed/", "Meta AI Blog"),
-
-    # Русскоязычный
     ("https://kod.ru/rss", "Kod.ru"),
 ]
 
@@ -212,6 +205,25 @@ SHOPPING_PATTERNS = [
     "обзор:", "характеристики",
 ]
 
+CORPORATE_PATTERNS = [
+    "steps down", "stepping down", "resigns", "resigned", "fired",
+    "laid off", "layoffs", "hiring freeze", "restructuring",
+    "new ceo", "new cto", "new role", "promoted to", "appointed",
+    "leaves company", "departing", "departure", "exits",
+    "team disbanded", "team dissolved", "shut down team",
+    "уходит", "уволен", "увольнение", "сокращение", "реструктуризация",
+    "назначен", "покидает", "распускает", "расформирован",
+    "internal memo", "employee revolt", "workplace culture",
+    "office politics", "board meeting", "shareholder",
+    "quarterly earnings", "earnings call", "revenue report",
+    "stock price", "ipo", "market cap", "valuation",
+    "merger", "acquisition talks", "antitrust",
+    "lawsuit filed", "sued by", "legal battle", "court case",
+    "внутренний документ", "совет директоров", "акционеры",
+    "квартальный отчёт", "выручка", "капитализация",
+    "слияние", "поглощение", "судебный иск",
+]
+
 
 # ====================== KEY ENTITIES ======================
 KEY_ENTITIES = [
@@ -229,7 +241,6 @@ KEY_ENTITIES = [
     "telegram", "durov", "дуров", "телеграм",
 ]
 
-# Субъекты новостей — для проверки "не писать про одно и то же"
 NEWS_SUBJECTS = {
     "openai": ["openai", "chatgpt", "gpt-4", "gpt-5", "gpt-4o", "sam altman", "dall-e", "sora"],
     "anthropic": ["anthropic", "claude", "claude 3", "dario amodei"],
@@ -406,17 +417,14 @@ def get_content_hash(text: str) -> str:
 
 
 def detect_subject(text: str) -> str:
-    """Определяет главный субъект новости (openai, google, anthropic и т.д.)"""
     text_lower = text.lower()
     best_subject = "other"
     best_count = 0
-
     for subject, keywords in NEWS_SUBJECTS.items():
         count = sum(1 for kw in keywords if kw in text_lower)
         if count > best_count:
             best_count = count
             best_subject = subject
-
     return best_subject if best_count > 0 else "other"
 
 
@@ -478,6 +486,39 @@ def is_shopping_content(text: str) -> bool:
                            "наушники", "телефон", "ноутбук", "планшет"]
             if any(w in text_lower for w in product_words):
                 return True
+    return False
+
+
+def is_corporate_news(text: str) -> bool:
+    text_lower = text.lower()
+
+    product_markers = [
+        "launch", "release", "announce", "new model", "new feature",
+        "update", "upgrade", "api", "open source", "benchmark",
+        "demo", "preview", "beta", "available now", "rolls out",
+        "introduces", "unveils", "reveals", "ships",
+        "запуск", "релиз", "обновление", "новая версия", "доступен",
+        "новая функция", "новая модель", "представил", "показал",
+        "выпустил", "анонсировал",
+    ]
+    product_count = sum(1 for m in product_markers if m in text_lower)
+
+    corporate_count = sum(1 for p in CORPORATE_PATTERNS if p in text_lower)
+
+    if corporate_count >= 2 and corporate_count > product_count:
+        return True
+
+    if corporate_count >= 1 and product_count == 0:
+        title_corporate = [
+            "steps down", "resigns", "fired", "laid off", "new ceo",
+            "departing", "leaves", "disbanded", "dissolved", "shut down",
+            "уходит", "уволен", "распускает", "покидает", "назначен",
+            "restructur", "реструктуризация", "сокращение",
+        ]
+        for tc in title_corporate:
+            if tc in text_lower[:200]:
+                return True
+
     return False
 
 
@@ -553,6 +594,10 @@ def is_relevant(article: Article) -> bool:
 
     if is_shopping_content(text):
         logger.info(f"  🛒 SHOPPING: {article.title[:50]}")
+        return False
+
+    if is_corporate_news(text):
+        logger.info(f"  🏢 CORPORATE: {article.title[:50]}")
         return False
 
     for bad in BAD_PHRASES:
@@ -650,7 +695,6 @@ class PostedManager:
             )
         ''')
 
-        # Добавить subject если нет
         try:
             cursor.execute("ALTER TABLE posted_articles ADD COLUMN subject TEXT DEFAULT 'other'")
             conn.commit()
@@ -779,7 +823,6 @@ class PostedManager:
             return result
 
     def check_subject_freshness(self, subject: str) -> Tuple[bool, str]:
-        """Проверяет не писали ли мы про этот субъект недавно."""
         if subject == "other":
             return True, ""
 
@@ -810,7 +853,6 @@ class PostedManager:
         with self._lock:
             cursor = self._get_conn().cursor()
 
-            # Проверка источника
             if source:
                 cursor.execute(
                     'SELECT source FROM posted_articles ORDER BY posted_date DESC LIMIT 2'
@@ -1084,7 +1126,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     seen_normalized_titles: Set[str] = set()
     seen_word_signatures: Set[str] = set()
     seen_content_hashes: Set[str] = set()
-    seen_subjects: Set[str] = set()
 
     stats = {
         "batch_dup": 0, "db_dup": 0, "diversity": 0, "passed": 0,
@@ -1111,7 +1152,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
             stats["batch_dup"] += 1
             continue
 
-        # Проверка субъекта внутри батча — не больше 2 про одно и то же
         text = f"{article.title} {article.summary}"
         subject = detect_subject(text)
 
@@ -1129,7 +1169,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
             stats["db_dup"] += 1
             continue
 
-        # Проверка субъекта в истории
         subj_ok, subj_reason = posted.check_subject_freshness(subject)
         if not subj_ok:
             posted.log_rejected(article, subj_reason)
@@ -1158,11 +1197,9 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         ai_sc = ai_relevance_score(text)
         prio_sc = priority_score(text)
 
-        # Штраф за источник из которого уже много кандидатов
         source_count = sum(1 for c in candidates if c.source == art.source)
         source_penalty = max(0, source_count - 2) * 5
 
-        # Штраф за субъект из которого уже много кандидатов
         subj = detect_subject(text)
         subj_count = sum(1 for c in candidates if detect_subject(f"{c.title} {c.summary}") == subj)
         subj_penalty = max(0, subj_count - 1) * 4
@@ -1185,35 +1222,45 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
 
-    prompt = f"""Ты — редактор Telegram-канала про AI и технологии для аудитории из РФ и СНГ.
+    prompt = f"""Ты — редактор Telegram-канала про AI-технологии и новинки для аудитории из РФ и СНГ.
 
 НОВОСТЬ:
 Заголовок: {article.title}
 Содержание: {article.summary[:800]}
 Источник: {article.source}
 
-ЗАДАЧА: Напиши пост для Telegram-канала.
+ЗАДАЧА: Напиши пост для Telegram-канала про AI-НОВИНКИ и ТЕХНОЛОГИИ.
 
-СТРУКТУРА:
+ФОКУС КАНАЛА — только это:
+🟢 Новые AI-модели, релизы, обновления (GPT-5, Claude 4, Gemini 2 и т.д.)
+🟢 Новые AI-продукты и сервисы (приложения, боты, инструменты)
+🟢 Прорывы в AI-исследованиях (бенчмарки, новые архитектуры)
+🟢 Практическое применение AI (медицина, образование, кодинг)
+🟢 AI-инструменты для обычных людей (генерация картинок, текстов, видео)
+
+НЕ ПОДХОДИТ — ответь SKIP:
+🔴 Кадровые перестановки (кто уволен, кто назначен CEO)
+🔴 Корпоративные скандалы, суды, иски
+🔴 Финансовые отчёты, выручка, акции
+🔴 Внутренняя политика компаний (реструктуризация, слияния)
+🔴 Скидки на гаджеты, обзоры телефонов
+🔴 Политика США без связи с AI
+
+СТРУКТУРА ПОСТА:
 1. 🔥 Цепляющий заголовок на русском
-2. Суть — что произошло (конкретные факты, цифры, названия)
-3. Почему это важно — как это влияет на пользователей/разработчиков/рынок
-4. Короткий вывод (1-2 предложения)
+2. Что нового — конкретные факты (название, версия, возможности)
+3. Чем полезно — как это можно использовать прямо сейчас
+4. Вывод (1-2 предложения)
 
 ТРЕБОВАНИЯ:
-✅ Пиши для аудитории из РФ/СНГ
-✅ Если новость про внутреннюю политику США без связи с технологиями — ответь ТОЛЬКО: SKIP
-✅ Если новость про скидки на гаджеты, обзоры телефонов, цены — ответь ТОЛЬКО: SKIP
 ✅ Длина: 700-1000 символов
 ✅ Конкретика: цифры, названия, даты
-✅ Живой разговорный стиль, без канцелярита
+✅ Живой разговорный стиль
 
 ЗАПРЕЩЕНО:
-❌ Фразы: "стоит отметить", "интересно, что", "важно понимать", "давайте разберёмся"
-❌ Общие фразы без конкретики ("это может повлиять на многие сферы")
-❌ Пересказ пресс-релиза. Нужен анализ и мнение.
-❌ Писать про рассылки, подписки, newsletter как новость
-❌ Писать про цены на гаджеты, скидки, где купить
+❌ "стоит отметить", "интересно, что", "важно понимать"
+❌ Общие фразы без конкретики
+❌ Пересказ пресс-релиза без анализа
 
 ПОСТ:"""
 
@@ -1296,7 +1343,7 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 # ====================== MAIN ======================
 async def main():
     logger.info("=" * 60)
-    logger.info("🚀 AI-POSTER v11.0 (Subject Diversity + Source Rotation)")
+    logger.info("🚀 AI-POSTER v11.1 (Product Focus + Corporate Filter)")
     logger.info("=" * 60)
 
     posted = PostedManager(config.db_file)
@@ -1329,7 +1376,6 @@ async def main():
             sources_count[art.source] = sources_count.get(art.source, 0) + 1
         logger.info(f"📰 Источники: {sources_count}")
 
-        # Показать сколько источников работает
         working = sum(1 for v in sources_count.values() if v > 0)
         logger.info(f"📡 Работающих источников: {working}/{len(RSS_FEEDS)}")
 

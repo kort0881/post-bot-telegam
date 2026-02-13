@@ -54,12 +54,12 @@ class Config:
 
         self.diversity_window = 7
         self.same_topic_limit = 2
-        self.same_subject_hours = 24
+        self.same_subject_hours = 8
 
         self.groq_retries_per_model = 2
         self.groq_base_delay = 2.0
 
-        self.rejected_retention_days = 7
+        self.rejected_retention_days = 2
 
         missing = []
         for var, name in [(self.groq_api_key, "GROQ_API_KEY"),
@@ -93,13 +93,9 @@ RSS_FEEDS = [
     ("https://arstechnica.com/tag/artificial-intelligence/feed/", "Ars Technica AI"),
     ("https://www.wired.com/feed/tag/ai/latest/rss", "WIRED AI"),
     ("https://the-decoder.com/feed/", "The Decoder"),
-    ("https://www.unite.ai/feed/", "Unite.AI"),
-    ("https://www.theverge.com/ai-artificial-intelligence/rss/index.xml", "The Verge AI"),
     ("https://9to5google.com/guides/google-ai/feed/", "9to5Google AI"),
     ("https://9to5mac.com/guides/apple-intelligence/feed/", "9to5Mac AI"),
     ("https://www.zdnet.com/topic/artificial-intelligence/rss.xml", "ZDNet AI"),
-    ("https://www.cnet.com/rss/ai/", "CNET AI"),
-    ("https://www.engadget.com/ai/rss.xml", "Engadget AI"),
     ("https://www.technologyreview.com/topic/artificial-intelligence/feed", "MIT Tech Review AI"),
     ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
     ("https://engineering.fb.com/category/ml-applications/feed/", "Meta AI Blog"),
@@ -200,9 +196,7 @@ SHOPPING_PATTERNS = [
     "best deal", "deals on", "deals for",
     "back down to $", "drops to $", "now $", "only $",
     "where to buy", "buy it now", "order now",
-    "review:", "hands-on:", "unboxing",
-    "лучшая цена", "скидка", "распродажа", "купить",
-    "обзор:", "характеристики",
+    "лучшая цена", "скидка", "распродажа",
 ]
 
 CORPORATE_PATTERNS = [
@@ -222,6 +216,20 @@ CORPORATE_PATTERNS = [
     "внутренний документ", "совет директоров", "акционеры",
     "квартальный отчёт", "выручка", "капитализация",
     "слияние", "поглощение", "судебный иск",
+]
+
+HOWTO_PATTERNS = [
+    "how to ", "how do i", "here's how", "step-by-step",
+    "tips and tricks", "tips for", "best ways to",
+    "как сделать", "как настроить", "как отключить", "как установить",
+    "как очистить", "как удалить", "как включить", "как убрать",
+    "как сбросить", "как обновить", "как проверить", "как поставить",
+    "пошаговая инструкция", "руководство по",
+    "ways to fix", "ways to improve", "things you can do",
+    "useful things", "fun questions", "simple trick",
+    "secret feature", "hidden feature",
+    "review:", "hands-on:", "unboxing",
+    "обзор:", "характеристики",
 ]
 
 
@@ -244,16 +252,16 @@ KEY_ENTITIES = [
 NEWS_SUBJECTS = {
     "openai": ["openai", "chatgpt", "gpt-4", "gpt-5", "gpt-4o", "sam altman", "dall-e", "sora"],
     "anthropic": ["anthropic", "claude", "claude 3", "dario amodei"],
-    "google": ["google", "gemini", "deepmind", "bard", "google ai"],
-    "meta": ["meta", "llama", "llama 3", "mark zuckerberg", "facebook ai"],
+    "google": ["google ai", "gemini", "deepmind", "bard"],
+    "meta": ["meta ai", "llama", "llama 3", "mark zuckerberg"],
     "microsoft": ["microsoft", "copilot", "bing ai", "azure ai"],
-    "nvidia": ["nvidia", "jensen huang", "cuda", "gpu", "h100", "b200"],
-    "apple": ["apple", "apple intelligence", "siri", "mlx"],
+    "nvidia": ["nvidia", "jensen huang", "cuda", "h100", "b200"],
+    "apple": ["apple intelligence", "siri ai", "mlx"],
     "midjourney": ["midjourney"],
     "stability": ["stability ai", "stable diffusion"],
     "deepseek": ["deepseek"],
     "mistral": ["mistral", "mixtral"],
-    "xai": ["xai", "grok", "elon musk ai"],
+    "xai": ["xai", "grok"],
     "telegram": ["telegram", "телеграм", "durov", "дуров"],
     "huggingface": ["hugging face", "huggingface"],
 }
@@ -429,7 +437,6 @@ def detect_subject(text: str) -> str:
 
 
 def parse_db_datetime(date_str: str) -> datetime:
-    """Парсит дату из SQLite и возвращает aware datetime."""
     try:
         if 'T' in date_str:
             dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
@@ -494,10 +501,9 @@ def is_shopping_content(text: str) -> bool:
                            "million", "investment", "инвестиции", "раунд", "оценка"]
         if not any(w in text_lower for w in investment_words):
             product_words = ["price", "buy", "sale", "deal", "discount", "cheap",
-                           "review", "specs", "earbuds", "phone", "laptop", "tablet",
+                           "specs", "earbuds", "phone", "laptop", "tablet",
                            "watch", "headphone", "speaker", "camera", "monitor",
-                           "цена", "купить", "обзор", "характеристики",
-                           "наушники", "телефон", "ноутбук", "планшет"]
+                           "цена", "купить", "наушники", "телефон", "ноутбук", "планшет"]
             if any(w in text_lower for w in product_words):
                 return True
     return False
@@ -516,7 +522,6 @@ def is_corporate_news(text: str) -> bool:
         "выпустил", "анонсировал",
     ]
     product_count = sum(1 for m in product_markers if m in text_lower)
-
     corporate_count = sum(1 for p in CORPORATE_PATTERNS if p in text_lower)
 
     if corporate_count >= 2 and corporate_count > product_count:
@@ -532,6 +537,24 @@ def is_corporate_news(text: str) -> bool:
         for tc in title_corporate:
             if tc in text_lower[:200]:
                 return True
+
+    return False
+
+
+def is_howto_content(text: str) -> bool:
+    text_lower = text.lower()
+
+    ai_product_markers = [
+        "chatgpt", "claude", "gemini", "midjourney", "dall-e", "copilot",
+        "stable diffusion", "grok", "deepseek", "sora",
+        "нейросеть", "нейросети", "gpt", "ai tool", "ai feature",
+    ]
+    if any(m in text_lower for m in ai_product_markers):
+        return False
+
+    howto_count = sum(1 for p in HOWTO_PATTERNS if p in text_lower)
+    if howto_count >= 1:
+        return True
 
     return False
 
@@ -612,6 +635,10 @@ def is_relevant(article: Article) -> bool:
 
     if is_corporate_news(text):
         logger.info(f"  🏢 CORPORATE: {article.title[:50]}")
+        return False
+
+    if is_howto_content(text):
+        logger.info(f"  📖 HOWTO: {article.title[:50]}")
         return False
 
     for bad in BAD_PHRASES:
@@ -764,9 +791,8 @@ class PostedManager:
             entities = extract_entities(f"{title} {summary}")
             domain = get_domain(url)
 
-            if self._was_rejected(norm_url):
-                result.add_reason("PREVIOUSLY_REJECTED")
-                return result
+            # НЕ проверяем rejected — пусть статьи получают второй шанс
+            # Проверяем только реально опубликованные
 
             cursor.execute('SELECT title FROM posted_articles WHERE norm_url = ?', (norm_url,))
             row = cursor.fetchone()
@@ -824,7 +850,7 @@ class PostedManager:
                             common = entities & existing_entities
                             min_size = min(len(entities), len(existing_entities))
                             overlap = len(common) / min_size if min_size > 0 else 0
-                            if len(common) >= 2 and overlap >= config.entity_overlap_threshold:
+                            if len(common) >= 3 and overlap >= config.entity_overlap_threshold:
                                 result.add_reason(f"ENTITY ({len(common)})", overlap, existing_title)
                     except Exception:
                         pass
@@ -836,7 +862,7 @@ class PostedManager:
 
             return result
 
-    def check_subject_freshness(self, subject: str) -> Tuple[bool, str]:
+    def check_subject_freshness(self, subject: str, new_title: str = "") -> Tuple[bool, str]:
         if subject == "other":
             return True, ""
 
@@ -855,11 +881,21 @@ class PostedManager:
                 hours_ago = (datetime.now(timezone.utc) - last_date).total_seconds() / 3600
 
                 if hours_ago < config.same_subject_hours:
+                    # Проверяем — если заголовки РАЗНЫЕ (similarity < 0.3), пропускаем
+                    if new_title:
+                        sim = calculate_similarity(
+                            normalize_title(new_title),
+                            normalize_title(row[0])
+                        )
+                        if sim < 0.3:
+                            logger.info(f"  ✅ DIFFERENT_ANGLE ({subject}, sim={sim:.0%}): {new_title[:40]}")
+                            return True, ""
+
                     return False, f"SAME_SUBJECT ({subject}, {hours_ago:.0f}h ago): {row[0][:40]}"
 
             return True, ""
 
-    def check_diversity(self, topic: str, source: str = "", subject: str = "") -> Tuple[bool, str]:
+    def check_diversity(self, topic: str, source: str = "") -> Tuple[bool, str]:
         with self._lock:
             cursor = self._get_conn().cursor()
 
@@ -941,8 +977,6 @@ class PostedManager:
                 return False
 
     def log_rejected(self, article: Article, reason: str):
-        norm_url = normalize_url(article.link)
-        self._add_rejected(norm_url, article.title, reason)
         logger.info(f"🚫 [{reason}]: {article.title[:50]}")
 
     def get_recent_posts(self, limit: int = 5) -> List[dict]:
@@ -971,8 +1005,8 @@ class PostedManager:
             cursor.execute(f"DELETE FROM posted_articles WHERE posted_date < datetime('now', '-{days} days')")
             deleted = cursor.rowcount
 
-            cursor.execute(
-                f"DELETE FROM rejected_urls WHERE rejected_at < datetime('now', '-{config.rejected_retention_days} days')")
+            # Полная очистка rejected — они больше не блокируют
+            cursor.execute("DELETE FROM rejected_urls")
             rejected_deleted = cursor.rowcount
 
             conn.commit()
@@ -1017,8 +1051,7 @@ def auto_cleanup_economics(posted: PostedManager):
     econ_terms = [
         "inflation", "federal reserve", "fed rate", "recession", "fed ",
         "gdp", "unemployment", "stock market", "bonds", "treasury",
-        "инфляция", "фрс", "бостик", "уорша", "процентная ставка",
-        "центральный банк", "валюта", "экономический рост"
+        "инфляция", "фрс", "процентная ставка", "центральный банк"
     ]
 
     with posted._lock:
@@ -1167,8 +1200,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
         if subject != "other":
             subject_count = sum(1 for c in candidates if detect_subject(f"{c.title} {c.summary}") == subject)
-            if subject_count >= 2:
-                logger.info(f"  🔄 BATCH_SAME_SUBJECT ({subject}): {article.title[:50]}")
+            if subject_count >= 3:
                 stats["same_subject"] += 1
                 continue
 
@@ -1179,14 +1211,14 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
             stats["db_dup"] += 1
             continue
 
-        subj_ok, subj_reason = posted.check_subject_freshness(subject)
+        subj_ok, subj_reason = posted.check_subject_freshness(subject, article.title)
         if not subj_ok:
             posted.log_rejected(article, subj_reason)
             stats["same_subject"] += 1
             continue
 
         topic = Topic.detect(text)
-        div_ok, div_reason = posted.check_diversity(topic, article.source, subject)
+        div_ok, div_reason = posted.check_diversity(topic, article.source)
         if not div_ok:
             posted.log_rejected(article, div_reason)
             stats["diversity"] += 1
@@ -1208,14 +1240,17 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         prio_sc = priority_score(text)
 
         source_count = sum(1 for c in candidates if c.source == art.source)
-        source_penalty = max(0, source_count - 2) * 5
+        source_penalty = max(0, source_count - 2) * 3
 
         subj = detect_subject(text)
-        subj_count = sum(1 for c in candidates if detect_subject(f"{c.title} {c.summary}") == subj)
-        subj_penalty = max(0, subj_count - 1) * 4
+        if subj != "other":
+            subj_count = sum(1 for c in candidates if detect_subject(f"{c.title} {c.summary}") == subj)
+            subj_penalty = max(0, subj_count - 1) * 2
+        else:
+            subj_penalty = 0
 
-        return (ai_sc * 3 + prio_sc * 5 + len(entities) * 1.5
-                + max(0, 72 - age) / 72 - source_penalty - subj_penalty)
+        freshness = max(0, 72 - age) / 72
+        return ai_sc * 3 + prio_sc * 5 + len(entities) * 1 + freshness * 2 - source_penalty - subj_penalty
 
     candidates.sort(key=score, reverse=True)
 
@@ -1255,6 +1290,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 🔴 Внутренняя политика компаний (реструктуризация, слияния)
 🔴 Скидки на гаджеты, обзоры телефонов
 🔴 Политика США без связи с AI
+🔴 Инструкции "как настроить/очистить/удалить" для обычных гаджетов
 
 СТРУКТУРА ПОСТА:
 1. 🔥 Цепляющий заголовок на русском
@@ -1353,7 +1389,7 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 # ====================== MAIN ======================
 async def main():
     logger.info("=" * 60)
-    logger.info("🚀 AI-POSTER v11.2 (Product Focus + DateTime Fix)")
+    logger.info("🚀 AI-POSTER v12.0 (Smart Subject + No Rejected Block + HOWTO Filter)")
     logger.info("=" * 60)
 
     posted = PostedManager(config.db_file)
@@ -1398,7 +1434,6 @@ async def main():
         logger.info(f"🎯 Топ кандидаты:")
         for i, c in enumerate(candidates[:7]):
             text = f"{c.title} {c.summary}"
-            prio = priority_score(text)
             ai_sc = ai_relevance_score(text)
             subj = detect_subject(text)
             logger.info(f"  {i + 1}. [ai={ai_sc}, subj={subj}] [{c.source}] {c.title[:55]}")

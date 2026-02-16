@@ -791,8 +791,10 @@ class PostedManager:
             entities = extract_entities(f"{title} {summary}")
             domain = get_domain(url)
 
-            # НЕ проверяем rejected — пусть статьи получают второй шанс
-            # Проверяем только реально опубликованные
+            # Проверяем rejected_urls (Change #2)
+            if self._was_rejected(norm_url):
+                result.add_reason("REJECTED_BEFORE", 1.0, "")
+                return result
 
             cursor.execute('SELECT title FROM posted_articles WHERE norm_url = ?', (norm_url,))
             row = cursor.fetchone()
@@ -977,7 +979,10 @@ class PostedManager:
                 return False
 
     def log_rejected(self, article: Article, reason: str):
+        # Change #1: Actually save to DB
         logger.info(f"🚫 [{reason}]: {article.title[:50]}")
+        norm_url = normalize_url(article.link)
+        self._add_rejected(norm_url, article.title, reason)
 
     def get_recent_posts(self, limit: int = 5) -> List[dict]:
         with self._lock:
@@ -1005,8 +1010,8 @@ class PostedManager:
             cursor.execute(f"DELETE FROM posted_articles WHERE posted_date < datetime('now', '-{days} days')")
             deleted = cursor.rowcount
 
-            # Полная очистка rejected — они больше не блокируют
-            cursor.execute("DELETE FROM rejected_urls")
+            # Change #3: Smart cleanup (retention for 2 days)
+            cursor.execute("DELETE FROM rejected_urls WHERE rejected_at < datetime('now', '-2 days')")
             rejected_deleted = cursor.rowcount
 
             conn.commit()
@@ -1388,6 +1393,17 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 
 # ====================== MAIN ======================
 async def main():
+    # Change #4: Lock file protection
+    lock_file = "bot.lock"
+    
+    if os.path.exists(lock_file):
+        logger.error("❌ Бот уже запущен! Удалите bot.lock если это ошибка")
+        return
+    
+    # Создаём lock-файл
+    with open(lock_file, 'w') as f:
+        f.write(str(os.getpid()))
+
     logger.info("=" * 60)
     logger.info("🚀 AI-POSTER v12.0 (Smart Subject + No Rejected Block + HOWTO Filter)")
     logger.info("=" * 60)
@@ -1460,6 +1476,10 @@ async def main():
     finally:
         posted.close()
         await bot.session.close()
+        
+        # Change #5: Remove lock file
+        if os.path.exists(lock_file):
+            os.remove(lock_file)
 
 
 if __name__ == "__main__":

@@ -42,8 +42,8 @@ class Config:
         self.retention_days = int(os.getenv("RETENTION_DAYS", "90"))
         self.db_file = "posted_articles.db"
 
-        # --- ВОЗВРАЩАЕМ ВАШИ СТРОГИЕ НАСТРОЙКИ (55%) ---
-        self.title_similarity_threshold = 0.55  # СТРОГО: Если 55% похоже - это дубль
+        # --- СТРОГИЕ НАСТРОЙКИ ДЕДУПА ---
+        self.title_similarity_threshold = 0.55
         self.ngram_similarity_threshold = 0.45
         self.entity_overlap_threshold = 0.50
         self.jaccard_threshold = 0.50
@@ -51,14 +51,16 @@ class Config:
 
         self.min_post_length = 450
         self.max_article_age_hours = 72
-        
-        # Снижаем порог входа, чтобы он ВИДЕЛ новости, но отсеивал дубли
-        self.min_ai_score = 1 
+
+        # Порог AI, чтобы видеть новости, но отсеивать мусор
+        self.min_ai_score = 1
 
         # --- НАСТРОЙКИ ЧЕРЕДОВАНИЯ ---
-        self.diversity_window = 5  # Смотрим на 5 последних постов
-        self.same_topic_limit = 2  # Не больше 2 постов подряд на одну тему
-        self.same_subject_hours = 6 # Интервал между постами про одну компанию (OpenAI и т.д.)
+        self.diversity_window = 5        # последние N постов по топику
+        self.same_topic_limit = 2        # не больше N постов на один topic в окне
+        self.same_subject_hours = 6      # (оставляем как есть для защиты от спама по subject)
+        self.rotation_recent_limit = 3   # смотрим последние 3 поста
+        self.rotation_max_per_subject = 3  # если среди последних 3 уже 3 openai — вырезаем openai из кандидатов
 
         self.groq_retries_per_model = 2
         self.groq_base_delay = 2.0
@@ -473,7 +475,7 @@ def priority_score(text: str) -> int:
     return score
 
 
-# ====================== ФИЛЬТРЫ (ОСТАВЛЯЕМ ПАРАНОЙЮ) ======================
+# ====================== ФИЛЬТРЫ ======================
 def is_promo_content(text: str) -> bool:
     text_lower = text.lower()
     promo_count = sum(1 for p in PROMO_PATTERNS if p in text_lower)
@@ -762,11 +764,6 @@ class PostedManager:
         conn.commit()
         logger.info("📚 База данных инициализирована")
 
-    def _was_rejected(self, norm_url: str) -> bool:
-        cursor = self._get_conn().cursor()
-        cursor.execute('SELECT 1 FROM rejected_urls WHERE norm_url = ?', (norm_url,))
-        return cursor.fetchone() is not None
-
     def _add_rejected(self, norm_url: str, title: str, reason: str):
         try:
             cursor = self._get_conn().cursor()
@@ -801,11 +798,6 @@ class PostedManager:
             entities = extract_entities(f"{title} {summary}")
             domain = get_domain(url)
 
-            # --- ВАЖНОЕ ИЗМЕНЕНИЕ ---
-            # Мы больше НЕ проверяем rejected_urls здесь.
-            # Это позволяет боту "передумать", если раньше он отклонил новость из-за тайминга.
-            # Фильтры "параноика" (реклама, крипта) отсеют мусор в функции filter_and_dedupe.
-
             cursor.execute('SELECT title FROM posted_articles WHERE norm_url = ?', (norm_url,))
             row = cursor.fetchone()
             if row:
@@ -823,12 +815,6 @@ class PostedManager:
             row = cursor.fetchone()
             if row:
                 result.add_reason("TITLE_EXACT", 1.0, row[0])
-                return result
-
-            cursor.execute('SELECT title FROM posted_articles WHERE title_word_signature = ?', (word_signature,))
-            row = cursor.fetchone()
-            if row:
-                result.add_reason("WORD_SIGNATURE", 0.95, row[0])
                 return result
 
             cursor.execute(
@@ -893,7 +879,6 @@ class PostedManager:
                 hours_ago = (datetime.now(timezone.utc) - last_date).total_seconds() / 3600
 
                 if hours_ago < config.same_subject_hours:
-                    # Если заголовки сильно разные, разрешаем
                     if new_title:
                         sim = calculate_similarity(
                             normalize_title(new_title),
@@ -920,8 +905,6 @@ class PostedManager:
                 if len(recent_sources) >= 2 and all(s == source for s in recent_sources):
                     return False, f"SAME_SOURCE_3X: {source}"
 
-                # Убрали строгое правило "подряд", оставили только 3 раза подряд
-
             if topic == Topic.GENERAL:
                 return True, ""
 
@@ -933,10 +916,6 @@ class PostedManager:
 
             if not recent_topics:
                 return True, ""
-
-            if recent_topics[0] == topic:
-                # Разрешаем повтор темы, если это горячая тема
-                pass 
 
             same_count = sum(1 for t in recent_topics if t == topic)
             if same_count >= config.same_topic_limit:
@@ -1057,8 +1036,8 @@ class PostedManager:
 # ====================== AUTO-CLEANUP ======================
 def auto_cleanup_economics(posted: PostedManager):
     logger.info("🧹 Проверка экономических постов...")
-    # Оставляем логику, чтобы удалять случайный пропуск, но не запускаем при каждом старте
     pass
+
 
 def auto_cleanup_non_ai(posted: PostedManager):
     logger.info("🧹 Проверка не-AI постов...")
@@ -1132,7 +1111,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     }
 
     for article in articles:
-        # Фильтры-параноики работают здесь
         if not is_relevant(article):
             stats["filtered_out"] += 1
             continue
@@ -1155,14 +1133,12 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         text = f"{article.title} {article.summary}"
         subject = detect_subject(text)
 
-        # Ослабили лимит на ту же тему в одной пачке
         if subject != "other":
             subject_count = sum(1 for c in candidates if detect_subject(f"{c.title} {c.summary}") == subject)
             if subject_count >= 5:
                 stats["same_subject"] += 1
                 continue
 
-        # Проверка дублей ТОЛЬКО ПО ПОСТАМ (игнорируя старые реджекты)
         dup_result = posted.is_duplicate(article.link, article.title, article.summary)
         if dup_result.is_duplicate:
             reason = "; ".join(dup_result.reasons[:3])
@@ -1191,7 +1167,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         candidates.append(article)
         stats["passed"] += 1
 
-    # Умная сортировка: Свежесть + Важность + AI Score
     def score(art: Article) -> float:
         text = f"{art.title} {art.summary}"
         entities = extract_entities(text)
@@ -1199,24 +1174,55 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         ai_sc = ai_relevance_score(text)
         prio_sc = priority_score(text)
 
-        # Пенальти за источник, если уже есть кандидат оттуда (чередование источников)
         source_count = sum(1 for c in candidates if c.source == art.source)
         source_penalty = max(0, source_count - 1) * 5
 
         freshness = max(0, 72 - age) / 72
-        
-        # Формула: AI * 3 + Важность * 5 + Сущности + Свежесть * 2 - Пенальти за повтор источника
+
         return ai_sc * 3 + prio_sc * 5 + len(entities) * 1 + freshness * 2 - source_penalty
 
     candidates.sort(key=score, reverse=True)
 
-    logger.info(f"📊 Итоги фильтрации:")
+    logger.info("📊 Итоги фильтрации:")
     logger.info(f"   filtered={stats['filtered_out']}, batch_dup={stats['batch_dup']}, "
                 f"db_dup={stats['db_dup']}, diversity={stats['diversity']}, "
                 f"same_subject={stats['same_subject']}, passed={stats['passed']}")
     logger.info(f"✅ Кандидатов: {len(candidates)} из {len(articles)}")
 
     return candidates
+
+
+# ====================== ROTATION (ЧЕРЕДОВАНИЕ SUBJECT) ======================
+def rotate_candidates_by_subject(candidates: List[Article], posted: PostedManager) -> List[Article]:
+    recent = posted.get_recent_posts(config.rotation_recent_limit)
+    recent_subj_counts = {}
+    for p in recent:
+        s = p.get("subject", "other")
+        recent_subj_counts[s] = recent_subj_counts.get(s, 0) + 1
+
+    if not recent_subj_counts:
+        return candidates
+
+    logger.info(f"🔄 Чередование по subject, последние {config.rotation_recent_limit}: {recent_subj_counts}")
+
+    rotated = []
+    skipped = 0
+    for art in candidates:
+        subj = detect_subject(f"{art.title} {art.summary}")
+        if recent_subj_counts.get(subj, 0) >= config.rotation_max_per_subject:
+            logger.info(f"   ⏭️ SKIP_ROTATION [{subj}] x{recent_subj_counts[subj]}: {art.title[:55]}")
+            skipped += 1
+            continue
+        rotated.append(art)
+
+    if skipped > 0:
+        logger.info(f"🔄 Чередование: выкинуто {skipped} кандидатов из-за перегруза subject")
+
+    if not rotated:
+        logger.info("⚠️ После ротации кандидатов не осталось, используем исходный список без ротации")
+        return candidates
+
+    return rotated
 
 
 # ====================== TEXT GENERATION ======================
@@ -1335,12 +1341,11 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 # ====================== MAIN ======================
 async def main():
     lock_file = "bot.lock"
-    
+
     if os.path.exists(lock_file):
         logger.error("❌ Бот уже запущен! Удалите bot.lock если это ошибка")
         return
-    
-    # Создаём lock-файл
+
     with open(lock_file, 'w') as f:
         f.write(str(os.getpid()))
 
@@ -1349,11 +1354,8 @@ async def main():
     logger.info("=" * 60)
 
     posted = PostedManager(config.db_file)
-    
-    # --- СБРОС СТАРЫХ ОТКАЗОВ ---
-    # Это позволяет боту "передумать" и взять новость, которую он пропустил час назад
-    posted.clear_rejected() 
-    # ----------------------------
+
+    posted.clear_rejected()
 
     try:
         if posted.verify_db():
@@ -1390,7 +1392,11 @@ async def main():
             logger.info("📭 Нет подходящих новостей")
             return
 
-        logger.info(f"🎯 Топ кандидаты:")
+        # ЧЕРЕДОВАНИЕ: если последние 3 поста уже про openai (или другой subject 3/3),
+        # выкидываем такие subject из списка кандидатов.
+        candidates = rotate_candidates_by_subject(candidates, posted)
+
+        logger.info("🎯 Топ кандидаты:")
         for i, c in enumerate(candidates[:7]):
             text = f"{c.title} {c.summary}"
             ai_sc = ai_relevance_score(text)
@@ -1398,7 +1404,6 @@ async def main():
             logger.info(f"  {i + 1}. [ai={ai_sc}, subj={subj}] [{c.source}] {c.title[:55]}")
 
         for article in candidates[:25]:
-            # Проверка дублей ТОЛЬКО по факту (по базе постов)
             dup_result = posted.is_duplicate(article.link, article.title, article.summary)
             if dup_result.is_duplicate:
                 posted.log_rejected(article, f"FINAL: {'; '.join(dup_result.reasons[:2])}")
@@ -1420,13 +1425,15 @@ async def main():
     finally:
         posted.close()
         await bot.session.close()
-        
+
         if os.path.exists(lock_file):
             os.remove(lock_file)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 
 

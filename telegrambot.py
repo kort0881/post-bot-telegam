@@ -13,6 +13,7 @@ from typing import List, Set, Optional, Tuple
 from urllib.parse import urlparse, parse_qs, urlencode
 from dataclasses import dataclass, field
 from functools import lru_cache
+from collections import defaultdict, deque
 
 import aiohttp
 import feedparser
@@ -52,15 +53,15 @@ class Config:
         self.min_post_length = 450
         self.max_article_age_hours = 72
 
-        # Порог AI, чтобы видеть новости, но отсеивать мусор
         self.min_ai_score = 1
 
         # --- НАСТРОЙКИ ЧЕРЕДОВАНИЯ ---
-        self.diversity_window = 5        # последние N постов по топику
-        self.same_topic_limit = 2        # не больше N постов на один topic в окне
-        self.same_subject_hours = 6      # (оставляем как есть для защиты от спама по subject)
-        self.rotation_recent_limit = 3   # смотрим последние 3 поста
-        self.rotation_max_per_subject = 3  # если среди последних 3 уже 3 openai — вырезаем openai из кандидатов
+        self.diversity_window = 5
+        self.same_topic_limit = 2
+        self.same_subject_hours = 6
+        self.rotation_recent_limit = 3
+        self.rotation_max_per_subject = 2
+        self.rotation_max_per_source = 2
 
         self.groq_retries_per_model = 2
         self.groq_base_delay = 2.0
@@ -775,13 +776,12 @@ class PostedManager:
         except Exception as e:
             logger.error(f"Ошибка добавления в rejected: {e}")
 
-    # --- ФУНКЦИЯ ОЧИСТКИ ОТКЛОНЕННЫХ ---
     def clear_rejected(self):
         with self._lock:
             conn = self._get_conn()
             conn.execute("DELETE FROM rejected_urls")
             conn.commit()
-            logger.info("♻️ История 'черного списка' очищена (начинаем поиск с нуля)")
+            logger.info("♻️ История 'черного списка' очищена")
 
     def is_duplicate(self, url: str, title: str, summary: str = "") -> DuplicateCheckResult:
         result = DuplicateCheckResult(is_duplicate=False, reasons=[])
@@ -793,7 +793,6 @@ class PostedManager:
             norm_url = normalize_url(url)
             title_normalized = normalize_title(title)
             title_words = set(get_title_words(title))
-            word_signature = get_sorted_word_signature(title)
             content_hash = get_content_hash(f"{title} {summary}")
             entities = extract_entities(f"{title} {summary}")
             domain = get_domain(url)
@@ -1095,6 +1094,26 @@ async def load_all_feeds() -> List[Article]:
     return all_articles
 
 
+# ====================== INTERLEAVE BY SOURCE ======================
+def interleave_by_source(candidates: List[Article]) -> List[Article]:
+    """Round-robin по источникам: берём по одной статье из каждого source по очереди.
+    Внутри каждого source порядок сохраняется (т.е. лучшие по score идут первыми)."""
+    by_source = defaultdict(deque)
+    for art in candidates:
+        by_source[art.source].append(art)
+
+    # Источники с меньшим числом статей идут первыми, чтобы редкие не потерялись
+    source_order = sorted(by_source.keys(), key=lambda s: len(by_source[s]))
+
+    result = []
+    while any(by_source[s] for s in source_order):
+        for source in source_order:
+            if by_source[source]:
+                result.append(by_source[source].popleft())
+
+    return result
+
+
 # ====================== FILTERING ======================
 def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Article]:
     logger.info("🔍 Фильтрация...")
@@ -1167,21 +1186,22 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         candidates.append(article)
         stats["passed"] += 1
 
+    # Сначала сортируем по score
     def score(art: Article) -> float:
         text = f"{art.title} {art.summary}"
         entities = extract_entities(text)
         age = (datetime.now(timezone.utc) - art.published).total_seconds() / 3600
         ai_sc = ai_relevance_score(text)
         prio_sc = priority_score(text)
-
-        source_count = sum(1 for c in candidates if c.source == art.source)
-        source_penalty = max(0, source_count - 1) * 5
-
         freshness = max(0, 72 - age) / 72
-
-        return ai_sc * 3 + prio_sc * 5 + len(entities) * 1 + freshness * 2 - source_penalty
+        return ai_sc * 3 + prio_sc * 5 + len(entities) * 1 + freshness * 2
 
     candidates.sort(key=score, reverse=True)
+
+    # Берём топ-20 по score, потом чередуем round-robin по source
+    top_candidates = candidates[:20]
+    rest_candidates = candidates[20:]
+    candidates = interleave_by_source(top_candidates) + rest_candidates
 
     logger.info("📊 Итоги фильтрации:")
     logger.info(f"   filtered={stats['filtered_out']}, batch_dup={stats['batch_dup']}, "
@@ -1192,37 +1212,67 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     return candidates
 
 
-# ====================== ROTATION (ЧЕРЕДОВАНИЕ SUBJECT) ======================
-def rotate_candidates_by_subject(candidates: List[Article], posted: PostedManager) -> List[Article]:
+# ====================== ROTATION (ЧЕРЕДОВАНИЕ SOURCE + SUBJECT) ======================
+def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[Article]:
+    """Чередует кандидатов по source И subject на основе истории последних постов."""
     recent = posted.get_recent_posts(config.rotation_recent_limit)
+
+    recent_source_counts = {}
     recent_subj_counts = {}
+
     for p in recent:
-        s = p.get("subject", "other")
-        recent_subj_counts[s] = recent_subj_counts.get(s, 0) + 1
+        s = p.get("source", "")
+        if s:
+            recent_source_counts[s] = recent_source_counts.get(s, 0) + 1
+        subj = p.get("subject", "other")
+        recent_subj_counts[subj] = recent_subj_counts.get(subj, 0) + 1
 
-    if not recent_subj_counts:
+    if not recent_source_counts and not recent_subj_counts:
+        logger.info("🔄 Нет истории постов — чередование не нужно")
         return candidates
 
-    logger.info(f"🔄 Чередование по subject, последние {config.rotation_recent_limit}: {recent_subj_counts}")
+    logger.info(f"🔄 Чередование: последние {config.rotation_recent_limit} постов")
+    logger.info(f"   Sources: {recent_source_counts}")
+    logger.info(f"   Subjects: {recent_subj_counts}")
 
-    rotated = []
-    skipped = 0
+    priority = []
+    normal = []
+    deprioritized = []
+
     for art in candidates:
-        subj = detect_subject(f"{art.title} {art.summary}")
-        if recent_subj_counts.get(subj, 0) >= config.rotation_max_per_subject:
-            logger.info(f"   ⏭️ SKIP_ROTATION [{subj}] x{recent_subj_counts[subj]}: {art.title[:55]}")
-            skipped += 1
+        text = f"{art.title} {art.summary}"
+        subj = detect_subject(text)
+        source = art.source
+
+        # Блокируем если subject перегружен
+        if subj != "other" and recent_subj_counts.get(subj, 0) >= config.rotation_max_per_subject:
+            logger.info(f"   ⏭️ SKIP_SUBJECT [{subj}] x{recent_subj_counts[subj]}: {art.title[:50]}")
+            deprioritized.append(art)
             continue
-        rotated.append(art)
 
-    if skipped > 0:
-        logger.info(f"🔄 Чередование: выкинуто {skipped} кандидатов из-за перегруза subject")
+        # Депиоритизируем если source перегружен
+        if recent_source_counts.get(source, 0) >= config.rotation_max_per_source:
+            logger.info(f"   ⬇️ DEPRIO_SOURCE [{source}] x{recent_source_counts[source]}: {art.title[:50]}")
+            deprioritized.append(art)
+            continue
 
-    if not rotated:
-        logger.info("⚠️ После ротации кандидатов не осталось, используем исходный список без ротации")
-        return candidates
+        # Приоритет — source, которого НЕ было в последних постах
+        if source not in recent_source_counts:
+            priority.append(art)
+        else:
+            normal.append(art)
 
-    return rotated
+    result = priority + normal
+
+    if not result:
+        logger.info("⚠️ После ротации пусто, возвращаем deprioritized")
+        return deprioritized if deprioritized else candidates
+
+    # Добавляем deprioritized в конец (на случай если основные не пройдут генерацию)
+    result.extend(deprioritized)
+
+    logger.info(f"🔄 Результат ротации: {len(priority)} приоритет + {len(normal)} норм + {len(deprioritized)} отложено")
+    return result
 
 
 # ====================== TEXT GENERATION ======================
@@ -1350,7 +1400,7 @@ async def main():
         f.write(str(os.getpid()))
 
     logger.info("=" * 60)
-    logger.info("🚀 AI-POSTER v16.0 (Strict Dedupe 55% + Cache Reset)")
+    logger.info("🚀 AI-POSTER v17.0 (Source+Subject Rotation)")
     logger.info("=" * 60)
 
     posted = PostedManager(config.db_file)
@@ -1392,12 +1442,11 @@ async def main():
             logger.info("📭 Нет подходящих новостей")
             return
 
-        # ЧЕРЕДОВАНИЕ: если последние 3 поста уже про openai (или другой subject 3/3),
-        # выкидываем такие subject из списка кандидатов.
-        candidates = rotate_candidates_by_subject(candidates, posted)
+        # Чередование по source + subject
+        candidates = rotate_candidates(candidates, posted)
 
-        logger.info("🎯 Топ кандидаты:")
-        for i, c in enumerate(candidates[:7]):
+        logger.info("🎯 Топ кандидаты после ротации:")
+        for i, c in enumerate(candidates[:10]):
             text = f"{c.title} {c.summary}"
             ai_sc = ai_relevance_score(text)
             subj = detect_subject(text)

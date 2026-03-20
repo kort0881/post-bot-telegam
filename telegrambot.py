@@ -840,7 +840,6 @@ class PostedManager:
                     except Exception:
                         pass
 
-                # FIX 1: Снижен порог с >= 2/3 до >= 1/2 — ловит короткие заголовки с одной сущностью
                 if entities and existing_entities_json:
                     try:
                         existing_entities = set(json.loads(existing_entities_json))
@@ -896,7 +895,6 @@ class PostedManager:
         with self._lock:
             cursor = self._get_conn().cursor()
 
-            # FIX 2: Окно source теперь берётся из config, а не хардкодится в LIMIT 2
             if source:
                 cursor.execute(
                     'SELECT source FROM posted_articles ORDER BY posted_date DESC LIMIT ?',
@@ -1100,13 +1098,11 @@ async def load_all_feeds() -> List[Article]:
 
 # ====================== INTERLEAVE BY SOURCE ======================
 def interleave_by_source(candidates: List[Article]) -> List[Article]:
-    """Round-robin по источникам: берём по одной статье из каждого source по очереди.
-    Внутри каждого source порядок сохраняется (т.е. лучшие по score идут первыми)."""
+    """Round-robin по источникам: берём по одной статье из каждого source по очереди."""
     by_source = defaultdict(deque)
     for art in candidates:
         by_source[art.source].append(art)
 
-    # Источники с меньшим числом статей идут первыми, чтобы редкие не потерялись
     source_order = sorted(by_source.keys(), key=lambda s: len(by_source[s]))
 
     result = []
@@ -1190,7 +1186,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         candidates.append(article)
         stats["passed"] += 1
 
-    # Сначала сортируем по score
     def score(art: Article) -> float:
         text = f"{art.title} {art.summary}"
         entities = extract_entities(text)
@@ -1202,7 +1197,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
     candidates.sort(key=score, reverse=True)
 
-    # Берём топ-20 по score, потом чередуем round-robin по source
     top_candidates = candidates[:20]
     rest_candidates = candidates[20:]
     candidates = interleave_by_source(top_candidates) + rest_candidates
@@ -1216,7 +1210,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     return candidates
 
 
-# ====================== ROTATION (ЧЕРЕДОВАНИЕ SOURCE + SUBJECT) ======================
+# ====================== ROTATION ======================
 def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[Article]:
     """Чередует кандидатов по source И subject на основе истории последних постов."""
     recent = posted.get_recent_posts(config.rotation_recent_limit)
@@ -1248,19 +1242,16 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
         subj = detect_subject(text)
         source = art.source
 
-        # Блокируем если subject перегружен
         if subj != "other" and recent_subj_counts.get(subj, 0) >= config.rotation_max_per_subject:
             logger.info(f"   ⏭️ SKIP_SUBJECT [{subj}] x{recent_subj_counts[subj]}: {art.title[:50]}")
             deprioritized.append(art)
             continue
 
-        # Депиоритизируем если source перегружен
         if recent_source_counts.get(source, 0) >= config.rotation_max_per_source:
             logger.info(f"   ⬇️ DEPRIO_SOURCE [{source}] x{recent_source_counts[source]}: {art.title[:50]}")
             deprioritized.append(art)
             continue
 
-        # Приоритет — source, которого НЕ было в последних постах
         if source not in recent_source_counts:
             priority.append(art)
         else:
@@ -1272,11 +1263,19 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
         logger.info("⚠️ После ротации пусто, возвращаем deprioritized")
         return deprioritized if deprioritized else candidates
 
-    # Добавляем deprioritized в конец (на случай если основные не пройдут генерацию)
     result.extend(deprioritized)
 
     logger.info(f"🔄 Результат ротации: {len(priority)} приоритет + {len(normal)} норм + {len(deprioritized)} отложено")
     return result
+
+
+# ====================== DISCLAIMER ======================
+DISCLAIMER = (
+    "\n\n⚠️ Отдельные организации, упомянутые в данном материале, могут иметь статус "
+    "«нежелательных» на территории РФ. Актуальный перечень размещён на официальном сайте "
+    "Минюста РФ: https://minjust.gov.ru/ru/pages/perechen-inostrannyh-i-mezhdunarodnyh-"
+    "organizacij-deyatelnost-kotoryh-priznana-nezhelatelnoj-na-territorii-rossiyskoy-federacii/"
+)
 
 
 # ====================== TEXT GENERATION ======================
@@ -1352,7 +1351,8 @@ async def generate_summary(article: Article) -> Optional[str]:
                 cta = "\n\n🔥 — огонь  |  🗿 — мимо  |  ⚡ — интересно"
                 source_link = f'\n\n🔗 <a href="{article.link}">Источник</a>'
 
-                final = f"{text}{cta}\n\n{hashtags}{source_link}"
+                # Дисклеймер добавляется сразу после основного текста поста
+                final = f"{text}{cta}\n\n{hashtags}{source_link}{DISCLAIMER}"
 
                 logger.info(f"  ✅ [{model}]: {len(text)} симв.")
                 return final
@@ -1374,12 +1374,8 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
     topic = Topic.detect(f"{article.title} {article.summary}")
     subject = detect_subject(f"{article.title} {article.summary}")
 
-    # FIX 3: Сохраняем в БД ДО отправки в Telegram.
-    # Если бот упадёт между send_message и add() — статья не будет отправлена повторно.
-    # Ложный позитив (статья в БД, но не отправлена) лучше, чем дубль в канале.
     saved = posted.add(article, topic, subject)
     if not saved:
-        # IntegrityError: статья уже в БД — кто-то успел добавить между filter и post
         logger.warning(f"⚠️ Статья уже в БД, пропускаем: {article.title[:50]}")
         return False
 
@@ -1395,8 +1391,6 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 
     except Exception as e:
         logger.error(f"❌ Telegram: {e}")
-        # Статья осталась в БД — не будет переотправлена при следующем запуске.
-        # Это намеренно: лучше пропустить одну новость, чем задублировать.
         return False
 
 
@@ -1404,7 +1398,6 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 async def main():
     lock_file = "bot.lock"
 
-    # FIX 4: Проверяем актуальность lock по PID — защита от зависших файлов после краша
     if os.path.exists(lock_file):
         try:
             with open(lock_file) as f:
@@ -1465,7 +1458,6 @@ async def main():
             logger.info("📭 Нет подходящих новостей")
             return
 
-        # Чередование по source + subject
         candidates = rotate_candidates(candidates, posted)
 
         logger.info("🎯 Топ кандидаты после ротации:")
@@ -1476,7 +1468,6 @@ async def main():
             logger.info(f"  {i + 1}. [ai={ai_sc}, subj={subj}] [{c.source}] {c.title[:55]}")
 
         for article in candidates[:25]:
-            # Финальная проверка дублей — на случай гонки между запусками
             dup_result = posted.is_duplicate(article.link, article.title, article.summary)
             if dup_result.is_duplicate:
                 posted.log_rejected(article, f"FINAL: {'; '.join(dup_result.reasons[:2])}")

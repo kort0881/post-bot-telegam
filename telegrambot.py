@@ -8,6 +8,8 @@ import logging
 import difflib
 import sqlite3
 import threading
+import signal
+import sys
 from datetime import datetime, timezone
 from typing import List, Set, Optional, Tuple, Dict
 from urllib.parse import urlparse, parse_qs, urlencode
@@ -41,7 +43,7 @@ class Config:
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.channel_id = os.getenv("CHANNEL_ID")
         self.retention_days = int(os.getenv("RETENTION_DAYS", "90"))
-        self.rejected_retention_days = 30  # Хранить rejected 30 дней
+        self.rejected_retention_days = 30
         self.db_file = "posted_articles.db"
 
         # --- СТРОГИЕ НАСТРОЙКИ ДЕДУПА ---
@@ -81,6 +83,10 @@ class Config:
 
         self.groq_retries_per_model = 2
         self.groq_base_delay = 2.0
+        
+        # --- ТАЙМАУТЫ ---
+        self.telegram_timeout = 30
+        self.http_timeout = 15
 
         missing = []
         for var, name in [(self.groq_api_key, "GROQ_API_KEY"),
@@ -94,10 +100,33 @@ class Config:
 
 config = Config()
 
-bot = Bot(token=config.telegram_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-groq_client = Groq(api_key=config.groq_api_key)
+# Отложенная инициализация бота
+bot: Optional[Bot] = None
+groq_client: Optional[Groq] = None
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+
+def init_clients():
+    """Инициализация клиентов с обработкой ошибок."""
+    global bot, groq_client
+    
+    try:
+        bot = Bot(
+            token=config.telegram_token, 
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        )
+        logger.info("✅ Telegram Bot инициализирован")
+    except Exception as e:
+        logger.error(f"❌ Ошибка инициализации Telegram Bot: {e}")
+        raise
+    
+    try:
+        groq_client = Groq(api_key=config.groq_api_key)
+        logger.info("✅ Groq client инициализирован")
+    except Exception as e:
+        logger.error(f"❌ Ошибка инициализации Groq: {e}")
+        raise
 
 
 # ====================== GROQ МОДЕЛИ ======================
@@ -1197,8 +1226,9 @@ async def fetch_feed(url: str, source: str) -> List[Article]:
     try:
         await asyncio.sleep(random.uniform(0.3, 1.5))
 
-        async with aiohttp.ClientSession() as sess:
-            async with sess.get(url, headers=HEADERS, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+        timeout = aiohttp.ClientTimeout(total=config.http_timeout)
+        async with aiohttp.ClientSession(timeout=timeout) as sess:
+            async with sess.get(url, headers=HEADERS) as resp:
                 if resp.status != 200:
                     logger.warning(f"  ⚠️ {source}: HTTP {resp.status}")
                     return []
@@ -1225,6 +1255,9 @@ async def fetch_feed(url: str, source: str) -> List[Article]:
         logger.info(f"  ✅ {source}: {len(articles)}")
         return articles
 
+    except asyncio.TimeoutError:
+        logger.warning(f"  ⚠️ {source}: Timeout")
+        return []
     except Exception as e:
         logger.warning(f"  ⚠️ {source}: {e}")
         return []
@@ -1233,11 +1266,14 @@ async def fetch_feed(url: str, source: str) -> List[Article]:
 async def load_all_feeds() -> List[Article]:
     logger.info("📥 Загрузка RSS...")
     tasks = [fetch_feed(url, source) for url, source in RSS_FEEDS]
-    results = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_articles = []
-    for feed_articles in results:
-        all_articles.extend(feed_articles)
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            logger.warning(f"  ⚠️ {RSS_FEEDS[i][1]}: {result}")
+        elif result:
+            all_articles.extend(result)
 
     logger.info(f"📦 Всего: {len(all_articles)}")
     return all_articles
@@ -1613,9 +1649,37 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
         return False
 
 
+# ====================== TELEGRAM CHECK ======================
+async def check_telegram_connection() -> bool:
+    """Проверка подключения к Telegram API."""
+    try:
+        logger.info("🔌 Проверка подключения к Telegram...")
+        me = await asyncio.wait_for(bot.get_me(), timeout=config.telegram_timeout)
+        logger.info(f"✅ Telegram OK: @{me.username}")
+        return True
+    except asyncio.TimeoutError:
+        logger.error("❌ Telegram: Timeout при подключении")
+        return False
+    except Exception as e:
+        logger.error(f"❌ Telegram: {e}")
+        return False
+
+
+# ====================== GRACEFUL SHUTDOWN ======================
+shutdown_event = asyncio.Event()
+
+def signal_handler(signum, frame):
+    logger.info(f"🛑 Получен сигнал {signum}, завершаем...")
+    shutdown_event.set()
+
+
 # ====================== MAIN ======================
 async def main():
     lock_file = "bot.lock"
+
+    # Обработка сигналов
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     if os.path.exists(lock_file):
         try:
@@ -1635,14 +1699,23 @@ async def main():
         f.write(str(os.getpid()))
 
     logger.info("=" * 60)
-    logger.info("🚀 AI-POSTER v18.1 (Persistent blacklist, cached subject stats)")
+    logger.info("🚀 AI-POSTER v18.2 (Fixed initialization, better error handling)")
     logger.info("=" * 60)
 
-    posted = PostedManager(config.db_file)
-
-    # НЕ вызываем clear_rejected() — rejected_urls теперь долговременный
-
+    posted = None
+    
     try:
+        # Инициализация клиентов
+        init_clients()
+        
+        # Проверка Telegram
+        if not await check_telegram_connection():
+            logger.error("❌ Не удалось подключиться к Telegram. Проверьте токен и сеть.")
+            return
+        
+        # Инициализация БД
+        posted = PostedManager(config.db_file)
+
         if posted.verify_db():
             logger.info("✅ БД OK")
         else:
@@ -1665,6 +1738,11 @@ async def main():
                 subj = p.get('subject', '?')
                 logger.info(f"   • [{p['topic']}][{subj}][{p.get('source', '?')}] {p['title'][:50]}...")
 
+        # Проверка на прерывание
+        if shutdown_event.is_set():
+            logger.info("🛑 Прерывание перед загрузкой RSS")
+            return
+
         raw = await load_all_feeds()
 
         sources_count = {}
@@ -1674,6 +1752,10 @@ async def main():
 
         working = sum(1 for v in sources_count.values() if v > 0)
         logger.info(f"📡 Работающих источников: {working}/{len(RSS_FEEDS)}")
+
+        if shutdown_event.is_set():
+            logger.info("🛑 Прерывание перед фильтрацией")
+            return
 
         candidates = filter_and_dedupe(raw, posted)
 
@@ -1691,6 +1773,10 @@ async def main():
             logger.info(f"  {i + 1}. [ai={ai_sc}, subj={subj}] [{c.source}] {c.title[:55]}")
 
         for article in candidates[:25]:
+            if shutdown_event.is_set():
+                logger.info("🛑 Прерывание в цикле публикации")
+                break
+                
             dup_result = posted.is_duplicate(article.link, article.title, article.summary)
             if dup_result.is_duplicate:
                 posted.log_rejected(article, f"FINAL: {'; '.join(dup_result.reasons[:2])}")
@@ -1709,18 +1795,36 @@ async def main():
         else:
             logger.info("😔 Не удалось опубликовать (все пропущены или ошибки генерации)")
 
+    except asyncio.CancelledError:
+        logger.info("🛑 Операция отменена")
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка: {e}", exc_info=True)
     finally:
-        posted.close()
-        await bot.session.close()
+        # Закрытие ресурсов
+        if posted:
+            posted.close()
+        
+        if bot:
+            try:
+                await bot.session.close()
+                logger.info("🔒 Telegram сессия закрыта")
+            except Exception as e:
+                logger.error(f"❌ Ошибка закрытия Telegram: {e}")
 
         if os.path.exists(lock_file):
             os.remove(lock_file)
+            
+        logger.info("👋 Завершение работы")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
-
-            
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("🛑 Прервано пользователем")
+    except Exception as e:
+        logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
+        sys.exit(1)
 
 
 

@@ -9,7 +9,7 @@ import difflib
 import sqlite3
 import threading
 from datetime import datetime, timezone
-from typing import List, Set, Optional, Tuple
+from typing import List, Set, Optional, Tuple, Dict
 from urllib.parse import urlparse, parse_qs, urlencode
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -44,27 +44,38 @@ class Config:
         self.db_file = "posted_articles.db"
 
         # --- СТРОГИЕ НАСТРОЙКИ ДЕДУПА ---
-        self.title_similarity_threshold = 0.55
-        self.ngram_similarity_threshold = 0.45
-        self.entity_overlap_threshold = 0.50
-        self.jaccard_threshold = 0.50
-        self.same_domain_similarity = 0.45
+        self.title_similarity_threshold = 0.50      # Было 0.55
+        self.ngram_similarity_threshold = 0.40      # Было 0.45
+        self.entity_overlap_threshold = 0.45        # Было 0.50
+        self.jaccard_threshold = 0.45               # Было 0.50
+        self.same_domain_similarity = 0.40          # Было 0.45
 
-        # ИЗМЕНЕНО: 450 → 350
+        # --- УСИЛЕННЫЙ АНТИПОВТОР ПО SUBJECT ---
+        self.subject_window_hours = 12              # Окно наблюдения за subject
+        self.max_posts_per_subject = 1              # Максимум постов с одним subject за окно
+        self.same_subject_similarity_threshold = 0.25  # Блок если subj совпадает И sim > 25%
+        self.same_subject_cooldown_hours = 18       # Cooldown для критичных subjects
+        self.critical_subjects = {"openai", "anthropic", "google", "meta", "telegram", "nvidia", "microsoft", "apple"}
+        
+        # --- ENTITY-BASED АНТИПОВТОР ---
+        self.entity_cooldown_hours = 10             # Окно проверки entity overlap
+        self.min_common_entities_block = 2          # Минимум общих entities для блока
+        
+        # --- ПРИОРИТЕТ И ШТРАФЫ ---
+        self.subject_priority_penalty = 8           # Штраф к score за недавний subject
+        self.batch_subject_limit = 2                # Максимум статей с одним subject в батче
+
         self.min_post_length = 350
         self.max_article_age_hours = 72
-
         self.min_ai_score = 1
-
-        # НОВОЕ: максимум одинаковых предложений в посте
         self.max_repeat_sentences = 2
 
         # --- НАСТРОЙКИ ЧЕРЕДОВАНИЯ ---
         self.diversity_window = 5
         self.same_topic_limit = 2
-        self.same_subject_hours = 6
-        self.rotation_recent_limit = 3
-        self.rotation_max_per_subject = 2
+        self.same_subject_hours = 6                 # Для legacy check_subject_freshness
+        self.rotation_recent_limit = 5              # Было 3
+        self.rotation_max_per_subject = 1           # Было 2
         self.rotation_max_per_source = 2
 
         self.groq_retries_per_model = 2
@@ -259,12 +270,12 @@ KEY_ENTITIES = [
 ]
 
 NEWS_SUBJECTS = {
-    "openai": ["openai", "chatgpt", "gpt-4", "gpt-5", "gpt-4o", "sam altman", "dall-e", "sora"],
-    "anthropic": ["anthropic", "claude", "claude 3", "dario amodei"],
-    "google": ["google ai", "gemini", "deepmind", "bard"],
+    "openai": ["openai", "chatgpt", "gpt-4", "gpt-5", "gpt-4o", "sam altman", "dall-e", "sora", "o1", "o3"],
+    "anthropic": ["anthropic", "claude", "claude 3", "claude 3.5", "dario amodei"],
+    "google": ["google ai", "gemini", "deepmind", "bard", "gemini 2"],
     "meta": ["meta ai", "llama", "llama 3", "mark zuckerberg"],
     "microsoft": ["microsoft", "copilot", "bing ai", "azure ai"],
-    "nvidia": ["nvidia", "jensen huang", "cuda", "h100", "b200"],
+    "nvidia": ["nvidia", "jensen huang", "cuda", "h100", "b200", "blackwell"],
     "apple": ["apple intelligence", "siri ai", "mlx"],
     "midjourney": ["midjourney"],
     "stability": ["stability ai", "stable diffusion"],
@@ -787,6 +798,104 @@ class PostedManager:
             conn.commit()
             logger.info("♻️ История 'черного списка' очищена")
 
+    def get_subject_posts_in_window(self, subject: str, hours: int) -> List[dict]:
+        """Получить все посты с данным subject за последние N часов."""
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute('''
+                SELECT title, posted_date, title_normalized, entities
+                FROM posted_articles 
+                WHERE subject = ? 
+                  AND posted_date > datetime('now', ?)
+                ORDER BY posted_date DESC
+            ''', (subject, f'-{hours} hours'))
+            
+            results = []
+            for r in cursor.fetchall():
+                results.append({
+                    'title': r[0],
+                    'date': r[1],
+                    'normalized': r[2],
+                    'entities': r[3]
+                })
+            return results
+
+    def check_subject_limit(self, subject: str, new_title: str, new_entities: Set[str] = None) -> Tuple[bool, str]:
+        """
+        Проверяет жёсткий лимит по subject за временное окно.
+        Возвращает (can_post, reason).
+        """
+        if subject == "other":
+            return True, ""
+        
+        recent_posts = self.get_subject_posts_in_window(subject, config.subject_window_hours)
+        
+        # 1. Проверка количества постов с этим subject
+        if len(recent_posts) >= config.max_posts_per_subject:
+            hours_since_last = 0
+            if recent_posts:
+                last_date = parse_db_datetime(recent_posts[0]['date'])
+                hours_since_last = (datetime.now(timezone.utc) - last_date).total_seconds() / 3600
+            
+            return False, f"SUBJECT_LIMIT ({subject}, {len(recent_posts)} posts in {config.subject_window_hours}h, last {hours_since_last:.1f}h ago)"
+        
+        # 2. Проверка similarity с каждым постом в окне
+        new_normalized = normalize_title(new_title)
+        for post in recent_posts:
+            sim = calculate_similarity(new_normalized, post['normalized'])
+            if sim > config.same_subject_similarity_threshold:
+                return False, f"SUBJECT_SIMILAR ({subject}, sim={sim:.0%}): {post['title'][:40]}"
+        
+        # 3. Проверка cooldown для критичных subjects
+        if subject in config.critical_subjects and recent_posts:
+            last_date = parse_db_datetime(recent_posts[0]['date'])
+            hours_since = (datetime.now(timezone.utc) - last_date).total_seconds() / 3600
+            if hours_since < config.same_subject_cooldown_hours:
+                # Но разрешаем если это СОВСЕМ другая новость (sim < 15%)
+                if recent_posts:
+                    sim = calculate_similarity(new_normalized, recent_posts[0]['normalized'])
+                    if sim >= 0.15:
+                        return False, f"SUBJECT_COOLDOWN ({subject}, {hours_since:.1f}h < {config.same_subject_cooldown_hours}h, sim={sim:.0%})"
+        
+        return True, ""
+
+    def check_entity_overlap(self, entities: Set[str], new_title: str) -> Tuple[bool, str]:
+        """
+        Проверяет, не было ли недавно поста с похожим набором entities.
+        """
+        if len(entities) < config.min_common_entities_block:
+            return True, ""
+        
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute('''
+                SELECT title, entities, title_normalized
+                FROM posted_articles 
+                WHERE posted_date > datetime('now', ?)
+                ORDER BY posted_date DESC
+                LIMIT 30
+            ''', (f'-{config.entity_cooldown_hours} hours',))
+            
+            new_normalized = normalize_title(new_title)
+            
+            for row in cursor.fetchall():
+                try:
+                    existing_entities = set(json.loads(row[1])) if row[1] else set()
+                    common = entities & existing_entities
+                    
+                    if len(common) >= config.min_common_entities_block:
+                        # Дополнительно проверяем similarity заголовков
+                        title_sim = calculate_similarity(new_normalized, row[2] or "")
+                        
+                        # Блокируем если много общих entities И хоть какое-то сходство заголовков
+                        if title_sim > 0.15 or len(common) >= 3:
+                            common_str = ', '.join(list(common)[:3])
+                            return False, f"ENTITY_OVERLAP ({len(common)}: {common_str}, title_sim={title_sim:.0%}): {row[0][:40]}"
+                except Exception:
+                    pass
+            
+            return True, ""
+
     def is_duplicate(self, url: str, title: str, summary: str = "") -> DuplicateCheckResult:
         result = DuplicateCheckResult(is_duplicate=False, reasons=[])
 
@@ -864,36 +973,8 @@ class PostedManager:
             return result
 
     def check_subject_freshness(self, subject: str, new_title: str = "") -> Tuple[bool, str]:
-        if subject == "other":
-            return True, ""
-
-        with self._lock:
-            cursor = self._get_conn().cursor()
-            cursor.execute(
-                '''SELECT title, posted_date FROM posted_articles 
-                   WHERE subject = ? 
-                   ORDER BY posted_date DESC LIMIT 1''',
-                (subject,)
-            )
-            row = cursor.fetchone()
-
-            if row:
-                last_date = parse_db_datetime(row[1])
-                hours_ago = (datetime.now(timezone.utc) - last_date).total_seconds() / 3600
-
-                if hours_ago < config.same_subject_hours:
-                    if new_title:
-                        sim = calculate_similarity(
-                            normalize_title(new_title),
-                            normalize_title(row[0])
-                        )
-                        if sim < 0.3:
-                            logger.info(f"  ✅ DIFFERENT_ANGLE ({subject}, sim={sim:.0%}): {new_title[:40]}")
-                            return True, ""
-
-                    return False, f"SAME_SUBJECT ({subject}, {hours_ago:.0f}h ago): {row[0][:40]}"
-
-            return True, ""
+        """Legacy метод - теперь использует check_subject_limit."""
+        return self.check_subject_limit(subject, new_title)
 
     def check_diversity(self, topic: str, source: str = "") -> Tuple[bool, str]:
         with self._lock:
@@ -995,6 +1076,20 @@ class PostedManager:
                 })
             return results
 
+    def get_recent_subjects(self, hours: int = 24) -> Dict[str, int]:
+        """Получить статистику subjects за последние N часов."""
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute('''
+                SELECT subject, COUNT(*) as cnt
+                FROM posted_articles 
+                WHERE posted_date > datetime('now', ?)
+                GROUP BY subject
+                ORDER BY cnt DESC
+            ''', (f'-{hours} hours',))
+            
+            return {row[0]: row[1] for row in cursor.fetchall()}
+
     def cleanup(self, days: int = 90):
         with self._lock:
             conn = self._get_conn()
@@ -1036,17 +1131,6 @@ class PostedManager:
                 logger.error(f"❌ Ошибка закрытия: {e}")
             finally:
                 self._conn = None
-
-
-# ====================== AUTO-CLEANUP ======================
-def auto_cleanup_economics(posted: PostedManager):
-    logger.info("🧹 Проверка экономических постов...")
-    pass
-
-
-def auto_cleanup_non_ai(posted: PostedManager):
-    logger.info("🧹 Проверка не-AI постов...")
-    pass
 
 
 # ====================== RSS LOADING ======================
@@ -1123,14 +1207,23 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     logger.info("🔍 Фильтрация...")
     logger.info(f"   Входящих статей: {len(articles)}")
 
+    # Показываем статистику subjects за последние 24h
+    recent_subjects = posted.get_recent_subjects(24)
+    if recent_subjects:
+        logger.info(f"   📊 Subjects за 24h: {dict(list(recent_subjects.items())[:5])}")
+
     candidates = []
     seen_normalized_titles: Set[str] = set()
     seen_word_signatures: Set[str] = set()
     seen_content_hashes: Set[str] = set()
+    
+    # Счётчик subjects в текущем батче
+    batch_subject_counts: Dict[str, int] = defaultdict(int)
 
     stats = {
         "batch_dup": 0, "db_dup": 0, "diversity": 0, "passed": 0,
-        "filtered_out": 0, "same_subject": 0
+        "filtered_out": 0, "subject_limit": 0, "entity_overlap": 0,
+        "batch_subject": 0
     }
 
     for article in articles:
@@ -1155,13 +1248,29 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
         text = f"{article.title} {article.summary}"
         subject = detect_subject(text)
+        entities = extract_entities(text)
 
-        if subject != "other":
-            subject_count = sum(1 for c in candidates if detect_subject(f"{c.title} {c.summary}") == subject)
-            if subject_count >= 5:
-                stats["same_subject"] += 1
-                continue
+        # === ПРОВЕРКА: Лимит subject в текущем батче ===
+        if subject != "other" and batch_subject_counts[subject] >= config.batch_subject_limit:
+            posted.log_rejected(article, f"BATCH_SUBJECT_LIMIT ({subject}, {batch_subject_counts[subject]} in batch)")
+            stats["batch_subject"] += 1
+            continue
 
+        # === ПРОВЕРКА: Глобальный лимит по subject ===
+        subj_ok, subj_reason = posted.check_subject_limit(subject, article.title, entities)
+        if not subj_ok:
+            posted.log_rejected(article, subj_reason)
+            stats["subject_limit"] += 1
+            continue
+
+        # === ПРОВЕРКА: Entity overlap ===
+        ent_ok, ent_reason = posted.check_entity_overlap(entities, article.title)
+        if not ent_ok:
+            posted.log_rejected(article, ent_reason)
+            stats["entity_overlap"] += 1
+            continue
+
+        # === ПРОВЕРКА: Дубликат в БД ===
         dup_result = posted.is_duplicate(article.link, article.title, article.summary)
         if dup_result.is_duplicate:
             reason = "; ".join(dup_result.reasons[:3])
@@ -1169,12 +1278,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
             stats["db_dup"] += 1
             continue
 
-        subj_ok, subj_reason = posted.check_subject_freshness(subject, article.title)
-        if not subj_ok:
-            posted.log_rejected(article, subj_reason)
-            stats["same_subject"] += 1
-            continue
-
+        # === ПРОВЕРКА: Diversity по topic и source ===
         topic = Topic.detect(text)
         div_ok, div_reason = posted.check_diversity(topic, article.source)
         if not div_ok:
@@ -1186,18 +1290,32 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         seen_word_signatures.add(word_sig)
         if content_hash:
             seen_content_hashes.add(content_hash)
-
+        
+        batch_subject_counts[subject] += 1
         candidates.append(article)
         stats["passed"] += 1
 
+    # === Сортировка с штрафом за повторяющийся subject ===
     def score(art: Article) -> float:
         text = f"{art.title} {art.summary}"
-        entities = extract_entities(text)
+        subject = detect_subject(text)
+        entities_set = extract_entities(text)
         age = (datetime.now(timezone.utc) - art.published).total_seconds() / 3600
         ai_sc = ai_relevance_score(text)
         prio_sc = priority_score(text)
         freshness = max(0, 72 - age) / 72
-        return ai_sc * 3 + prio_sc * 5 + len(entities) * 1 + freshness * 2
+        
+        base_score = ai_sc * 3 + prio_sc * 5 + len(entities_set) * 1 + freshness * 2
+        
+        # Штраф если subject недавно публиковался
+        if subject != "other":
+            recent_subj = posted.get_subject_posts_in_window(subject, 24)
+            if recent_subj:
+                penalty = config.subject_priority_penalty * len(recent_subj)
+                base_score -= penalty
+                logger.debug(f"   📉 Penalty -{penalty} for {subject} ({len(recent_subj)} recent): {art.title[:40]}")
+        
+        return base_score
 
     candidates.sort(key=score, reverse=True)
 
@@ -1207,8 +1325,9 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
     logger.info("📊 Итоги фильтрации:")
     logger.info(f"   filtered={stats['filtered_out']}, batch_dup={stats['batch_dup']}, "
-                f"db_dup={stats['db_dup']}, diversity={stats['diversity']}, "
-                f"same_subject={stats['same_subject']}, passed={stats['passed']}")
+                f"db_dup={stats['db_dup']}, diversity={stats['diversity']}")
+    logger.info(f"   subject_limit={stats['subject_limit']}, entity_overlap={stats['entity_overlap']}, "
+                f"batch_subject={stats['batch_subject']}")
     logger.info(f"✅ Кандидатов: {len(candidates)} из {len(articles)}")
 
     return candidates
@@ -1246,6 +1365,7 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
         subj = detect_subject(text)
         source = art.source
 
+        # Жёсткий skip если subject недавно был слишком часто
         if subj != "other" and recent_subj_counts.get(subj, 0) >= config.rotation_max_per_subject:
             logger.info(f"   ⏭️ SKIP_SUBJECT [{subj}] x{recent_subj_counts[subj]}: {art.title[:50]}")
             deprioritized.append(art)
@@ -1256,7 +1376,7 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
             deprioritized.append(art)
             continue
 
-        if source not in recent_source_counts:
+        if source not in recent_source_counts and subj not in recent_subj_counts:
             priority.append(art)
         else:
             normal.append(art)
@@ -1285,7 +1405,6 @@ DISCLAIMER = (
 # ====================== ПОВТОРЯЮЩИЕСЯ ПРЕДЛОЖЕНИЯ ======================
 def has_repeated_sentences(text: str, max_repeats: int = 2) -> bool:
     """Возвращает True если в тексте более max_repeats похожих предложений."""
-    # Разбиваем на предложения по точке, восклицательному и вопросительному знаку
     sentences = re.split(r'[.!?]\s+', text)
     sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
 
@@ -1311,7 +1430,6 @@ def has_repeated_sentences(text: str, max_repeats: int = 2) -> bool:
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
 
-    # ИЗМЕНЕНО: новый компактный промпт без нумерованного списка
     prompt = f"""Ты — редактор Telegram-канала про AI-технологии для аудитории из РФ и СНГ.
 
 НОВОСТЬ:
@@ -1333,7 +1451,6 @@ async def generate_summary(article: Article) -> Optional[str]:
 
 ПОСТ:"""
 
-    # РАСШИРЕНО: добавлены новые фразы-индикаторы воды
     water_phrases = [
         "стоит отметить", "важно понимать", "интересно, что",
         "давайте разберёмся", "как мы знаем", "не секрет",
@@ -1342,7 +1459,6 @@ async def generate_summary(article: Article) -> Optional[str]:
         "это важно потому что", "это меняет всё",
         "это открывает возможности", "это меняет правила",
         "почему это меняет", "вот почему это важно",
-        # НОВЫЕ фразы
         "важно отметить", "стоит упомянуть", "следует сказать",
     ]
 
@@ -1355,9 +1471,7 @@ async def generate_summary(article: Article) -> Optional[str]:
                 resp = await asyncio.to_thread(
                     groq_client.chat.completions.create,
                     model=model,
-                    # ИЗМЕНЕНО: temperature 0.7 → 0.9
                     temperature=0.9,
-                    # ИЗМЕНЕНО: max_tokens 1200 → 800
                     max_tokens=800,
                     messages=[{"role": "user", "content": prompt}],
                 )
@@ -1375,7 +1489,6 @@ async def generate_summary(article: Article) -> Optional[str]:
                     logger.warning("  ⚠️ Вода/морализаторство, повтор...")
                     continue
 
-                # НОВОЕ: проверка на повторяющиеся предложения
                 if has_repeated_sentences(text, config.max_repeat_sentences):
                     logger.warning("  ⚠️ Повторяющиеся предложения, регенерация...")
                     continue
@@ -1386,7 +1499,6 @@ async def generate_summary(article: Article) -> Optional[str]:
                 cta = "\n\n🔥 — огонь  |  🗿 — мимо  |  ⚡ — интересно"
                 source_link = f'\n\n🔗 <a href="{article.link}">Источник</a>'
 
-                # Дисклеймер добавляется сразу после основного текста поста
                 final = f"{text}{cta}\n\n{hashtags}{source_link}{DISCLAIMER}"
 
                 logger.info(f"  ✅ [{model}]: {len(text)} симв.")
@@ -1451,7 +1563,7 @@ async def main():
         f.write(str(os.getpid()))
 
     logger.info("=" * 60)
-    logger.info("🚀 AI-POSTER v17.3 (Compact prompts, repeat-sentence filter, temperature 0.9)")
+    logger.info("🚀 AI-POSTER v18.0 (Enhanced anti-repeat: subject limits, entity overlap)")
     logger.info("=" * 60)
 
     posted = PostedManager(config.db_file)
@@ -1469,6 +1581,11 @@ async def main():
 
         stats = posted.get_stats()
         logger.info(f"📊 Статистика: {stats['total_posted']} posted")
+
+        # Показываем subjects за последние 24 часа
+        recent_subjects = posted.get_recent_subjects(24)
+        if recent_subjects:
+            logger.info(f"📊 Subjects за 24h: {dict(recent_subjects)}")
 
         recent = posted.get_recent_posts(5)
         if recent:
@@ -1517,20 +1634,7 @@ async def main():
                 logger.info("\n🏁 Готово!")
                 break
 
-            await asyncio.sleep(2)
-        else:
-            logger.info("😔 Не удалось опубликовать (все пропущены или ошибки генерации)")
-
-    finally:
-        posted.close()
-        await bot.session.close()
-
-        if os.path.exists(lock_file):
-            os.remove(lock_file)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+            
 
 
 

@@ -41,29 +41,30 @@ class Config:
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.channel_id = os.getenv("CHANNEL_ID")
         self.retention_days = int(os.getenv("RETENTION_DAYS", "90"))
+        self.rejected_retention_days = 30  # Хранить rejected 30 дней
         self.db_file = "posted_articles.db"
 
         # --- СТРОГИЕ НАСТРОЙКИ ДЕДУПА ---
-        self.title_similarity_threshold = 0.50      # Было 0.55
-        self.ngram_similarity_threshold = 0.40      # Было 0.45
-        self.entity_overlap_threshold = 0.45        # Было 0.50
-        self.jaccard_threshold = 0.45               # Было 0.50
-        self.same_domain_similarity = 0.40          # Было 0.45
+        self.title_similarity_threshold = 0.50
+        self.ngram_similarity_threshold = 0.40
+        self.entity_overlap_threshold = 0.45
+        self.jaccard_threshold = 0.45
+        self.same_domain_similarity = 0.40
 
         # --- УСИЛЕННЫЙ АНТИПОВТОР ПО SUBJECT ---
-        self.subject_window_hours = 12              # Окно наблюдения за subject
-        self.max_posts_per_subject = 1              # Максимум постов с одним subject за окно
-        self.same_subject_similarity_threshold = 0.25  # Блок если subj совпадает И sim > 25%
-        self.same_subject_cooldown_hours = 18       # Cooldown для критичных subjects
+        self.subject_window_hours = 12
+        self.max_posts_per_subject = 1
+        self.same_subject_similarity_threshold = 0.25
+        self.same_subject_cooldown_hours = 18
         self.critical_subjects = {"openai", "anthropic", "google", "meta", "telegram", "nvidia", "microsoft", "apple"}
         
         # --- ENTITY-BASED АНТИПОВТОР ---
-        self.entity_cooldown_hours = 10             # Окно проверки entity overlap
-        self.min_common_entities_block = 2          # Минимум общих entities для блока
+        self.entity_cooldown_hours = 10
+        self.min_common_entities_block = 2
         
         # --- ПРИОРИТЕТ И ШТРАФЫ ---
-        self.subject_priority_penalty = 8           # Штраф к score за недавний subject
-        self.batch_subject_limit = 2                # Максимум статей с одним subject в батче
+        self.subject_priority_penalty = 8
+        self.batch_subject_limit = 2
 
         self.min_post_length = 350
         self.max_article_age_hours = 72
@@ -73,9 +74,9 @@ class Config:
         # --- НАСТРОЙКИ ЧЕРЕДОВАНИЯ ---
         self.diversity_window = 5
         self.same_topic_limit = 2
-        self.same_subject_hours = 6                 # Для legacy check_subject_freshness
-        self.rotation_recent_limit = 5              # Было 3
-        self.rotation_max_per_subject = 1           # Было 2
+        self.same_subject_hours = 6
+        self.rotation_recent_limit = 5
+        self.rotation_max_per_subject = 1
         self.rotation_max_per_source = 2
 
         self.groq_retries_per_model = 2
@@ -469,6 +470,16 @@ def parse_db_datetime(date_str: str) -> datetime:
         return datetime.now(timezone.utc)
 
 
+def safe_json_loads(value: str, default=None):
+    """Безопасный парсинг JSON с проверкой на null/None."""
+    if not value or value in ('null', 'None', '[]', '{}'):
+        return default if default is not None else []
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return default if default is not None else []
+
+
 # ====================== AI STRENGTH SCORE ======================
 def ai_relevance_score(text: str) -> int:
     text_lower = text.lower()
@@ -716,87 +727,99 @@ class PostedManager:
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self._conn = sqlite3.connect(self.db_file, timeout=30.0, check_same_thread=False)
-            self._conn.row_factory = sqlite3.Row
-            self._conn.execute('PRAGMA journal_mode=WAL')
-            self._conn.execute('PRAGMA busy_timeout=30000')
-        return self._conn
+        """Потокобезопасное получение соединения с БД."""
+        with self._lock:
+            if self._conn is None:
+                self._conn = sqlite3.connect(self.db_file, timeout=30.0, check_same_thread=False)
+                self._conn.row_factory = sqlite3.Row
+                self._conn.execute('PRAGMA journal_mode=WAL')
+                self._conn.execute('PRAGMA busy_timeout=30000')
+            return self._conn
 
     def _init_db(self):
         conn = self._get_conn()
-        cursor = conn.cursor()
+        with self._lock:
+            cursor = conn.cursor()
 
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS posted_articles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                url TEXT NOT NULL,
-                norm_url TEXT NOT NULL UNIQUE,
-                domain TEXT NOT NULL,
-                title TEXT NOT NULL,
-                title_normalized TEXT NOT NULL,
-                title_words TEXT,
-                title_word_signature TEXT,
-                summary TEXT,
-                content_hash TEXT,
-                entities TEXT,
-                topic TEXT DEFAULT 'general',
-                subject TEXT DEFAULT 'other',
-                source TEXT,
-                posted_date TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS posted_articles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url TEXT NOT NULL,
+                    norm_url TEXT NOT NULL UNIQUE,
+                    domain TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    title_normalized TEXT NOT NULL,
+                    title_words TEXT,
+                    title_word_signature TEXT,
+                    summary TEXT,
+                    content_hash TEXT,
+                    entities TEXT,
+                    topic TEXT DEFAULT 'general',
+                    subject TEXT DEFAULT 'other',
+                    source TEXT,
+                    posted_date TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
 
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS rejected_urls (
-                norm_url TEXT PRIMARY KEY,
-                title TEXT,
-                reason TEXT,
-                rejected_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS rejected_urls (
+                    norm_url TEXT PRIMARY KEY,
+                    title TEXT,
+                    reason TEXT,
+                    rejected_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
 
-        try:
-            cursor.execute("ALTER TABLE posted_articles ADD COLUMN subject TEXT DEFAULT 'other'")
-            conn.commit()
-        except Exception:
-            pass
-
-        indices = [
-            ('idx_norm_url', 'norm_url'),
-            ('idx_content_hash', 'content_hash'),
-            ('idx_domain', 'domain'),
-            ('idx_posted_date', 'posted_date'),
-            ('idx_title_normalized', 'title_normalized'),
-            ('idx_title_word_signature', 'title_word_signature'),
-            ('idx_subject', 'subject'),
-        ]
-        for idx_name, column in indices:
             try:
-                cursor.execute(f'CREATE INDEX IF NOT EXISTS {idx_name} ON posted_articles({column})')
+                cursor.execute("ALTER TABLE posted_articles ADD COLUMN subject TEXT DEFAULT 'other'")
+                conn.commit()
             except Exception:
                 pass
 
-        conn.commit()
+            indices = [
+                ('idx_norm_url', 'norm_url'),
+                ('idx_content_hash', 'content_hash'),
+                ('idx_domain', 'domain'),
+                ('idx_posted_date', 'posted_date'),
+                ('idx_title_normalized', 'title_normalized'),
+                ('idx_title_word_signature', 'title_word_signature'),
+                ('idx_subject', 'subject'),
+            ]
+            for idx_name, column in indices:
+                try:
+                    cursor.execute(f'CREATE INDEX IF NOT EXISTS {idx_name} ON posted_articles({column})')
+                except Exception:
+                    pass
+
+            conn.commit()
         logger.info("📚 База данных инициализирована")
 
     def _add_rejected(self, norm_url: str, title: str, reason: str):
+        """Добавить URL в долговременный чёрный список."""
         try:
-            cursor = self._get_conn().cursor()
-            cursor.execute(
-                'INSERT OR REPLACE INTO rejected_urls (norm_url, title, reason) VALUES (?, ?, ?)',
-                (norm_url, title[:200], reason)
-            )
-            self._get_conn().commit()
+            with self._lock:
+                cursor = self._get_conn().cursor()
+                cursor.execute(
+                    'INSERT OR REPLACE INTO rejected_urls (norm_url, title, reason, rejected_at) VALUES (?, ?, ?, datetime("now"))',
+                    (norm_url, title[:200], reason)
+                )
+                self._get_conn().commit()
         except Exception as e:
             logger.error(f"Ошибка добавления в rejected: {e}")
 
-    def clear_rejected(self):
+    def is_rejected(self, url: str) -> Tuple[bool, str]:
+        """Проверить, находится ли URL в чёрном списке."""
+        norm_url = normalize_url(url)
         with self._lock:
-            conn = self._get_conn()
-            conn.execute("DELETE FROM rejected_urls")
-            conn.commit()
-            logger.info("♻️ История 'черного списка' очищена")
+            cursor = self._get_conn().cursor()
+            cursor.execute(
+                'SELECT reason FROM rejected_urls WHERE norm_url = ? AND rejected_at > datetime("now", ?)',
+                (norm_url, f'-{config.rejected_retention_days} days')
+            )
+            row = cursor.fetchone()
+            if row:
+                return True, row[0]
+            return False, ""
 
     def get_subject_posts_in_window(self, subject: str, hours: int) -> List[dict]:
         """Получить все посты с данным subject за последние N часов."""
@@ -820,11 +843,28 @@ class PostedManager:
                 })
             return results
 
+    def get_subject_stats_cached(self, hours: int = 24) -> Dict[str, List[dict]]:
+        """Получить кэш всех subject'ов за N часов для использования в score()."""
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute('''
+                SELECT subject, title, posted_date, title_normalized
+                FROM posted_articles 
+                WHERE posted_date > datetime('now', ?)
+                ORDER BY posted_date DESC
+            ''', (f'-{hours} hours',))
+            
+            result: Dict[str, List[dict]] = defaultdict(list)
+            for r in cursor.fetchall():
+                result[r[0]].append({
+                    'title': r[1],
+                    'date': r[2],
+                    'normalized': r[3]
+                })
+            return dict(result)
+
     def check_subject_limit(self, subject: str, new_title: str, new_entities: Set[str] = None) -> Tuple[bool, str]:
-        """
-        Проверяет жёсткий лимит по subject за временное окно.
-        Возвращает (can_post, reason).
-        """
+        """Проверяет жёсткий лимит по subject за временное окно."""
         if subject == "other":
             return True, ""
         
@@ -851,7 +891,6 @@ class PostedManager:
             last_date = parse_db_datetime(recent_posts[0]['date'])
             hours_since = (datetime.now(timezone.utc) - last_date).total_seconds() / 3600
             if hours_since < config.same_subject_cooldown_hours:
-                # Но разрешаем если это СОВСЕМ другая новость (sim < 15%)
                 if recent_posts:
                     sim = calculate_similarity(new_normalized, recent_posts[0]['normalized'])
                     if sim >= 0.15:
@@ -860,9 +899,7 @@ class PostedManager:
         return True, ""
 
     def check_entity_overlap(self, entities: Set[str], new_title: str) -> Tuple[bool, str]:
-        """
-        Проверяет, не было ли недавно поста с похожим набором entities.
-        """
+        """Проверяет, не было ли недавно поста с похожим набором entities."""
         if len(entities) < config.min_common_entities_block:
             return True, ""
         
@@ -879,20 +916,15 @@ class PostedManager:
             new_normalized = normalize_title(new_title)
             
             for row in cursor.fetchall():
-                try:
-                    existing_entities = set(json.loads(row[1])) if row[1] else set()
-                    common = entities & existing_entities
+                existing_entities = set(safe_json_loads(row[1], []))
+                common = entities & existing_entities
+                
+                if len(common) >= config.min_common_entities_block:
+                    title_sim = calculate_similarity(new_normalized, row[2] or "")
                     
-                    if len(common) >= config.min_common_entities_block:
-                        # Дополнительно проверяем similarity заголовков
-                        title_sim = calculate_similarity(new_normalized, row[2] or "")
-                        
-                        # Блокируем если много общих entities И хоть какое-то сходство заголовков
-                        if title_sim > 0.15 or len(common) >= 3:
-                            common_str = ', '.join(list(common)[:3])
-                            return False, f"ENTITY_OVERLAP ({len(common)}: {common_str}, title_sim={title_sim:.0%}): {row[0][:40]}"
-                except Exception:
-                    pass
+                    if title_sim > 0.15 or len(common) >= 3:
+                        common_str = ', '.join(list(common)[:3])
+                        return False, f"ENTITY_OVERLAP ({len(common)}: {common_str}, title_sim={title_sim:.0%}): {row[0][:40]}"
             
             return True, ""
 
@@ -910,33 +942,59 @@ class PostedManager:
             entities = extract_entities(f"{title} {summary}")
             domain = get_domain(url)
 
-            cursor.execute('SELECT title FROM posted_articles WHERE norm_url = ?', (norm_url,))
+            # Проверка в rejected_urls (долговременный чёрный список)
+            cursor.execute(
+                'SELECT reason FROM rejected_urls WHERE norm_url = ? AND rejected_at > datetime("now", ?)',
+                (norm_url, f'-{config.rejected_retention_days} days')
+            )
+            row = cursor.fetchone()
+            if row:
+                result.add_reason(f"BLACKLISTED ({row[0]})", 1.0, title)
+                return result
+
+            # Точное совпадение URL
+            cursor.execute(
+                'SELECT title FROM posted_articles WHERE norm_url = ? AND posted_date > datetime("now", ?)',
+                (norm_url, f'-{config.retention_days} days')
+            )
             row = cursor.fetchone()
             if row:
                 result.add_reason("URL_EXACT", 1.0, row[0])
                 return result
 
+            # Совпадение content_hash
             if content_hash:
-                cursor.execute('SELECT title FROM posted_articles WHERE content_hash = ?', (content_hash,))
+                cursor.execute(
+                    'SELECT title FROM posted_articles WHERE content_hash = ? AND posted_date > datetime("now", ?)',
+                    (content_hash, f'-{config.retention_days} days')
+                )
                 row = cursor.fetchone()
                 if row:
                     result.add_reason("CONTENT_HASH", 1.0, row[0])
                     return result
 
-            cursor.execute('SELECT title FROM posted_articles WHERE title_normalized = ?', (title_normalized,))
+            # Точное совпадение нормализованного заголовка
+            cursor.execute(
+                'SELECT title FROM posted_articles WHERE title_normalized = ? AND posted_date > datetime("now", ?)',
+                (title_normalized, f'-{config.retention_days} days')
+            )
             row = cursor.fetchone()
             if row:
                 result.add_reason("TITLE_EXACT", 1.0, row[0])
                 return result
 
-            cursor.execute(
-                'SELECT id, title, title_normalized, title_words, entities, domain FROM posted_articles')
+            # Проверка similarity только для записей за retention_days
+            cursor.execute('''
+                SELECT id, title, title_normalized, title_words, entities, domain 
+                FROM posted_articles 
+                WHERE posted_date > datetime('now', ?)
+            ''', (f'-{config.retention_days} days',))
             all_posts = cursor.fetchall()
 
             for row in all_posts:
                 existing_id, existing_title, existing_normalized, existing_words_json, existing_entities_json, existing_domain = row
 
-                seq_sim = calculate_similarity(title_normalized, existing_normalized)
+                seq_sim = calculate_similarity(title_normalized, existing_normalized or "")
                 if seq_sim > config.title_similarity_threshold:
                     result.add_reason(f"TITLE_SIM ({seq_sim:.0%})", seq_sim, existing_title)
 
@@ -944,36 +1002,30 @@ class PostedManager:
                 if ngram_sim > config.ngram_similarity_threshold:
                     result.add_reason(f"NGRAM ({ngram_sim:.0%})", ngram_sim, existing_title)
 
-                if existing_words_json:
-                    try:
-                        existing_words = set(json.loads(existing_words_json))
-                        jaccard = jaccard_similarity(title_words, existing_words)
-                        if jaccard > config.jaccard_threshold:
-                            result.add_reason(f"JACCARD ({jaccard:.0%})", jaccard, existing_title)
-                    except Exception:
-                        pass
+                existing_words = set(safe_json_loads(existing_words_json, []))
+                if existing_words:
+                    jaccard = jaccard_similarity(title_words, existing_words)
+                    if jaccard > config.jaccard_threshold:
+                        result.add_reason(f"JACCARD ({jaccard:.0%})", jaccard, existing_title)
 
-                if entities and existing_entities_json:
-                    try:
-                        existing_entities = set(json.loads(existing_entities_json))
-                        if len(entities) >= 1 and len(existing_entities) >= 1:
-                            common = entities & existing_entities
-                            min_size = min(len(entities), len(existing_entities))
-                            overlap = len(common) / min_size if min_size > 0 else 0
-                            if len(common) >= 2 and overlap >= config.entity_overlap_threshold:
-                                result.add_reason(f"ENTITY ({len(common)})", overlap, existing_title)
-                    except Exception:
-                        pass
+                existing_entities = set(safe_json_loads(existing_entities_json, []))
+                if entities and existing_entities:
+                    if len(entities) >= 1 and len(existing_entities) >= 1:
+                        common = entities & existing_entities
+                        min_size = min(len(entities), len(existing_entities))
+                        overlap = len(common) / min_size if min_size > 0 else 0
+                        if len(common) >= 2 and overlap >= config.entity_overlap_threshold:
+                            result.add_reason(f"ENTITY ({len(common)})", overlap, existing_title)
 
                 if domain == existing_domain:
-                    same_sim = calculate_similarity(title_normalized, existing_normalized)
+                    same_sim = calculate_similarity(title_normalized, existing_normalized or "")
                     if same_sim > config.same_domain_similarity:
                         result.add_reason(f"SAME_DOMAIN ({same_sim:.0%})", same_sim, existing_title)
 
             return result
 
     def check_subject_freshness(self, subject: str, new_title: str = "") -> Tuple[bool, str]:
-        """Legacy метод - теперь использует check_subject_limit."""
+        """Legacy метод - использует check_subject_limit."""
         return self.check_subject_limit(subject, new_title)
 
     def check_diversity(self, topic: str, source: str = "") -> Tuple[bool, str]:
@@ -1054,6 +1106,7 @@ class PostedManager:
                 return False
 
     def log_rejected(self, article: Article, reason: str):
+        """Добавить в долговременный чёрный список."""
         logger.info(f"🚫 [{reason}]: {article.title[:50]}")
         norm_url = normalize_url(article.link)
         self._add_rejected(norm_url, article.title, reason)
@@ -1095,13 +1148,18 @@ class PostedManager:
             conn = self._get_conn()
             cursor = conn.cursor()
 
+            # Очистка старых posted
             cursor.execute(f"DELETE FROM posted_articles WHERE posted_date < datetime('now', '-{days} days')")
-            deleted = cursor.rowcount
+            deleted_posted = cursor.rowcount
+
+            # Очистка старых rejected (отдельный срок хранения)
+            cursor.execute(f"DELETE FROM rejected_urls WHERE rejected_at < datetime('now', '-{config.rejected_retention_days} days')")
+            deleted_rejected = cursor.rowcount
 
             conn.commit()
 
-            if deleted > 0:
-                logger.info(f"🧹 Очищено: {deleted} posted")
+            if deleted_posted > 0 or deleted_rejected > 0:
+                logger.info(f"🧹 Очищено: {deleted_posted} posted, {deleted_rejected} rejected")
 
     def get_stats(self) -> dict:
         with self._lock:
@@ -1122,15 +1180,16 @@ class PostedManager:
                 return False
 
     def close(self):
-        if self._conn:
-            try:
-                self._conn.commit()
-                self._conn.close()
-                logger.info("🔒 БД закрыта")
-            except Exception as e:
-                logger.error(f"❌ Ошибка закрытия: {e}")
-            finally:
-                self._conn = None
+        with self._lock:
+            if self._conn:
+                try:
+                    self._conn.commit()
+                    self._conn.close()
+                    logger.info("🔒 БД закрыта")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка закрытия: {e}")
+                finally:
+                    self._conn = None
 
 
 # ====================== RSS LOADING ======================
@@ -1186,12 +1245,19 @@ async def load_all_feeds() -> List[Article]:
 
 # ====================== INTERLEAVE BY SOURCE ======================
 def interleave_by_source(candidates: List[Article]) -> List[Article]:
-    """Round-robin по источникам: берём по одной статье из каждого source по очереди."""
-    by_source = defaultdict(deque)
+    """Round-robin по источникам в порядке появления (без сортировки по длине)."""
+    if not candidates:
+        return []
+    
+    by_source: Dict[str, deque] = {}
+    source_order: List[str] = []
+    
+    # Сохраняем порядок появления источников
     for art in candidates:
+        if art.source not in by_source:
+            by_source[art.source] = deque()
+            source_order.append(art.source)
         by_source[art.source].append(art)
-
-    source_order = sorted(by_source.keys(), key=lambda s: len(by_source[s]))
 
     result = []
     while any(by_source[s] for s in source_order):
@@ -1212,21 +1278,30 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     if recent_subjects:
         logger.info(f"   📊 Subjects за 24h: {dict(list(recent_subjects.items())[:5])}")
 
+    # Кэшируем статистику по subjects для score()
+    subject_stats_cache = posted.get_subject_stats_cached(24)
+
     candidates = []
     seen_normalized_titles: Set[str] = set()
     seen_word_signatures: Set[str] = set()
     seen_content_hashes: Set[str] = set()
     
-    # Счётчик subjects в текущем батче
     batch_subject_counts: Dict[str, int] = defaultdict(int)
 
     stats = {
         "batch_dup": 0, "db_dup": 0, "diversity": 0, "passed": 0,
         "filtered_out": 0, "subject_limit": 0, "entity_overlap": 0,
-        "batch_subject": 0
+        "batch_subject": 0, "blacklisted": 0
     }
 
     for article in articles:
+        # Проверка в чёрном списке
+        is_blacklisted, bl_reason = posted.is_rejected(article.link)
+        if is_blacklisted:
+            logger.info(f"  ⛔ BLACKLISTED ({bl_reason}): {article.title[:50]}")
+            stats["blacklisted"] += 1
+            continue
+
         if not is_relevant(article):
             stats["filtered_out"] += 1
             continue
@@ -1250,27 +1325,27 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         subject = detect_subject(text)
         entities = extract_entities(text)
 
-        # === ПРОВЕРКА: Лимит subject в текущем батче ===
+        # Лимит subject в текущем батче
         if subject != "other" and batch_subject_counts[subject] >= config.batch_subject_limit:
             posted.log_rejected(article, f"BATCH_SUBJECT_LIMIT ({subject}, {batch_subject_counts[subject]} in batch)")
             stats["batch_subject"] += 1
             continue
 
-        # === ПРОВЕРКА: Глобальный лимит по subject ===
+        # Глобальный лимит по subject
         subj_ok, subj_reason = posted.check_subject_limit(subject, article.title, entities)
         if not subj_ok:
             posted.log_rejected(article, subj_reason)
             stats["subject_limit"] += 1
             continue
 
-        # === ПРОВЕРКА: Entity overlap ===
+        # Entity overlap
         ent_ok, ent_reason = posted.check_entity_overlap(entities, article.title)
         if not ent_ok:
             posted.log_rejected(article, ent_reason)
             stats["entity_overlap"] += 1
             continue
 
-        # === ПРОВЕРКА: Дубликат в БД ===
+        # Дубликат в БД
         dup_result = posted.is_duplicate(article.link, article.title, article.summary)
         if dup_result.is_duplicate:
             reason = "; ".join(dup_result.reasons[:3])
@@ -1278,7 +1353,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
             stats["db_dup"] += 1
             continue
 
-        # === ПРОВЕРКА: Diversity по topic и source ===
+        # Diversity по topic и source
         topic = Topic.detect(text)
         div_ok, div_reason = posted.check_diversity(topic, article.source)
         if not div_ok:
@@ -1295,7 +1370,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         candidates.append(article)
         stats["passed"] += 1
 
-    # === Сортировка с штрафом за повторяющийся subject ===
+    # Сортировка с использованием кэша
     def score(art: Article) -> float:
         text = f"{art.title} {art.summary}"
         subject = detect_subject(text)
@@ -1307,13 +1382,11 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         
         base_score = ai_sc * 3 + prio_sc * 5 + len(entities_set) * 1 + freshness * 2
         
-        # Штраф если subject недавно публиковался
-        if subject != "other":
-            recent_subj = posted.get_subject_posts_in_window(subject, 24)
-            if recent_subj:
-                penalty = config.subject_priority_penalty * len(recent_subj)
-                base_score -= penalty
-                logger.debug(f"   📉 Penalty -{penalty} for {subject} ({len(recent_subj)} recent): {art.title[:40]}")
+        # Штраф из кэша (без запроса к БД)
+        if subject != "other" and subject in subject_stats_cache:
+            recent_count = len(subject_stats_cache[subject])
+            penalty = config.subject_priority_penalty * recent_count
+            base_score -= penalty
         
         return base_score
 
@@ -1327,7 +1400,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     logger.info(f"   filtered={stats['filtered_out']}, batch_dup={stats['batch_dup']}, "
                 f"db_dup={stats['db_dup']}, diversity={stats['diversity']}")
     logger.info(f"   subject_limit={stats['subject_limit']}, entity_overlap={stats['entity_overlap']}, "
-                f"batch_subject={stats['batch_subject']}")
+                f"batch_subject={stats['batch_subject']}, blacklisted={stats['blacklisted']}")
     logger.info(f"✅ Кандидатов: {len(candidates)} из {len(articles)}")
 
     return candidates
@@ -1365,7 +1438,6 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
         subj = detect_subject(text)
         source = art.source
 
-        # Жёсткий skip если subject недавно был слишком часто
         if subj != "other" and recent_subj_counts.get(subj, 0) >= config.rotation_max_per_subject:
             logger.info(f"   ⏭️ SKIP_SUBJECT [{subj}] x{recent_subj_counts[subj]}: {art.title[:50]}")
             deprioritized.append(art)
@@ -1563,12 +1635,12 @@ async def main():
         f.write(str(os.getpid()))
 
     logger.info("=" * 60)
-    logger.info("🚀 AI-POSTER v18.0 (Enhanced anti-repeat: subject limits, entity overlap)")
+    logger.info("🚀 AI-POSTER v18.1 (Persistent blacklist, cached subject stats)")
     logger.info("=" * 60)
 
     posted = PostedManager(config.db_file)
 
-    posted.clear_rejected()
+    # НЕ вызываем clear_rejected() — rejected_urls теперь долговременный
 
     try:
         if posted.verify_db():
@@ -1580,9 +1652,8 @@ async def main():
         posted.cleanup(config.retention_days)
 
         stats = posted.get_stats()
-        logger.info(f"📊 Статистика: {stats['total_posted']} posted")
+        logger.info(f"📊 Статистика: {stats['total_posted']} posted, {stats['total_rejected']} в чёрном списке")
 
-        # Показываем subjects за последние 24 часа
         recent_subjects = posted.get_recent_subjects(24)
         if recent_subjects:
             logger.info(f"📊 Subjects за 24h: {dict(recent_subjects)}")
@@ -1633,6 +1704,21 @@ async def main():
             if await post_article(article, summary, posted):
                 logger.info("\n🏁 Готово!")
                 break
+
+            await asyncio.sleep(2)
+        else:
+            logger.info("😔 Не удалось опубликовать (все пропущены или ошибки генерации)")
+
+    finally:
+        posted.close()
+        await bot.session.close()
+
+        if os.path.exists(lock_file):
+            os.remove(lock_file)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 
             
 

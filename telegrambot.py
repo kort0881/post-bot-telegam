@@ -50,10 +50,14 @@ class Config:
         self.jaccard_threshold = 0.50
         self.same_domain_similarity = 0.45
 
-        self.min_post_length = 450
+        # ИЗМЕНЕНО: 450 → 350
+        self.min_post_length = 350
         self.max_article_age_hours = 72
 
         self.min_ai_score = 1
+
+        # НОВОЕ: максимум одинаковых предложений в посте
+        self.max_repeat_sentences = 2
 
         # --- НАСТРОЙКИ ЧЕРЕДОВАНИЯ ---
         self.diversity_window = 5
@@ -1278,46 +1282,58 @@ DISCLAIMER = (
 )
 
 
+# ====================== ПОВТОРЯЮЩИЕСЯ ПРЕДЛОЖЕНИЯ ======================
+def has_repeated_sentences(text: str, max_repeats: int = 2) -> bool:
+    """Возвращает True если в тексте более max_repeats похожих предложений."""
+    # Разбиваем на предложения по точке, восклицательному и вопросительному знаку
+    sentences = re.split(r'[.!?]\s+', text)
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
+
+    if len(sentences) < 2:
+        return False
+
+    repeat_count = 0
+    checked = []
+    for sent in sentences:
+        for prev in checked:
+            sim = calculate_similarity(sent, prev)
+            if sim > 0.6:
+                repeat_count += 1
+                if repeat_count >= max_repeats:
+                    logger.warning(f"  ⚠️ REPEAT_SENTENCES ({repeat_count}): «{sent[:40]}»")
+                    return True
+        checked.append(sent)
+
+    return False
+
+
 # ====================== TEXT GENERATION ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
 
-    prompt = f"""Ты — редактор Telegram-канала про AI-технологии и новинки для аудитории из РФ и СНГ.
+    # ИЗМЕНЕНО: новый компактный промпт без нумерованного списка
+    prompt = f"""Ты — редактор Telegram-канала про AI-технологии для аудитории из РФ и СНГ.
 
 НОВОСТЬ:
 Заголовок: {article.title}
 Содержание: {article.summary[:800]}
 Источник: {article.source}
 
-ЗАДАЧА: Напиши пост для Telegram-канала про AI-НОВИНКИ и ТЕХНОЛОГИИ.
+Если новость НЕ про AI/нейросети — ответь одним словом: SKIP
 
-ФОКУС КАНАЛА:
-🟢 Новые AI-модели и релизы (GPT, Claude, Gemini, Llama)
-🟢 Новые AI-инструменты, которые можно попробовать
-🟢 Важные новости индустрии AI
-🟢 Практическое применение
-
-НЕ ПОДХОДИТ — ответь SKIP если новость:
-🔴 Вообще не про AI/нейросети
-🔴 Простая реклама купи-продай
-🔴 Скучный корпоративный отчет (назначили директора, продали акции)
-
-СТРУКТУРА ПОСТА:
-1. 🔥 Цепляющий заголовок на русском
-2. Суть новости: что произошло, кто участвует, ключевые цифры и факты
-3. Дополнительный контекст и детали: предыстория, сравнения, подробности из новости
-4. Короткий итог — одно предложение, только факт, без поучений
+Напиши Telegram-пост по схеме:
+1 яркий факт из новости → 1 практический вывод или следствие → 1 вопрос или прогноз.
 
 ТРЕБОВАНИЯ:
-✅ Длина: 600-900 символов
-✅ Конкретика: цифры, названия, даты
-✅ Живой стиль, без канцеляризмов ("стоит отметить" — ЗАПРЕЩЕНО)
-✅ Просто расширяй фактуру новости и детали — без морализаторства
-❌ ЗАПРЕЩЕНО использовать фразы: "почему это важно", "для чего это важно", "это важно потому что", "важно понимать", "это меняет", "это открывает возможности"
+✅ 400-700 символов
+✅ Конкретные цифры, названия, даты — без воды
+✅ Живой разговорный стиль, без шаблонов
+✅ Каждый блок — отдельный абзац
+❌ ЗАПРЕЩЕНО: "стоит отметить", "важно понимать", "это меняет", "открывает возможности", "почему это важно", "важно отметить", "стоит упомянуть", "следует сказать", нумерация (1. 2. 3.)
 
 ПОСТ:"""
 
-    # Фразы-индикаторы воды и морализаторства — пост будет пересоздан
+    # РАСШИРЕНО: добавлены новые фразы-индикаторы воды
     water_phrases = [
         "стоит отметить", "важно понимать", "интересно, что",
         "давайте разберёмся", "как мы знаем", "не секрет",
@@ -1326,6 +1342,8 @@ async def generate_summary(article: Article) -> Optional[str]:
         "это важно потому что", "это меняет всё",
         "это открывает возможности", "это меняет правила",
         "почему это меняет", "вот почему это важно",
+        # НОВЫЕ фразы
+        "важно отметить", "стоит упомянуть", "следует сказать",
     ]
 
     for model in GROQ_MODELS:
@@ -1337,8 +1355,10 @@ async def generate_summary(article: Article) -> Optional[str]:
                 resp = await asyncio.to_thread(
                     groq_client.chat.completions.create,
                     model=model,
-                    temperature=0.7,
-                    max_tokens=1200,
+                    # ИЗМЕНЕНО: temperature 0.7 → 0.9
+                    temperature=0.9,
+                    # ИЗМЕНЕНО: max_tokens 1200 → 800
+                    max_tokens=800,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 text = resp.choices[0].message.content.strip()
@@ -1353,6 +1373,11 @@ async def generate_summary(article: Article) -> Optional[str]:
 
                 if any(w in text.lower() for w in water_phrases):
                     logger.warning("  ⚠️ Вода/морализаторство, повтор...")
+                    continue
+
+                # НОВОЕ: проверка на повторяющиеся предложения
+                if has_repeated_sentences(text, config.max_repeat_sentences):
+                    logger.warning("  ⚠️ Повторяющиеся предложения, регенерация...")
                     continue
 
                 topic = Topic.detect(f"{article.title} {article.summary}")
@@ -1426,7 +1451,7 @@ async def main():
         f.write(str(os.getpid()))
 
     logger.info("=" * 60)
-    logger.info("🚀 AI-POSTER v17.2 (No-moralizing prompts, extended water filter)")
+    logger.info("🚀 AI-POSTER v17.3 (Compact prompts, repeat-sentence filter, temperature 0.9)")
     logger.info("=" * 60)
 
     posted = PostedManager(config.db_file)
@@ -1506,7 +1531,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
 
 
 

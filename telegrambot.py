@@ -54,42 +54,42 @@ class Config:
         self.same_domain_similarity = 0.40
 
         # УСИЛЕННЫЕ ОГРАНИЧЕНИЯ НА ПОВТОРЫ СУБЪЕКТОВ
-        self.subject_window_hours = 24  # было 12
-        self.max_posts_per_subject = 2  # было 1
-        self.subject_min_interval_hours = 8  # НОВЫЙ: минимум между постами одного субъекта
-        self.same_subject_similarity_threshold = 0.50  # было 0.25 (строже)
-        self.same_subject_cooldown_hours = 10  # было 18 (меньше)
-        
+        self.subject_window_hours = 24
+        self.max_posts_per_subject = 2
+        self.subject_min_interval_hours = 8
+        self.same_subject_similarity_threshold = 0.50
+        self.same_subject_cooldown_hours = 10
+
         # Критические субъекты (частые)
         self.critical_subjects = {
-            "openai", "anthropic", "google", "meta", 
+            "openai", "anthropic", "google", "meta",
             "nvidia", "microsoft", "apple"
-        }  # telegram убран - теперь может постится чаще
-        
+        }
+
         # Контроль сущностей
-        self.entity_cooldown_hours = 4  # было 10
-        self.min_common_entities_block = 3  # было 2 (строже)
-        
+        self.entity_cooldown_hours = 4
+        self.min_common_entities_block = 3
+
         # Скоринг и приоритеты
-        self.subject_priority_penalty = 15  # было 8 (сильнее штраф)
-        self.fresh_subject_bonus = 10  # НОВЫЙ: бонус за редкие субъекты
-        self.batch_subject_limit = 3  # было 2
+        self.subject_priority_penalty = 15
+        self.fresh_subject_bonus = 10
+        self.batch_subject_limit = 3
 
         # Фильтрация контента
-        self.min_post_length = 350
+        self.min_post_length = 600  # увеличено с 350
         self.max_article_age_hours = 72
         self.min_ai_score = 1
         self.max_repeat_sentences = 2
 
         # Разнообразие топиков
-        self.diversity_window = 8  # было 5
-        self.same_topic_limit = 3  # было 2
-        
+        self.diversity_window = 8
+        self.same_topic_limit = 3
+
         # ПРИНУДИТЕЛЬНАЯ РОТАЦИЯ
-        self.rotation_history_size = 10  # НОВЫЙ: сколько последних постов проверяем
-        self.rotation_max_per_subject = 1  # макс в последних N постах
-        self.rotation_max_per_source = 3  # было 2
-        self.min_subjects_between_repeats = 3  # НОВЫЙ: минимум разных субъектов перед повтором
+        self.rotation_history_size = 10
+        self.rotation_max_per_subject = 1
+        self.rotation_max_per_source = 3
+        self.min_subjects_between_repeats = 3
 
         # API настройки
         self.groq_retries_per_model = 2
@@ -118,17 +118,17 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 
 def init_clients():
     global bot, groq_client
-    
+
     try:
         bot = Bot(
-            token=config.telegram_token, 
+            token=config.telegram_token,
             default=DefaultBotProperties(parse_mode=ParseMode.HTML)
         )
         logger.info("✅ Telegram Bot инициализирован")
     except Exception as e:
         logger.error(f"❌ Ошибка инициализации Telegram Bot: {e}")
         raise
-    
+
     try:
         groq_client = Groq(api_key=config.groq_api_key)
         logger.info("✅ Groq client инициализирован")
@@ -853,7 +853,7 @@ class PostedManager:
                   AND posted_date > datetime('now', ?)
                 ORDER BY posted_date DESC
             ''', (subject, f'-{hours} hours'))
-            
+
             results = []
             for r in cursor.fetchall():
                 results.append({
@@ -873,7 +873,7 @@ class PostedManager:
                 WHERE posted_date > datetime('now', ?)
                 ORDER BY posted_date DESC
             ''', (f'-{hours} hours',))
-            
+
             result: Dict[str, List[dict]] = defaultdict(list)
             for r in cursor.fetchall():
                 result[r[0]].append({
@@ -884,7 +884,6 @@ class PostedManager:
             return dict(result)
 
     def get_last_n_subjects(self, n: int = 5) -> List[str]:
-        """НОВЫЙ МЕТОД: Получить субъекты последних N постов."""
         with self._lock:
             cursor = self._get_conn().cursor()
             cursor.execute('''
@@ -895,51 +894,45 @@ class PostedManager:
             return [row[0] for row in cursor.fetchall()]
 
     def can_post_subject(self, subject: str) -> Tuple[bool, str]:
-        """НОВЫЙ МЕТОД: Быстрая проверка возможности публикации субъекта."""
         if subject == "other":
             return True, ""
-        
+
         last_subjects = self.get_last_n_subjects(config.min_subjects_between_repeats)
-        
+
         if subject in last_subjects:
             position = last_subjects.index(subject) + 1
             return False, f"RECENT ({subject} был {position}-м из последних {config.min_subjects_between_repeats})"
-        
+
         return True, ""
 
     def check_subject_limit(self, subject: str, new_title: str, new_entities: Set[str] = None) -> Tuple[bool, str]:
-        """УЛУЧШЕННАЯ ПРОВЕРКА: с минимальным интервалом."""
         if subject == "other":
             return True, ""
-        
+
         recent_posts = self.get_subject_posts_in_window(subject, config.subject_window_hours)
-        
-        # 1. Общий лимит за окно
+
         if len(recent_posts) >= config.max_posts_per_subject:
             return False, f"SUBJECT_LIMIT ({subject}: {len(recent_posts)}/{config.max_posts_per_subject} за {config.subject_window_hours}h)"
-        
-        # 2. НОВОЕ: Минимальный интервал между постами одного субъекта
+
         if recent_posts:
             last_date = parse_db_datetime(recent_posts[0]['date'])
             hours_since = (datetime.now(timezone.utc) - last_date).total_seconds() / 3600
-            
+
             if hours_since < config.subject_min_interval_hours:
                 return False, f"SUBJECT_COOLDOWN ({subject}: {hours_since:.1f}h < {config.subject_min_interval_hours}h)"
-        
-        # 3. Проверка похожести заголовков
+
         new_normalized = normalize_title(new_title)
         for post in recent_posts:
             sim = calculate_similarity(new_normalized, post['normalized'])
             if sim > config.same_subject_similarity_threshold:
                 return False, f"SUBJECT_SIMILAR ({subject}, sim={sim:.0%})"
-        
+
         return True, ""
 
     def check_entity_overlap(self, entities: Set[str], new_title: str) -> Tuple[bool, str]:
-        """УЛУЧШЕННАЯ ПРОВЕРКА: строже по сущностям."""
         if len(entities) < config.min_common_entities_block:
             return True, ""
-        
+
         with self._lock:
             cursor = self._get_conn().cursor()
             cursor.execute('''
@@ -949,26 +942,25 @@ class PostedManager:
                 ORDER BY posted_date DESC
                 LIMIT 20
             ''', (f'-{config.entity_cooldown_hours} hours',))
-            
+
             new_normalized = normalize_title(new_title)
-            
+
             for row in cursor.fetchall():
                 existing_entities = set(safe_json_loads(row[1], []))
                 common = entities & existing_entities
-                
+
                 if len(common) >= config.min_common_entities_block:
                     title_sim = calculate_similarity(new_normalized, row[2] or "")
-                    
-                    # Блокируем если: 4+ сущности ИЛИ 3 сущности + похожий заголовок
+
                     should_block = (
                         len(common) >= 4 or
                         (len(common) >= 3 and title_sim > 0.25)
                     )
-                    
+
                     if should_block:
                         common_str = ', '.join(list(common)[:3])
                         return False, f"ENTITY_OVERLAP ({len(common)}: {common_str}, title_sim={title_sim:.0%}): {row[0][:40]}"
-            
+
             return True, ""
 
     def is_duplicate(self, url: str, title: str, summary: str = "") -> DuplicateCheckResult:
@@ -1172,7 +1164,7 @@ class PostedManager:
                 GROUP BY subject
                 ORDER BY cnt DESC
             ''', (f'-{hours} hours',))
-            
+
             return {row[0]: row[1] for row in cursor.fetchall()}
 
     def cleanup(self, days: int = 90):
@@ -1283,10 +1275,10 @@ async def load_all_feeds() -> List[Article]:
 def interleave_by_source(candidates: List[Article]) -> List[Article]:
     if not candidates:
         return []
-    
+
     by_source: Dict[str, deque] = {}
     source_order: List[str] = []
-    
+
     for art in candidates:
         if art.source not in by_source:
             by_source[art.source] = deque()
@@ -1316,7 +1308,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     seen_normalized_titles: Set[str] = set()
     seen_word_signatures: Set[str] = set()
     seen_content_hashes: Set[str] = set()
-    
+
     batch_subject_counts: Dict[str, int] = defaultdict(int)
 
     stats = {
@@ -1390,13 +1382,12 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         seen_word_signatures.add(word_sig)
         if content_hash:
             seen_content_hashes.add(content_hash)
-        
+
         batch_subject_counts[subject] += 1
         candidates.append(article)
         stats["passed"] += 1
 
     def score(art: Article) -> float:
-        """УЛУЧШЕННЫЙ СКОРИНГ: с бонусом за свежие субъекты."""
         text = f"{art.title} {art.summary}"
         subject = detect_subject(text)
         entities_set = extract_entities(text)
@@ -1404,19 +1395,17 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         ai_sc = ai_relevance_score(text)
         prio_sc = priority_score(text)
         freshness = max(0, 72 - age) / 72
-        
+
         base_score = ai_sc * 3 + prio_sc * 5 + len(entities_set) * 1 + freshness * 2
-        
-        # Прогрессивный штраф за недавние субъекты
+
         if subject != "other" and subject in subject_stats_cache:
             recent_count = len(subject_stats_cache[subject])
             penalty = config.subject_priority_penalty * (recent_count ** 1.5)
             base_score -= penalty
-        
-        # Бонус за свежий субъект
+
         if subject != "other" and subject not in subject_stats_cache:
             base_score += config.fresh_subject_bonus
-        
+
         return base_score
 
     candidates.sort(key=score, reverse=True)
@@ -1436,72 +1425,62 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
 
 def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[Article]:
-    """УСИЛЕННАЯ РОТАЦИЯ: принудительная проверка последних N постов."""
-    
     recent = posted.get_recent_posts(config.rotation_history_size)
-    
+
     if not recent:
         logger.info("🔄 Нет истории — ротация не нужна")
         return candidates
-    
-    # Собираем субъекты последних постов
+
     recent_subjects = []
     for p in recent:
         subj = p.get('subject', 'other')
         recent_subjects.append(subj)
-    
-    # Считаем частоту субъектов
+
     subject_counts = {}
     for subj in recent_subjects:
         subject_counts[subj] = subject_counts.get(subj, 0) + 1
-    
-    # Последние N субъектов (для проверки "между повторами")
+
     last_n_subjects = recent_subjects[:config.min_subjects_between_repeats]
-    
+
     logger.info(f"🔄 Последние {config.rotation_history_size} постов")
     logger.info(f"   Субъекты: {recent_subjects[:5]}")
     logger.info(f"   Частота: {subject_counts}")
     logger.info(f"   Последние {config.min_subjects_between_repeats}: {last_n_subjects}")
-    
-    priority = []      # Свежие субъекты
-    normal = []        # Можно постить
-    blocked = []       # Блокированы (слишком часто)
-    
+
+    priority = []
+    normal = []
+    blocked = []
+
     for art in candidates:
         text = f"{art.title} {art.summary}"
         subj = detect_subject(text)
-        
-        # 1. Субъект был в последних N постах — блокируем
+
         if subj != "other" and subj in last_n_subjects:
             logger.info(f"   ⛔ BLOCKED [{subj}] в последних {config.min_subjects_between_repeats}: {art.title[:45]}")
             blocked.append(art)
             continue
-        
-        # 2. Субъект слишком частый — блокируем
+
         if subj != "other" and subject_counts.get(subj, 0) >= config.rotation_max_per_subject:
             logger.info(f"   ⛔ BLOCKED [{subj}] x{subject_counts[subj]} в истории: {art.title[:45]}")
             blocked.append(art)
             continue
-        
-        # 3. Свежий субъект — приоритет
+
         if subj not in subject_counts or subject_counts.get(subj, 0) == 0:
             logger.info(f"   ⭐ PRIORITY [свежий {subj}]: {art.title[:45]}")
             priority.append(art)
         else:
             normal.append(art)
-    
+
     result = priority + normal
-    
+
     if not result:
         logger.warning("⚠️ Все кандидаты заблокированы ротацией!")
-        # Возвращаем несколько blocked на случай если больше ничего нет
         return blocked[:3] if blocked else candidates[:1]
-    
-    # Добавляем blocked в конец (на случай если всё остальное не пройдёт)
+
     result.extend(blocked)
-    
+
     logger.info(f"🔄 Результат: {len(priority)} приоритет, {len(normal)} норм, {len(blocked)} blocked")
-    
+
     return result
 
 
@@ -1542,19 +1521,23 @@ async def generate_summary(article: Article) -> Optional[str]:
 
 НОВОСТЬ:
 Заголовок: {article.title}
-Содержание: {article.summary[:800]}
+Содержание: {article.summary[:1200]}
 Источник: {article.source}
 
 Если новость НЕ про AI/нейросети — ответь одним словом: SKIP
 
 Напиши Telegram-пост по схеме:
-1 яркий факт из новости → 1 практический вывод или следствие → 1 вопрос или прогноз.
+1. Главный факт с конкретными деталями (что случилось, кто, когда, цифры)
+2. Как это работает или что изменилось — раскрой суть, не скупись на детали
+3. Что это означает на практике — для пользователей, индустрии или конкурентов
 
 ТРЕБОВАНИЯ:
-✅ 400-700 символов
-✅ Конкретные цифры, названия, даты — без воды
-✅ Живой разговорный стиль, без шаблонов
+✅ 700-1000 символов — пиши подробно, используй все важные детали из новости
+✅ Конкретные цифры, названия моделей, даты, имена — это важно
+✅ Живой разговорный стиль, без шаблонов и канцелярита
 ✅ Каждый блок — отдельный абзац
+✅ Заканчивай уверенным утверждением или выводом — без вопросов читателю
+❌ ЗАПРЕЩЕНО: вопросы в конце ("Что думаете?", "Как вам?" и подобное)
 ❌ ЗАПРЕЩЕНО: "стоит отметить", "важно понимать", "это меняет", "открывает возможности", "почему это важно", "важно отметить", "стоит упомянуть", "следует сказать", нумерация (1. 2. 3.)
 
 ПОСТ:"""
@@ -1568,6 +1551,12 @@ async def generate_summary(article: Article) -> Optional[str]:
         "это открывает возможности", "это меняет правила",
         "почему это меняет", "вот почему это важно",
         "важно отметить", "стоит упомянуть", "следует сказать",
+    ]
+
+    ending_question_patterns = [
+        r'[Чч]то думаете', r'[Кк]ак вам', r'[Кк]аков ваш', r'[Вв]аше мнение',
+        r'[Пп]оделитесь', r'[Жж]дём ваших', r'[Nn]апишите в комментар',
+        r'[Аа] вы', r'\?$', r'\?\s*$',
     ]
 
     for model in GROQ_MODELS:
@@ -1596,6 +1585,20 @@ async def generate_summary(article: Article) -> Optional[str]:
                 if any(w in text.lower() for w in water_phrases):
                     logger.warning("  ⚠️ Вода/морализаторство, повтор...")
                     continue
+
+                # Убираем вопрос в конце, если модель всё же его поставила
+                last_paragraph = text.strip().split('\n')[-1].strip()
+                has_ending_question = any(
+                    re.search(p, last_paragraph) for p in ending_question_patterns
+                )
+                if has_ending_question:
+                    logger.warning("  ⚠️ Вопрос в конце — удаляем последний абзац...")
+                    paragraphs = [p.strip() for p in text.strip().split('\n') if p.strip()]
+                    if len(paragraphs) > 1:
+                        text = '\n\n'.join(paragraphs[:-1])
+                    else:
+                        # Один абзац — просто обрезаем вопрос
+                        text = re.sub(r'[\.\s]*[А-Яа-яA-Za-z\s,]+\?[\s]*$', '.', text).strip()
 
                 if has_repeated_sentences(text, config.max_repeat_sentences):
                     logger.warning("  ⚠️ Повторяющиеся предложения, регенерация...")
@@ -1693,18 +1696,18 @@ async def main():
         f.write(str(os.getpid()))
 
     logger.info("=" * 60)
-    logger.info("🚀 AI-POSTER v19.0 (Enhanced Subject Rotation)")
+    logger.info("🚀 AI-POSTER v19.1 (Detailed Posts, No Questions)")
     logger.info("=" * 60)
 
     posted = None
-    
+
     try:
         init_clients()
-        
+
         if not await check_telegram_connection():
             logger.error("❌ Не удалось подключиться к Telegram. Проверьте токен и сеть.")
             return
-        
+
         posted = PostedManager(config.db_file)
 
         if posted.verify_db():
@@ -1766,16 +1769,15 @@ async def main():
             if shutdown_event.is_set():
                 logger.info("🛑 Прерывание в цикле публикации")
                 break
-            
-            # НОВАЯ ПРОВЕРКА: можно ли постить этот субъект сейчас
+
             text = f"{article.title} {article.summary}"
             subject = detect_subject(text)
-            
+
             can_post, reason = posted.can_post_subject(subject)
             if not can_post:
                 posted.log_rejected(article, reason)
                 continue
-            
+
             dup_result = posted.is_duplicate(article.link, article.title, article.summary)
             if dup_result.is_duplicate:
                 posted.log_rejected(article, f"FINAL: {'; '.join(dup_result.reasons[:2])}")
@@ -1801,7 +1803,7 @@ async def main():
     finally:
         if posted:
             posted.close()
-        
+
         if bot:
             try:
                 await bot.session.close()
@@ -1811,7 +1813,7 @@ async def main():
 
         if os.path.exists(lock_file):
             os.remove(lock_file)
-            
+
         logger.info("👋 Завершение работы")
 
 

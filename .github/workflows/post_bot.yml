@@ -2,7 +2,8 @@ name: Telegram AI Tech Bot
 
 on:
   schedule:
-    - cron: '0 */2 * * *'
+    - cron: '0 7,9,12,14,16,18,20,22 * * *'
+      timezone: 'Europe/Moscow'
   workflow_dispatch:
 
 permissions:

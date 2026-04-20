@@ -46,19 +46,19 @@ class Config:
         self.rejected_retention_days = 30
         self.db_file = "posted_articles.db"
 
-        # Пороги дубликатов
-        self.title_similarity_threshold = 0.50
-        self.ngram_similarity_threshold = 0.40
-        self.entity_overlap_threshold = 0.45
-        self.jaccard_threshold = 0.45
-        self.same_domain_similarity = 0.40
+        # Пороги дубликатов (ослаблены)
+        self.title_similarity_threshold = 0.60      # было 0.50
+        self.ngram_similarity_threshold = 0.55      # было 0.40
+        self.entity_overlap_threshold = 0.60        # было 0.45
+        self.jaccard_threshold = 0.55               # было 0.45
+        self.same_domain_similarity = 0.65          # было 0.40
 
-        # УСИЛЕННЫЕ ОГРАНИЧЕНИЯ НА ПОВТОРЫ СУБЪЕКТОВ
+        # Ограничения на повтор субъектов (ослаблены)
         self.subject_window_hours = 24
-        self.max_posts_per_subject = 3
-        self.subject_min_interval_hours = 6
+        self.max_posts_per_subject = 5              # было 3
+        self.subject_min_interval_hours = 2         # было 6
         self.same_subject_similarity_threshold = 0.60
-        self.same_subject_cooldown_hours = 8
+        self.same_subject_cooldown_hours = 3        # было 8
 
         # Критические субъекты (частые)
         self.critical_subjects = {
@@ -66,18 +66,18 @@ class Config:
             "nvidia", "microsoft", "apple"
         }
 
-        # Контроль сущностей
+        # Контроль сущностей (ослаблен)
         self.entity_cooldown_hours = 4
-        self.min_common_entities_block = 3
+        self.min_common_entities_block = 4          # было 3
 
         # Скоринг и приоритеты
         self.subject_priority_penalty = 15
         self.fresh_subject_bonus = 10
-        self.batch_subject_limit = 3
+        self.batch_subject_limit = 5                # было 3
 
         # Фильтрация контента
         self.min_post_length = 600
-        self.max_article_age_hours = 72
+        self.max_article_age_hours = 168            # было 72 (7 дней)
         self.min_ai_score = 1
         self.max_repeat_sentences = 2
 
@@ -91,15 +91,15 @@ class Config:
         self.rotation_max_per_source = 3
         self.min_subjects_between_repeats = 3
 
-        # РОТАЦИЯ ИСТОЧНИКОВ
-        self.source_min_posts_between = 2   # сколько постов из других источников должно быть между постами одного источника
-        self.source_max_in_window = 2       # максимум постов из одного источника за последние rotation_history_size постов
+        # РОТАЦИЯ ИСТОЧНИКОВ (ослаблена)
+        self.source_min_posts_between = 1           # было 2
+        self.source_max_in_window = 4               # было 2
 
         # API настройки
         self.groq_retries_per_model = 2
         self.groq_base_delay = 2.0
         self.telegram_timeout = 30
-        self.http_timeout = 15
+        self.http_timeout = 30                      # увеличено с 15
 
         # Проверка обязательных переменных
         missing = []
@@ -169,6 +169,7 @@ RSS_FEEDS = [
 ]
 
 
+# РАСШИРЕННЫЕ СПИСКИ AI-КЛЮЧЕВЫХ СЛОВ
 AI_KEYWORDS_STRONG = [
     "artificial intelligence", "machine learning", "deep learning",
     "neural network", "llm", "large language model",
@@ -183,6 +184,8 @@ AI_KEYWORDS_STRONG = [
     "reinforcement learning", "supervised learning",
     "ai safety", "ai alignment", "agi",
     "rlhf", "fine-tuning", "rag",
+    "ai startup", "ai funding", "ai chip", "ai nuclear",      # новые
+    "ai-powered", "ai research", "ai development",            # новые
     "нейросеть", "нейросети", "нейросетей", "нейронная сеть",
     "искусственный интеллект", "машинное обучение", "глубокое обучение",
     "большая языковая модель", "генеративный ии",
@@ -197,7 +200,8 @@ AI_KEYWORDS_WEAK = [
     "robotics", "humanoid", "automation",
     "nlp", "ai model", "ai training",
     "hugging face", "stability ai", "cohere", "perplexity",
-    "vector database",
+    "vector database", "startup", "funding", "valuation",      # новые
+    "nuclear", "robot", "humanoid",                           # новые
     "бот", "боты", "ботов",
     "автоматизация", "робот", "роботы", "робототехника",
     "распознавание", "генерация",
@@ -546,6 +550,9 @@ def ai_relevance_score(text: str) -> int:
     for kw in AI_KEYWORDS_WEAK:
         if kw in text_lower:
             score += 1
+    # Если в тексте явно есть "ai" или "нейросеть", даём минимум 1 балл, чтобы не отсеять
+    if score == 0 and ("ai" in text_lower or "нейросеть" in text_lower or "ии" in text_lower):
+        score = 1
     return score
 
 
@@ -576,6 +583,11 @@ def is_promo_content(text: str) -> bool:
 
 def is_shopping_content(text: str) -> bool:
     text_lower = text.lower()
+    # Исключение: статьи про инвестиции/финансирование не считать шоппингом
+    investment_words = ["funding", "raises", "valuation", "billion", "million", "round", "инвестиции"]
+    if any(w in text_lower for w in investment_words):
+        return False
+
     if ai_relevance_score(text_lower) >= 4:
         return False
     shopping_count = sum(1 for p in SHOPPING_PATTERNS if p in text_lower)
@@ -583,21 +595,19 @@ def is_shopping_content(text: str) -> bool:
         return True
     price_pattern = re.search(r'\$\d+', text_lower)
     if price_pattern:
-        investment_words = ["funding", "raises", "round", "valuation", "billion",
-                           "million", "investment", "инвестиции", "раунд", "оценка"]
-        if not any(w in text_lower for w in investment_words):
-            product_words = ["price", "buy", "sale", "deal", "discount", "cheap",
-                           "specs", "earbuds", "phone", "laptop", "tablet",
-                           "watch", "headphone", "speaker", "camera", "monitor",
-                           "цена", "купить", "наушники", "телефон", "ноутбук", "планшет"]
-            if any(w in text_lower for w in product_words):
-                return True
+        product_words = ["price", "buy", "sale", "deal", "discount", "cheap",
+                         "specs", "earbuds", "phone", "laptop", "tablet",
+                         "watch", "headphone", "speaker", "camera", "monitor",
+                         "цена", "купить", "наушники", "телефон", "ноутбук", "планшет"]
+        if any(w in text_lower for w in product_words):
+            return True
     return False
 
 
 def is_corporate_news(text: str) -> bool:
     text_lower = text.lower()
 
+    # Если это продуктовый анонс (launch, release, new model) – не блокируем
     product_markers = [
         "launch", "release", "announce", "new model", "new feature",
         "update", "upgrade", "api", "open source", "benchmark",
@@ -630,6 +640,7 @@ def is_corporate_news(text: str) -> bool:
 def is_howto_content(text: str) -> bool:
     text_lower = text.lower()
 
+    # Если статья про конкретные AI-инструменты – не блокируем
     ai_product_markers = [
         "chatgpt", "claude", "gemini", "midjourney", "dall-e", "copilot",
         "stable diffusion", "grok", "deepseek", "sora",
@@ -708,8 +719,12 @@ def is_relevant(article: Article) -> bool:
 
     ai_score = ai_relevance_score(text)
     if ai_score < config.min_ai_score:
-        logger.info(f"  🚫 LOW_AI (score={ai_score}): {article.title[:60]}")
-        return False
+        # Если в заголовке есть "ai" или "нейросеть", но скор низкий, всё равно пропускаем
+        if "ai" not in text and "нейросеть" not in text and "ии" not in text:
+            logger.info(f"  🚫 LOW_AI (score={ai_score}): {article.title[:60]}")
+            return False
+        else:
+            logger.info(f"  ✅ LOW_AI but forced PASS (score={ai_score}): {article.title[:55]}")
 
     if is_promo_content(text):
         logger.info(f"  📢 PROMO: {article.title[:50]}")
@@ -1429,7 +1444,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         age = (datetime.now(timezone.utc) - art.published).total_seconds() / 3600
         ai_sc = ai_relevance_score(text)
         prio_sc = priority_score(text)
-        freshness = max(0, 72 - age) / 72
+        freshness = max(0, 168 - age) / 168   # используем новый max_age
 
         base_score = ai_sc * 3 + prio_sc * 5 + len(entities_set) * 1 + freshness * 2
 
@@ -1444,9 +1459,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         return base_score
 
     candidates.sort(key=score, reverse=True)
-
-    # Интерливинг по ВСЕМ кандидатам: сначала сортируем по скору (лучшие первыми),
-    # затем чередуем источники round-robin чтобы ни один не занял несколько позиций подряд
     candidates = interleave_by_source(candidates)
 
     logger.info("📊 Итоги фильтрации:")
@@ -1538,7 +1550,6 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
 
     if not result:
         logger.warning("⚠️ Все кандидаты заблокированы ротацией!")
-        # Отдаём заблокированных, отсортированных по разнообразию источников
         blocked_interleaved = interleave_by_source(blocked)
         return blocked_interleaved[:3] if blocked_interleaved else candidates[:1]
 
@@ -1759,7 +1770,7 @@ async def main():
         f.write(str(os.getpid()))
 
     logger.info("=" * 60)
-    logger.info("🚀 AI-POSTER v19.1 (Detailed Posts, No Questions)")
+    logger.info("🚀 AI-POSTER v19.2 (Less Strict Filters, More News)")
     logger.info("=" * 60)
 
     posted = None
@@ -1888,7 +1899,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

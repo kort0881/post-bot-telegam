@@ -91,6 +91,10 @@ class Config:
         self.rotation_max_per_source = 3
         self.min_subjects_between_repeats = 3
 
+        # РОТАЦИЯ ИСТОЧНИКОВ
+        self.source_min_posts_between = 2   # сколько постов из других источников должно быть между постами одного источника
+        self.source_max_in_window = 2       # максимум постов из одного источника за последние rotation_history_size постов
+
         # API настройки
         self.groq_retries_per_model = 2
         self.groq_base_delay = 2.0
@@ -1085,13 +1089,20 @@ class PostedManager:
             if source:
                 cursor.execute(
                     'SELECT source FROM posted_articles ORDER BY posted_date DESC LIMIT ?',
-                    (config.rotation_max_per_source,)
+                    (config.rotation_history_size,)
                 )
                 recent_sources = [row[0] for row in cursor.fetchall()]
 
-                if (len(recent_sources) >= config.rotation_max_per_source
-                        and all(s == source for s in recent_sources)):
-                    return False, f"SAME_SOURCE_{config.rotation_max_per_source + 1}X: {source}"
+                # Блокируем если источник встречался в последних source_min_posts_between постах
+                last_few = recent_sources[:config.source_min_posts_between]
+                if source in last_few:
+                    pos = last_few.index(source) + 1
+                    return False, f"SOURCE_TOO_RECENT ({source} был {pos}-м из последних {config.source_min_posts_between})"
+
+                # Блокируем если источник превысил лимит за окно
+                source_count = sum(1 for s in recent_sources if s == source)
+                if source_count >= config.source_max_in_window:
+                    return False, f"SOURCE_LIMIT ({source}: {source_count}/{config.source_max_in_window} за последние {config.rotation_history_size})"
 
             if topic == Topic.GENERAL:
                 return True, ""
@@ -1434,9 +1445,9 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
     candidates.sort(key=score, reverse=True)
 
-    top_candidates = candidates[:20]
-    rest_candidates = candidates[20:]
-    candidates = interleave_by_source(top_candidates) + rest_candidates
+    # Интерливинг по ВСЕМ кандидатам: сначала сортируем по скору (лучшие первыми),
+    # затем чередуем источники round-robin чтобы ни один не занял несколько позиций подряд
+    candidates = interleave_by_source(candidates)
 
     logger.info("📊 Итоги фильтрации:")
     logger.info(f"   filtered={stats['filtered_out']}, batch_dup={stats['batch_dup']}, "
@@ -1456,20 +1467,27 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
         return candidates
 
     recent_subjects = []
+    recent_sources = []
     for p in recent:
-        subj = p.get('subject', 'other')
-        recent_subjects.append(subj)
+        recent_subjects.append(p.get('subject', 'other'))
+        recent_sources.append(p.get('source', ''))
 
     subject_counts = {}
     for subj in recent_subjects:
         subject_counts[subj] = subject_counts.get(subj, 0) + 1
 
+    source_counts = {}
+    for src in recent_sources:
+        source_counts[src] = source_counts.get(src, 0) + 1
+
     last_n_subjects = recent_subjects[:config.min_subjects_between_repeats]
+    last_n_sources = recent_sources[:config.source_min_posts_between]
 
     logger.info(f"🔄 Последние {config.rotation_history_size} постов")
     logger.info(f"   Субъекты: {recent_subjects[:5]}")
-    logger.info(f"   Частота: {subject_counts}")
-    logger.info(f"   Последние {config.min_subjects_between_repeats}: {last_n_subjects}")
+    logger.info(f"   Источники: {recent_sources[:5]}")
+    logger.info(f"   Частота субъектов: {subject_counts}")
+    logger.info(f"   Частота источников: {source_counts}")
 
     priority = []
     normal = []
@@ -1478,19 +1496,40 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
     for art in candidates:
         text = f"{art.title} {art.summary}"
         subj = detect_subject(text)
+        src = art.source
 
+        # --- Блокировка по источнику ---
+        if src in last_n_sources:
+            pos = last_n_sources.index(src) + 1
+            logger.info(f"   ⛔ BLOCKED [src {src}] был {pos}-м из последних {config.source_min_posts_between}: {art.title[:40]}")
+            blocked.append(art)
+            continue
+
+        if source_counts.get(src, 0) >= config.source_max_in_window:
+            logger.info(f"   ⛔ BLOCKED [src {src}] x{source_counts[src]} в истории: {art.title[:40]}")
+            blocked.append(art)
+            continue
+
+        # --- Блокировка по субъекту ---
         if subj != "other" and subj in last_n_subjects:
-            logger.info(f"   ⛔ BLOCKED [{subj}] в последних {config.min_subjects_between_repeats}: {art.title[:45]}")
+            logger.info(f"   ⛔ BLOCKED [{subj}] в последних {config.min_subjects_between_repeats}: {art.title[:40]}")
             blocked.append(art)
             continue
 
         if subj != "other" and subject_counts.get(subj, 0) >= config.rotation_max_per_subject:
-            logger.info(f"   ⛔ BLOCKED [{subj}] x{subject_counts[subj]} в истории: {art.title[:45]}")
+            logger.info(f"   ⛔ BLOCKED [{subj}] x{subject_counts[subj]} в истории: {art.title[:40]}")
             blocked.append(art)
             continue
 
-        if subj not in subject_counts or subject_counts.get(subj, 0) == 0:
-            logger.info(f"   ⭐ PRIORITY [свежий {subj}]: {art.title[:45]}")
+        # --- Приоритет: свежий субъект И источник ---
+        fresh_subject = subj not in subject_counts or subject_counts.get(subj, 0) == 0
+        fresh_source = src not in source_counts or source_counts.get(src, 0) == 0
+
+        if fresh_source and fresh_subject:
+            logger.info(f"   ⭐⭐ PRIORITY [новый src+subj]: {art.title[:40]}")
+            priority.append(art)
+        elif fresh_source or fresh_subject:
+            logger.info(f"   ⭐ PRIORITY [{'новый src' if fresh_source else 'новый subj'}]: {art.title[:40]}")
             priority.append(art)
         else:
             normal.append(art)
@@ -1499,9 +1538,11 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
 
     if not result:
         logger.warning("⚠️ Все кандидаты заблокированы ротацией!")
-        return blocked[:3] if blocked else candidates[:1]
+        # Отдаём заблокированных, отсортированных по разнообразию источников
+        blocked_interleaved = interleave_by_source(blocked)
+        return blocked_interleaved[:3] if blocked_interleaved else candidates[:1]
 
-    result.extend(blocked)
+    result.extend(interleave_by_source(blocked))
 
     logger.info(f"🔄 Результат: {len(priority)} приоритет, {len(normal)} норм, {len(blocked)} blocked")
 
@@ -1847,8 +1888,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
-
 
 
 

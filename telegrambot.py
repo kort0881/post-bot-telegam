@@ -55,10 +55,10 @@ class Config:
 
         # УСИЛЕННЫЕ ОГРАНИЧЕНИЯ НА ПОВТОРЫ СУБЪЕКТОВ
         self.subject_window_hours = 24
-        self.max_posts_per_subject = 2
-        self.subject_min_interval_hours = 8
-        self.same_subject_similarity_threshold = 0.50
-        self.same_subject_cooldown_hours = 10
+        self.max_posts_per_subject = 3
+        self.subject_min_interval_hours = 6
+        self.same_subject_similarity_threshold = 0.60
+        self.same_subject_cooldown_hours = 8
 
         # Критические субъекты (частые)
         self.critical_subjects = {
@@ -76,7 +76,7 @@ class Config:
         self.batch_subject_limit = 3
 
         # Фильтрация контента
-        self.min_post_length = 600  # увеличено с 350
+        self.min_post_length = 600
         self.max_article_age_hours = 72
         self.min_ai_score = 1
         self.max_repeat_sentences = 2
@@ -156,6 +156,12 @@ RSS_FEEDS = [
     ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
     ("https://engineering.fb.com/category/ml-applications/feed/", "Meta AI Blog"),
     ("https://kod.ru/rss", "Kod.ru"),
+    (
+        "https://habr.com/ru/rss/feed/1cf1798b4d67ac63d1869bba8f26920f"
+        "?fl=ru&complexity=high&rating=10"
+        "&types%5B%5D=article&types%5B%5D=post&types%5B%5D=news",
+        "Habr AI",
+    ),
 ]
 
 
@@ -318,6 +324,24 @@ NEWS_SUBJECTS = {
     "xai": ["xai", "grok"],
     "telegram": ["telegram", "телеграм", "durov", "дуров"],
     "huggingface": ["hugging face", "huggingface"],
+    "applications": [
+        "ai-powered", "ai powered", "uses ai to", "ai use cases",
+        "ai in healthcare", "ai in medicine", "ai in education",
+        "ai in finance", "ai in banking", "ai in retail",
+        "ai in marketing", "ai in manufacturing", "ai in robotics",
+        "ai in government", "ai for small business", "ai for startups",
+        "ai in telecom", "ai in cybersecurity",
+    ],
+    "creativity": [
+        "ai-generated images", "ai generated images",
+        "ai-generated video", "ai-generated music",
+        "text-to-image", "text to image",
+        "text-to-video", "text to video",
+        "ai for creators", "ai for artists",
+        "ai for designers", "story generation",
+        "music generation", "video generation",
+        "image generation", "creative ai tools",
+    ],
 }
 
 
@@ -1586,7 +1610,6 @@ async def generate_summary(article: Article) -> Optional[str]:
                     logger.warning("  ⚠️ Вода/морализаторство, повтор...")
                     continue
 
-                # Убираем вопрос в конце, если модель всё же его поставила
                 last_paragraph = text.strip().split('\n')[-1].strip()
                 has_ending_question = any(
                     re.search(p, last_paragraph) for p in ending_question_patterns
@@ -1597,7 +1620,6 @@ async def generate_summary(article: Article) -> Optional[str]:
                     if len(paragraphs) > 1:
                         text = '\n\n'.join(paragraphs[:-1])
                     else:
-                        # Один абзац — просто обрезаем вопрос
                         text = re.sub(r'[\.\s]*[А-Яа-яA-Za-z\s,]+\?[\s]*$', '.', text).strip()
 
                 if has_repeated_sentences(text, config.max_repeat_sentences):
@@ -1825,7 +1847,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

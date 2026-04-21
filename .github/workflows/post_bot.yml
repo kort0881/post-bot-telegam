@@ -2,8 +2,10 @@ name: Telegram AI Tech Bot
 
 on:
   schedule:
-    # 7,10,13,16,18,19,21,23 по МСК (UTC+3) → 4,7,10,13,15,16,18,20 по UTC
-    - cron: '0 4,7,10,13,15,16,18,20 * * *'
+    # Каждые 3 часа по московскому времени (UTC+3)
+    # Запуск в 0, 3, 6, 9, 12, 15, 18, 21 МСК
+    # Соответствующие UTC-часы: 21, 0, 3, 6, 9, 12, 15, 18
+    - cron: '0 21,0,3,6,9,12,15,18 * * *'
   workflow_dispatch:
 
 permissions:
@@ -62,5 +64,4 @@ jobs:
           git add ai_poster.log 2>/dev/null || true
           git diff --staged --quiet || git commit -m "🤖 Update database [skip ci]"
           git push || (git pull --rebase && git push)
-
 

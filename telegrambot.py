@@ -49,38 +49,31 @@ class Config:
         self.rejected_retention_days = 30
         self.db_file = "posted_articles.db"
 
-        # Пороги дубликатов (ослаблены)
         self.title_similarity_threshold = 0.60
         self.ngram_similarity_threshold = 0.55
         self.entity_overlap_threshold = 0.60
         self.jaccard_threshold = 0.55
         self.same_domain_similarity = 0.65
 
-        # Ограничения на повтор субъектов (ослаблены)
         self.subject_window_hours = 24
         self.max_posts_per_subject = 5
         self.subject_min_interval_hours = 2
         self.same_subject_similarity_threshold = 0.60
         self.same_subject_cooldown_hours = 3
 
-        # Контроль сущностей (ослаблен)
         self.entity_cooldown_hours = 4
         self.min_common_entities_block = 4
 
-        # Скоринг и приоритеты – для чередования тематик
-        self.alternation_enabled = True      # чередовать AI / блокировки
+        self.alternation_enabled = True
 
-        # Фильтрация контента
-        self.min_post_length = 500           # для блокировок можно чуть короче
+        self.min_post_length = 500
         self.max_article_age_hours = 168
         self.min_ai_score = 1
         self.max_repeat_sentences = 2
 
-        # Разнообразие топиков
         self.diversity_window = 8
         self.same_topic_limit = 3
 
-        # Ротация
         self.rotation_history_size = 10
         self.rotation_max_per_subject = 1
         self.rotation_max_per_source = 3
@@ -89,13 +82,11 @@ class Config:
         self.source_min_posts_between = 1
         self.source_max_in_window = 4
 
-        # API настройки
         self.groq_retries_per_model = 2
         self.groq_base_delay = 2.0
         self.telegram_timeout = 30
         self.http_timeout = 30
 
-        # Проверка обязательных переменных
         missing = []
         for var, name in [(self.groq_api_key, "GROQ_API_KEY"),
                           (self.telegram_token, "TELEGRAM_BOT_TOKEN"),
@@ -116,7 +107,6 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 
 def init_clients():
     global bot, groq_client
-
     try:
         bot = Bot(
             token=config.telegram_token,
@@ -126,7 +116,6 @@ def init_clients():
     except Exception as e:
         logger.error(f"❌ Ошибка инициализации Telegram Bot: {e}")
         raise
-
     try:
         groq_client = Groq(api_key=config.groq_api_key)
         logger.info("✅ Groq client инициализирован")
@@ -142,7 +131,6 @@ GROQ_MODELS = [
 
 # ---------- RSS-фиды: AI + блокировки / обход ----------
 RSS_FEEDS = [
-    # AI
     ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch AI"),
     ("https://venturebeat.com/category/ai/feed/", "VentureBeat AI"),
     ("https://arstechnica.com/tag/artificial-intelligence/feed/", "Ars Technica AI"),
@@ -156,7 +144,6 @@ RSS_FEEDS = [
     ("https://engineering.fb.com/category/ml-applications/feed/", "Meta AI Blog"),
     ("https://kod.ru/rss", "Kod.ru"),
     ("https://habr.com/ru/rss/feed/1cf1798b4d67ac63d1869bba8f26920f?fl=ru&complexity=high&rating=10&types%5B%5D=article&types%5B%5D=post&types%5B%5D=news", "Habr AI"),
-    # Блокировки, обход, VPN, РКН
     ("https://rkn.gov.ru/rss/news.xml", "РКН новости"),
     ("https://t.me/s/roskomsvoboda", "Роскомсвобода (RSS)"),
     ("https://t.me/s/antizapret", "Антизапрет"),
@@ -166,7 +153,6 @@ RSS_FEEDS = [
 ]
 
 # ---------- КЛЮЧЕВЫЕ СЛОВА ----------
-# AI (сильные)
 AI_KEYWORDS_STRONG = [
     "artificial intelligence", "machine learning", "deep learning",
     "neural network", "llm", "large language model",
@@ -191,7 +177,6 @@ AI_KEYWORDS_WEAK = [
     "нейро", "ии",
 ]
 
-# Блокировки / обход
 BLOCK_KEYWORDS = [
     "блокировка", "заблокирован", "реестр ркн", "roskomnadzor", "rkn",
     "обход блокировок", "dpi", "замедление трафика", "sniffing",
@@ -201,7 +186,6 @@ BLOCK_KEYWORDS = [
     "замедление youtube", "замедление ютуб",
 ]
 
-# Исключаемое: игры, бизнес-корпоративные новости, реклама
 GAMES_EXCLUDE = [
     "ps5", "xbox", "nintendo", "game review", "baldur's gate", "roblox", "esports",
     "twitch streamer", "fortnite", "игра", "игровая", "гейминг", "киберспорт"
@@ -222,6 +206,16 @@ PROMO_PATTERNS = [
     "free trial", "скидка на подписку", "вебинар", "webinar", "buy now", "special offer",
     "купить vpn", "vpn сервис", "тариф", "промокод"
 ]
+
+# ---------- DATACLASS ARTICLE ----------
+@dataclass
+class Article:
+    title: str
+    summary: str
+    link: str
+    source: str
+    published: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
 
 # ---------- ТОПИКИ ----------
 class Topic:
@@ -366,7 +360,6 @@ def ngram_similarity(str1: str, str2: str, n: int = 2) -> float:
 
 
 def extract_entities(text: str) -> Set[str]:
-    # Упростим – для AI и блокировок не критично, оставим пустым
     return set()
 
 
@@ -378,7 +371,6 @@ def get_content_hash(text: str) -> str:
 
 
 def detect_subject(text: str) -> str:
-    # Для чередования используем топик, а не subject
     return Topic.detect(text)
 
 
@@ -421,9 +413,7 @@ def ai_relevance_score(text: str) -> int:
 def is_promo_content(text: str) -> bool:
     text_lower = text.lower()
     promo_count = sum(1 for p in PROMO_PATTERNS if p in text_lower)
-    if promo_count >= 2:
-        return True
-    return False
+    return promo_count >= 2
 
 
 def is_relevant(article: Article) -> bool:
@@ -434,22 +424,18 @@ def is_relevant(article: Article) -> bool:
         logger.info(f"  ⏰ TOO_OLD ({age_hours:.0f}h): {article.title[:50]}")
         return False
 
-    # Исключаем игры
     if any(g in text for g in GAMES_EXCLUDE):
         logger.info(f"  🎮 GAME: {article.title[:50]}")
         return False
 
-    # Исключаем бизнес-новости
     if any(b in text for b in BUSINESS_EXCLUDE):
         logger.info(f"  🏢 BUSINESS: {article.title[:50]}")
         return False
 
-    # Исключаем рекламу
     if is_promo_content(text):
         logger.info(f"  📢 PROMO: {article.title[:50]}")
         return False
 
-    # Определяем тип: AI или блокировки
     is_ai = (ai_relevance_score(text) >= config.min_ai_score or
              "ai" in text or "нейросеть" in text or "ии" in text)
     is_block = any(kw in text for kw in BLOCK_KEYWORDS)
@@ -458,7 +444,6 @@ def is_relevant(article: Article) -> bool:
         logger.info(f"  🚫 NEITHER AI NOR BLOCK: {article.title[:50]}")
         return False
 
-    # Дополнительная защита от рекламы VPN в блокировочных новостях
     if is_block and any(ad in text for ad in ["купить", "скидка", "промокод", "тариф"]):
         logger.info(f"  🛑 VPN_AD: {article.title[:50]}")
         return False
@@ -502,7 +487,6 @@ class PostedManager:
         with self._lock:
             conn = self._get_conn()
             cursor = conn.cursor()
-
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS posted_articles (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -522,7 +506,6 @@ class PostedManager:
                     posted_date TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS rejected_urls (
                     norm_url TEXT PRIMARY KEY,
@@ -531,13 +514,11 @@ class PostedManager:
                     rejected_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-
             try:
                 cursor.execute("ALTER TABLE posted_articles ADD COLUMN subject TEXT DEFAULT 'other'")
                 conn.commit()
             except Exception:
                 pass
-
             indices = [
                 ('idx_norm_url', 'norm_url'),
                 ('idx_content_hash', 'content_hash'),
@@ -552,7 +533,6 @@ class PostedManager:
                     cursor.execute(f'CREATE INDEX IF NOT EXISTS {idx_name} ON posted_articles({column})')
                 except Exception:
                     pass
-
             conn.commit()
         logger.info("📚 База данных инициализирована")
 
@@ -591,7 +571,6 @@ class PostedManager:
                   AND posted_date > datetime('now', ?)
                 ORDER BY posted_date DESC
             ''', (subject, f'-{hours} hours'))
-
             results = []
             for r in cursor.fetchall():
                 results.append({
@@ -611,7 +590,6 @@ class PostedManager:
                 WHERE posted_date > datetime('now', ?)
                 ORDER BY posted_date DESC
             ''', (f'-{hours} hours',))
-
             result: Dict[str, List[dict]] = defaultdict(list)
             for r in cursor.fetchall():
                 result[r[0]].append({
@@ -659,16 +637,13 @@ class PostedManager:
         return True, ""
 
     def check_entity_overlap(self, entities: Set[str], new_title: str) -> Tuple[bool, str]:
-        # Упрощённо – всегда пропускаем
         return True, ""
 
     def is_duplicate(self, url: str, title: str, summary: str = "") -> DuplicateCheckResult:
         result = DuplicateCheckResult(is_duplicate=False, reasons=[])
-
         with self._lock:
             conn = self._get_conn()
             cursor = conn.cursor()
-
             norm_url = normalize_url(url)
             title_normalized = normalize_title(title)
             title_words = set(get_title_words(title))
@@ -721,26 +696,21 @@ class PostedManager:
 
             for row in all_posts:
                 existing_id, existing_title, existing_normalized, existing_words_json, existing_entities_json, existing_domain = row
-
                 seq_sim = calculate_similarity(title_normalized, existing_normalized or "")
                 if seq_sim > config.title_similarity_threshold:
                     result.add_reason(f"TITLE_SIM ({seq_sim:.0%})", seq_sim, existing_title)
-
                 ngram_sim = ngram_similarity(title, existing_title)
                 if ngram_sim > config.ngram_similarity_threshold:
                     result.add_reason(f"NGRAM ({ngram_sim:.0%})", ngram_sim, existing_title)
-
                 existing_words = set(safe_json_loads(existing_words_json, []))
                 if existing_words:
                     jaccard = jaccard_similarity(title_words, existing_words)
                     if jaccard > config.jaccard_threshold:
                         result.add_reason(f"JACCARD ({jaccard:.0%})", jaccard, existing_title)
-
                 if domain == existing_domain:
                     same_sim = calculate_similarity(title_normalized, existing_normalized or "")
                     if same_sim > config.same_domain_similarity:
                         result.add_reason(f"SAME_DOMAIN ({same_sim:.0%})", same_sim, existing_title)
-
             return result
 
     def check_diversity(self, topic: str, source: str = "") -> Tuple[bool, str]:
@@ -759,7 +729,6 @@ class PostedManager:
                 source_count = sum(1 for s in recent_sources if s == source)
                 if source_count >= config.source_max_in_window:
                     return False, f"SOURCE_LIMIT ({source}: {source_count}/{config.source_max_in_window} за последние {config.rotation_history_size})"
-
             if topic == Topic.GENERAL:
                 return True, ""
             cursor.execute(
@@ -778,7 +747,6 @@ class PostedManager:
         with self._lock:
             conn = self._get_conn()
             cursor = conn.cursor()
-
             norm_url = normalize_url(article.link)
             domain_val = get_domain(article.link)
             title_normalized = normalize_title(article.title)
@@ -786,7 +754,6 @@ class PostedManager:
             word_signature = get_sorted_word_signature(article.title)
             content_hash = get_content_hash(f"{article.title} {article.summary}")
             entities = []
-
             try:
                 cursor.execute('''
                     INSERT INTO posted_articles 
@@ -1050,13 +1017,11 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         candidates.append(article)
         stats["passed"] += 1
 
-    # Сортировка: приоритет у статей, которые не совпадают с последним топиком (чередование)
+    # Чередование топиков
     last_topic = posted.get_last_topic()
     if config.alternation_enabled and last_topic:
-        # Определяем, какой топик считается AI, какой блокировочным
         ai_topics = {Topic.LLM, Topic.IMAGE_GEN, Topic.ROBOTICS, Topic.HARDWARE, Topic.MESSENGER, Topic.GENERAL}
         block_topics = {Topic.BLOCK, Topic.BYPASS, Topic.WHITELIST}
-        # Хотим, чтобы следующий пост был из другой группы
         if last_topic in ai_topics:
             preferred_group = block_topics
         else:
@@ -1068,7 +1033,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
         candidates.sort(key=alternation_score, reverse=True)
     else:
-        # Простая сортировка по релевантности (можно оставить или убрать)
         def simple_score(art: Article) -> float:
             text = f"{art.title} {art.summary}"
             return ai_relevance_score(text) + (10 if any(kw in text for kw in BLOCK_KEYWORDS) else 0)
@@ -1112,7 +1076,6 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
             logger.info(f"   ⛔ BLOCKED [src {src}] x{source_counts[src]} в истории: {art.title[:40]}")
             blocked.append(art)
             continue
-        # Для простоты все остальные считаем приоритетными
         priority.append(art)
 
     result = priority + normal
@@ -1152,7 +1115,6 @@ async def generate_summary(article: Article) -> Optional[str]:
     text_for_topic = f"{article.title} {article.summary}"
     topic = Topic.detect(text_for_topic)
 
-    # Определяем, AI это или блокировки
     is_block_topic = topic in (Topic.BLOCK, Topic.BYPASS, Topic.WHITELIST)
 
     if is_block_topic:
@@ -1263,7 +1225,6 @@ async def generate_summary(article: Article) -> Optional[str]:
                     logger.warning("  ⚠️ Повторяющиеся предложения, регенерация...")
                     continue
 
-                # Топик определён выше, но можно переопределить
                 hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
                 source_link = f'\n\n🔗 <a href="{article.link}">Источник</a>'
 
@@ -1287,7 +1248,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
     topic = Topic.detect(f"{article.title} {article.summary}")
-    subject = topic  # используем topic как subject для совместимости
+    subject = topic
     saved = posted.add(article, topic, subject)
     if not saved:
         logger.warning(f"⚠️ Статья уже в БД, пропускаем: {article.title[:50]}")
@@ -1414,13 +1375,11 @@ async def main():
             topic = Topic.detect(f"{c.title} {c.summary}")
             logger.info(f"  {i + 1}. [{topic}] [{c.source}] {c.title[:55]}")
 
-        # Пытаемся опубликовать первый подходящий
         for article in candidates[:25]:
             if shutdown_event.is_set():
                 logger.info("🛑 Прерывание в цикле публикации")
                 break
 
-            # Повторная быстрая проверка (на случай, если за время генерации что-то изменилось)
             dup_result = posted.is_duplicate(article.link, article.title, article.summary)
             if dup_result.is_duplicate:
                 posted.log_rejected(article, f"FINAL: {'; '.join(dup_result.reasons[:2])}")
@@ -1465,7 +1424,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

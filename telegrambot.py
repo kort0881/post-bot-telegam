@@ -82,6 +82,9 @@ class Config:
         self.source_min_posts_between = 1
         self.source_max_in_window = 4
 
+        # Добавлено – лимит статей одного subject за один запуск
+        self.batch_subject_limit = 5
+
         self.groq_retries_per_model = 2
         self.groq_base_delay = 2.0
         self.telegram_timeout = 30

@@ -149,7 +149,6 @@ RSS_FEEDS = [
         "Habr AI"
     ),
     ("https://rkn.gov.ru/rss/news.xml", "РКН новости"),
-    # t.me/s/* — HTML, не RSS; заменены на реальные RSS-источники
     ("https://roskomsvoboda.org/feed/", "Роскомсвобода"),
     ("https://opennet.me/rss/news", "OpenNet"),
     ("https://habr.com/ru/rss/hub/internet_regulation/all/", "Habr Регулирование"),
@@ -242,7 +241,7 @@ class Topic:
         MESSENGER: "#Telegram #мессенджеры #боты",
         GENERAL: "#ИИ #технологии #AI",
         BLOCK: "#РКН #блокировки #цензура",
-        BYPASS: "#VLESS #Xray #обход #VPN",
+        BYPASS: "#блокировки #цензура",       # изменено: убраны методы обхода
         WHITELIST: "#белыйсписок #доступность",
     }
 
@@ -304,7 +303,6 @@ def normalize_title(title: str) -> str:
     t = title.lower().strip()
     t = re.sub(r'[^\w\s]', ' ', t)
     t = re.sub(r'\s+', ' ', t).strip()
-    # Нормализуем версии продуктов (GPT-4o → gpt4o), но НЕ трогаем чистые числа/даты
     t = re.sub(
         r'([a-zA-Zа-яА-ЯёЁ]+)\s*[-.]?\s*(\d+(?:\.\d+)?)',
         lambda m: m.group(1) + m.group(2).replace('.', ''),
@@ -473,7 +471,6 @@ class DuplicateCheckResult:
 class PostedManager:
     def __init__(self, db_file: str = "posted_articles.db"):
         self.db_file = db_file
-        # Отдельное соединение на каждый поток
         self._local = threading.local()
         self._lock = threading.RLock()
         self._init_db()
@@ -518,7 +515,6 @@ class PostedManager:
                     rejected_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-            # Добавляем колонку subject если её нет (миграция)
             try:
                 cursor.execute("ALTER TABLE posted_articles ADD COLUMN subject TEXT DEFAULT 'other'")
                 conn.commit()
@@ -536,9 +532,7 @@ class PostedManager:
             ]
             for idx_name, column in indices:
                 try:
-                    cursor.execute(
-                        f'CREATE INDEX IF NOT EXISTS {idx_name} ON posted_articles({column})'
-                    )
+                    cursor.execute(f'CREATE INDEX IF NOT EXISTS {idx_name} ON posted_articles({column})')
                 except Exception:
                     pass
             conn.commit()
@@ -620,7 +614,6 @@ class PostedManager:
             return [row[0] for row in cursor.fetchall()]
 
     def can_post_subject(self, subject: str) -> Tuple[bool, str]:
-        """Проверяет, не повторяется ли subject слишком часто подряд."""
         if subject == "other":
             return True, ""
         last_subjects = self.get_last_n_subjects(config.min_subjects_between_repeats)
@@ -680,7 +673,6 @@ class PostedManager:
             content_hash = get_content_hash(f"{title} {summary}")
             domain = get_domain(url)
 
-            # 1. Чёрный список
             cursor.execute(
                 'SELECT reason FROM rejected_urls WHERE norm_url = ? '
                 'AND rejected_at > datetime("now", ?)',
@@ -691,7 +683,6 @@ class PostedManager:
                 result.add_reason(f"BLACKLISTED ({row[0]})", 1.0, title)
                 return result
 
-            # 2. URL точное совпадение
             cursor.execute(
                 'SELECT title FROM posted_articles WHERE norm_url = ? '
                 'AND posted_date > datetime("now", ?)',
@@ -702,7 +693,6 @@ class PostedManager:
                 result.add_reason("URL_EXACT", 1.0, row[0])
                 return result
 
-            # 3. Хэш контента
             if content_hash:
                 cursor.execute(
                     'SELECT title FROM posted_articles WHERE content_hash = ? '
@@ -714,7 +704,6 @@ class PostedManager:
                     result.add_reason("CONTENT_HASH", 1.0, row[0])
                     return result
 
-            # 4. Точный заголовок
             cursor.execute(
                 'SELECT title FROM posted_articles WHERE title_normalized = ? '
                 'AND posted_date > datetime("now", ?)',
@@ -725,7 +714,6 @@ class PostedManager:
                 result.add_reason("TITLE_EXACT", 1.0, row[0])
                 return result
 
-            # 5. Нечёткие совпадения
             cursor.execute('''
                 SELECT id, title, title_normalized, title_words, domain
                 FROM posted_articles
@@ -986,7 +974,6 @@ async def load_all_feeds() -> List[Article]:
 
 
 def interleave_by_source(candidates: List[Article]) -> List[Article]:
-    """Чередует статьи из разных источников round-robin."""
     if not candidates:
         return []
     by_source: Dict[str, deque] = {}
@@ -1049,14 +1036,12 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         text = f"{article.title} {article.summary}"
         subject = Topic.detect(text)
 
-        # Проверка: subject слишком часто повторяется в хвосте истории
         subj_rot_ok, subj_rot_reason = posted.can_post_subject(subject)
         if not subj_rot_ok:
             posted.log_rejected(article, subj_rot_reason)
             stats["subject_rotation"] += 1
             continue
 
-        # Лимит subject за один запуск
         if subject != "other" and batch_subject_counts[subject] >= config.batch_subject_limit:
             posted.log_rejected(
                 article,
@@ -1065,14 +1050,12 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
             stats["batch_subject"] += 1
             continue
 
-        # Лимит subject за окно времени + cooldown + схожесть внутри subject
         subj_ok, subj_reason = posted.check_subject_limit(subject, article.title)
         if not subj_ok:
             posted.log_rejected(article, subj_reason)
             stats["subject_limit"] += 1
             continue
 
-        # Дедупликация по БД
         dup_result = posted.is_duplicate(article.link, article.title, article.summary)
         if dup_result.is_duplicate:
             reason = "; ".join(dup_result.reasons[:3])
@@ -1080,8 +1063,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
             stats["db_dup"] += 1
             continue
 
-        # Разнообразие топиков
-        topic = subject  # topic == subject (оба используют Topic.detect)
+        topic = subject
         div_ok, div_reason = posted.check_diversity(topic, article.source)
         if not div_ok:
             posted.log_rejected(article, div_reason)
@@ -1097,7 +1079,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         candidates.append(article)
         stats["passed"] += 1
 
-    # Чередование AI ↔ блокировки
     last_topic = posted.get_last_topic()
     if config.alternation_enabled and last_topic:
         ai_topics = {Topic.LLM, Topic.IMAGE_GEN, Topic.ROBOTICS, Topic.HARDWARE,
@@ -1134,7 +1115,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
 
 def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[Article]:
-    """Фильтрует кандидатов по истории источников, заблокированные добавляет в конец."""
     recent = posted.get_recent_posts(config.rotation_history_size)
     if not recent:
         return candidates
@@ -1203,7 +1183,8 @@ async def generate_summary(article: Article) -> Optional[str]:
     is_block_topic = topic in (Topic.BLOCK, Topic.BYPASS, Topic.WHITELIST)
 
     if is_block_topic:
-        prompt = f"""Ты — редактор канала про обход блокировок и цифровые свободы.
+        # ИЗМЕНЕНО: убраны инструкции по обходу, оставлено только описание блокировок
+        prompt = f"""Ты — редактор канала про интернет-блокировки и цифровые ограничения.
 
 НОВОСТЬ:
 Заголовок: {article.title}
@@ -1211,16 +1192,15 @@ async def generate_summary(article: Article) -> Optional[str]:
 Источник: {article.source}
 
 Напиши Telegram-пост по схеме:
-1. Что именно заблокировали/замедлили (если новость о блокировке) или какой метод обхода появился.
-2. Техническая причина (DPI, SNI, IP-блокировка).
-3. Конкретная инструкция: как обойти с помощью VLESS / Xray / WireGuard (приведи пример фрагмента конфига или команды).
-4. Где взять актуальные белые списки или прокси.
+1. Что именно заблокировали или ограничили (сайт, сервис, приложение).
+2. Техническая причина блокировки (например, DPI, IP-блокировка, SNI).
+3. Как это влияет на пользователей и на рынок.
 
 ТРЕБОВАНИЯ:
 ✅ 600-800 символов, живой язык, с эмодзи.
-✅ Конкретные цифры, названия, команды.
-❌ НИКАКИХ призывов поставить реакцию (огонь, палец вверх, сердечко), написать комментарий, подписаться, купить VPN.
-❌ Без рекламы платных сервисов.
+✅ Конкретные цифры, названия, факты.
+❌ НИКАКИХ инструкций по обходу блокировок, конфигов, команд, ссылок на прокси.
+❌ НИКАКИХ призывов поставить реакцию, написать комментарий, подписаться, купить VPN.
 
 ПОСТ:"""
     else:
@@ -1290,12 +1270,10 @@ async def generate_summary(article: Article) -> Optional[str]:
 
                 if len(text) < config.min_post_length:
                     logger.warning(f"  ⚠️ Короткий ({len(text)} симв.), следующая модель...")
-                    # break — выходим из попыток для этой модели, переходим к следующей
                     break
 
                 if any(w in text.lower() for w in water_phrases):
                     logger.warning("  ⚠️ Обнаружена «вода», следующая модель...")
-                    # break — та же температура/промпт не дадут другого результата
                     break
 
                 last_paragraph = text.strip().split('\n')[-1].strip()
@@ -1334,10 +1312,6 @@ async def generate_summary(article: Article) -> Optional[str]:
 
 
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
-    """
-    Сначала отправляем в Telegram, затем фиксируем в БД.
-    Если отправка упала — статья не попадает в БД и может быть повторно обработана.
-    """
     topic = Topic.detect(f"{article.title} {article.summary}")
     subject = topic
 
@@ -1353,10 +1327,8 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
         logger.error(f"❌ Telegram ошибка отправки: {e}")
         return False
 
-    # Сохраняем только после успешной отправки
     saved = posted.add(article, topic, subject)
     if not saved:
-        # Статья отправлена, но не сохранена — логируем, чтобы не потерять
         logger.warning(
             f"⚠️ Пост отправлен, но не сохранён в БД (возможно дубль): {article.title[:50]}"
         )
@@ -1378,7 +1350,6 @@ async def check_telegram_connection() -> bool:
 
 
 async def main():
-    # Event создаётся внутри event loop — корректно для Python 3.10+
     shutdown_event = asyncio.Event()
 
     def signal_handler(signum, frame):
@@ -1413,7 +1384,7 @@ async def main():
         f.write(str(os.getpid()))
 
     logger.info("=" * 60)
-    logger.info("🚀 БЛОКИРОВКИ + AI (без игр/бизнеса/рекламы, без призывов реакций)")
+    logger.info("🚀 БЛОКИРОВКИ + AI (без игр/бизнеса/рекламы, без призывов и инструкций по обходу)")
     logger.info("=" * 60)
 
     posted = None
@@ -1484,7 +1455,6 @@ async def main():
                 logger.info("🛑 Прерывание в цикле публикации")
                 break
 
-            # Финальная проверка дубля (за время обработки кто-то мог добавить)
             dup_result = posted.is_duplicate(article.link, article.title, article.summary)
             if dup_result.is_duplicate:
                 posted.log_rejected(

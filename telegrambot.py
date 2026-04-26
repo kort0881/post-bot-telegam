@@ -46,7 +46,7 @@ class Config:
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.channel_id = os.getenv("CHANNEL_ID")
         self.retention_days = 90
-        self.rejected_retention_days = 0          # чёрный список не храним (очищаем при старте)
+        self.rejected_retention_days = 0
         self.db_file = "posted_articles.db"
 
         self.title_similarity_threshold = 0.60
@@ -55,28 +55,28 @@ class Config:
         self.same_domain_similarity = 0.65
 
         self.subject_window_hours = 48
-        self.max_posts_per_subject = 10           # увеличено
-        self.subject_min_interval_hours = 1       # уменьшено
+        self.max_posts_per_subject = 10
+        self.subject_min_interval_hours = 1
         self.same_subject_similarity_threshold = 0.60
 
         self.alternation_enabled = True
 
         self.min_post_length = 700
-        self.max_article_age_hours = 336          # 14 дней
+        self.max_article_age_hours = 336
         self.min_ai_score = 1
         self.max_repeat_sentences = 2
 
         self.diversity_window = 8
-        self.same_topic_limit = 4                 # увеличено
+        self.same_topic_limit = 4
 
         self.rotation_history_size = 10
         self.rotation_max_per_source = 6
-        self.min_subjects_between_repeats = 10    # отключаем ротацию тем (10 > истории)
+        self.min_subjects_between_repeats = 10
 
         self.source_min_posts_between = 1
         self.source_max_in_window = 6
 
-        self.batch_subject_limit = 10             # увеличено с 5
+        self.batch_subject_limit = 10
 
         self.groq_retries_per_model = 2
         self.groq_base_delay = 2.0
@@ -206,7 +206,6 @@ PROMO_PATTERNS = [
     "купить vpn", "vpn сервис", "тариф", "промокод"
 ]
 
-# ---------- ДОПОЛНИТЕЛЬНЫЕ ФИЛЬТРЫ ДЛЯ МУСОРА ----------
 REVIEW_KEYWORDS = ["review", "tested", "hands-on", "обзор", "тест", "скидка", "discount", "deal", "best", "top 10"]
 
 
@@ -416,13 +415,11 @@ def is_promo_content(text: str) -> bool:
 def is_relevant(article: Article) -> bool:
     text = f"{article.title} {article.summary}".lower()
 
-    # Проверка возраста
     age_hours = (datetime.now(timezone.utc) - article.published).total_seconds() / 3600
     if age_hours > config.max_article_age_hours:
         logger.info(f"  ⏰ TOO_OLD ({age_hours:.0f}h): {article.title[:50]}")
         return False
 
-    # Исключаем игры, бизнес, рекламу
     if any(g in text for g in GAMES_EXCLUDE):
         logger.info(f"  🎮 GAME: {article.title[:50]}")
         return False
@@ -435,14 +432,11 @@ def is_relevant(article: Article) -> bool:
         logger.info(f"  📢 PROMO: {article.title[:50]}")
         return False
 
-    # НОВОЕ: отсекаем обзоры, скидки, рейтинги (даже если есть слово AI)
     if any(rw in text for rw in REVIEW_KEYWORDS):
-        # Но если это явно про AI-модель (например, обзор GPT-5), то пропускаем
         if not any(kw in text for kw in AI_KEYWORDS_STRONG):
             logger.info(f"  📝 REVIEW/DEAL (нет сильного AI): {article.title[:50]}")
             return False
 
-    # Определяем AI и блокировки
     has_strong_ai = any(kw in text for kw in AI_KEYWORDS_STRONG)
     has_weak_ai = any(kw in text for kw in AI_KEYWORDS_WEAK)
     is_ai = has_strong_ai or (has_weak_ai and config.min_ai_score <= 1)
@@ -452,7 +446,6 @@ def is_relevant(article: Article) -> bool:
         logger.info(f"  🚫 NEITHER AI NOR BLOCK: {article.title[:50]}")
         return False
 
-    # Доп. проверка: если это блокировка, но явно реклама VPN
     if is_block and any(ad in text for ad in ["купить", "скидка", "промокод", "тариф"]):
         logger.info(f"  🛑 VPN_AD: {article.title[:50]}")
         return False
@@ -548,11 +541,9 @@ class PostedManager:
         logger.info("📚 База данных инициализирована")
 
     def _add_rejected(self, norm_url: str, title: str, reason: str):
-        # Чёрный список больше не используем – заглушка
         pass
 
     def is_rejected(self, url: str) -> Tuple[bool, str]:
-        # Чёрный список отключён – всегда False
         return False, ""
 
     def get_subject_posts_in_window(self, subject: str, hours: int) -> List[dict]:
@@ -604,7 +595,6 @@ class PostedManager:
             return [row[0] for row in cursor.fetchall()]
 
     def can_post_subject(self, subject: str) -> Tuple[bool, str]:
-        # ОТКЛЮЧАЕМ ротацию тем – всегда можно постить любую тему
         return True, ""
 
     def check_subject_limit(
@@ -653,8 +643,6 @@ class PostedManager:
             title_words = set(get_title_words(title))
             content_hash = get_content_hash(f"{title} {summary}")
             domain = get_domain(url)
-
-            # Чёрный список не проверяем
 
             cursor.execute(
                 'SELECT title FROM posted_articles WHERE norm_url = ? '
@@ -802,7 +790,6 @@ class PostedManager:
 
     def log_rejected(self, article: Article, reason: str):
         logger.info(f"🚫 [{reason}]: {article.title[:50]}")
-        # Не записываем в rejected_urls
 
     def get_recent_posts(self, limit: int = 5) -> List[dict]:
         with self._lock:
@@ -836,7 +823,6 @@ class PostedManager:
                 f"DELETE FROM posted_articles WHERE posted_date < datetime('now', '-{days} days')"
             )
             deleted_posted = cursor.rowcount
-            # Очищаем rejected_urls полностью при запуске
             cursor.execute("DELETE FROM rejected_urls")
             deleted_rejected = cursor.rowcount
             conn.commit()
@@ -955,7 +941,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     }
 
     for article in articles:
-        # Чёрный список отключён
         if not is_relevant(article):
             stats["filtered_out"] += 1
             continue
@@ -977,8 +962,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
         text = f"{article.title} {article.summary}"
         subject = Topic.detect(text)
-
-        # Ротация тем отключена (can_post_subject всегда True)
 
         if subject != "other" and batch_subject_counts[subject] >= config.batch_subject_limit:
             logger.info(f"  ⏭️ BATCH_SUBJECT_LIMIT ({subject}, {batch_subject_counts[subject]} in batch): {article.title[:50]}")
@@ -1338,7 +1321,6 @@ async def main():
             logger.error("❌ Проблема с БД!")
             return
 
-        # Принудительная очистка старых записей и чёрного списка
         posted.cleanup(config.retention_days)
 
         stats = posted.get_stats()
@@ -1370,17 +1352,37 @@ async def main():
 
         candidates = filter_and_dedupe(raw, posted)
 
+        # ====================== НОВЫЙ FALLBACK с приоритетом Habr ======================
         if not candidates:
-            logger.info("⚠️ Кандидатов нет, пробуем fallback: выбираем статью с максимальным AI-скором")
-            scored = [(article, ai_relevance_score(f"{article.title} {article.summary}")) for article in raw]
-            scored.sort(key=lambda x: x[1], reverse=True)
-            if scored and scored[0][1] > 0:
-                fallback_article = scored[0][0]
-                logger.info(f"  🔄 Fallback выбран: {fallback_article.title[:60]} (score={scored[0][1]})")
+            logger.info("⚠️ Кандидатов нет, пробуем fallback на Habr...")
+            habr_articles = [art for art in raw if art.source == "Habr AI"]
+            fallback_article = None
+            for art in habr_articles:
+                # Для fallback применяем мягкие фильтры: не старше 30 дней, не игры/бизнес/реклама
+                age_hours = (datetime.now(timezone.utc) - art.published).total_seconds() / 3600
+                if age_hours > 720:  # 30 дней
+                    continue
+                text = f"{art.title} {art.summary}".lower()
+                if any(g in text for g in GAMES_EXCLUDE) or any(b in text for b in BUSINESS_EXCLUDE) or is_promo_content(text):
+                    continue
+                dup_res = posted.is_duplicate(art.link, art.title, art.summary)
+                if not dup_res.is_duplicate:
+                    fallback_article = art
+                    break
+            if fallback_article:
+                logger.info(f"  🔄 Fallback Habr выбран: {fallback_article.title[:60]}")
                 candidates = [fallback_article]
             else:
-                logger.info("📭 Даже fallback не нашёл подходящей статьи")
-                return
+                logger.info("⚠️ Fallback Habr не дал статьи, используем общий fallback по AI-скору")
+                scored = [(article, ai_relevance_score(f"{article.title} {article.summary}")) for article in raw]
+                scored.sort(key=lambda x: x[1], reverse=True)
+                if scored and scored[0][1] > 0:
+                    fallback_article = scored[0][0]
+                    logger.info(f"  🔄 Fallback AI-скор выбран: {fallback_article.title[:60]} (score={scored[0][1]})")
+                    candidates = [fallback_article]
+                else:
+                    logger.info("📭 Даже fallback не нашёл подходящей статьи")
+                    return
 
         candidates = rotate_candidates(candidates, posted)
 
@@ -1441,7 +1443,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

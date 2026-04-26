@@ -46,7 +46,7 @@ class Config:
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.channel_id = os.getenv("CHANNEL_ID")
         self.retention_days = int(os.getenv("RETENTION_DAYS", "90"))
-        self.rejected_retention_days = 30
+        self.rejected_retention_days = 7   # сокращён до 7 дней
         self.db_file = "posted_articles.db"
 
         self.title_similarity_threshold = 0.60
@@ -55,29 +55,29 @@ class Config:
         self.jaccard_threshold = 0.55
         self.same_domain_similarity = 0.65
 
-        self.subject_window_hours = 24
-        self.max_posts_per_subject = 5
+        self.subject_window_hours = 48          # увеличено
+        self.max_posts_per_subject = 8          # увеличено
         self.subject_min_interval_hours = 2
         self.same_subject_similarity_threshold = 0.60
-        self.same_subject_cooldown_hours = 3
+        self.same_subject_cooldown_hours = 2
 
         self.alternation_enabled = True
 
         self.min_post_length = 500
-        self.max_article_age_hours = 168
-        self.min_ai_score = 1
+        self.max_article_age_hours = 336        # 14 дней
+        self.min_ai_score = 0                   # разрешить статьи даже с 0 баллов
         self.max_repeat_sentences = 2
 
         self.diversity_window = 8
         self.same_topic_limit = 3
 
         self.rotation_history_size = 10
-        self.rotation_max_per_subject = 1
-        self.rotation_max_per_source = 3
+        self.rotation_max_per_subject = 2       # увеличено
+        self.rotation_max_per_source = 6        # увеличено
         self.min_subjects_between_repeats = 3
 
         self.source_min_posts_between = 1
-        self.source_max_in_window = 4
+        self.source_max_in_window = 6           # увеличено
 
         self.batch_subject_limit = 5
 
@@ -1038,21 +1038,20 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
         subj_rot_ok, subj_rot_reason = posted.can_post_subject(subject)
         if not subj_rot_ok:
-            posted.log_rejected(article, subj_rot_reason)
+            # Временный отказ – не записываем в rejected_urls
+            logger.info(f"  ⏭️ SUBJECT_ROTATION ({subj_rot_reason}): {article.title[:50]}")
             stats["subject_rotation"] += 1
             continue
 
         if subject != "other" and batch_subject_counts[subject] >= config.batch_subject_limit:
-            posted.log_rejected(
-                article,
-                f"BATCH_SUBJECT_LIMIT ({subject}, {batch_subject_counts[subject]} in batch)"
-            )
+            logger.info(f"  ⏭️ BATCH_SUBJECT_LIMIT ({subject}, {batch_subject_counts[subject]} in batch): {article.title[:50]}")
             stats["batch_subject"] += 1
             continue
 
         subj_ok, subj_reason = posted.check_subject_limit(subject, article.title)
         if not subj_ok:
-            posted.log_rejected(article, subj_reason)
+            # Временный отказ – не записываем в rejected_urls
+            logger.info(f"  ⏭️ {subj_reason}: {article.title[:50]}")
             stats["subject_limit"] += 1
             continue
 
@@ -1066,7 +1065,8 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         topic = subject
         div_ok, div_reason = posted.check_diversity(topic, article.source)
         if not div_ok:
-            posted.log_rejected(article, div_reason)
+            # Временный отказ – не записываем в rejected_urls
+            logger.info(f"  ⏭️ DIVERSITY ({div_reason}): {article.title[:50]}")
             stats["diversity"] += 1
             continue
 
@@ -1183,7 +1183,6 @@ async def generate_summary(article: Article) -> Optional[str]:
     is_block_topic = topic in (Topic.BLOCK, Topic.BYPASS, Topic.WHITELIST)
 
     if is_block_topic:
-        # ИЗМЕНЕНО: убраны инструкции по обходу, оставлено только описание блокировок
         prompt = f"""Ты — редактор канала про интернет-блокировки и цифровые ограничения.
 
 НОВОСТЬ:
@@ -1438,9 +1437,18 @@ async def main():
 
         candidates = filter_and_dedupe(raw, posted)
 
+        # FALLBACK: если кандидатов нет, взять самую релевантную из всех
         if not candidates:
-            logger.info("📭 Нет подходящих новостей")
-            return
+            logger.info("⚠️ Кандидатов нет, пробуем fallback: выбираем статью с максимальным AI-скором")
+            scored = [(article, ai_relevance_score(f"{article.title} {article.summary}")) for article in raw]
+            scored.sort(key=lambda x: x[1], reverse=True)
+            if scored and scored[0][1] > 0:
+                fallback_article = scored[0][0]
+                logger.info(f"  🔄 Fallback выбран: {fallback_article.title[:60]} (score={scored[0][1]})")
+                candidates = [fallback_article]
+            else:
+                logger.info("📭 Даже fallback не нашёл подходящей статьи")
+                return
 
         candidates = rotate_candidates(candidates, posted)
 

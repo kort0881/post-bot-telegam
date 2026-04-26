@@ -45,41 +45,38 @@ class Config:
         self.groq_api_key = os.getenv("GROQ_API_KEY")
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.channel_id = os.getenv("CHANNEL_ID")
-        self.retention_days = int(os.getenv("RETENTION_DAYS", "90"))
-        self.rejected_retention_days = 7
+        self.retention_days = 90
+        self.rejected_retention_days = 0          # чёрный список не храним (очищаем при старте)
         self.db_file = "posted_articles.db"
 
         self.title_similarity_threshold = 0.60
         self.ngram_similarity_threshold = 0.55
-        self.entity_overlap_threshold = 0.60
         self.jaccard_threshold = 0.55
         self.same_domain_similarity = 0.65
 
         self.subject_window_hours = 48
-        self.max_posts_per_subject = 8
-        self.subject_min_interval_hours = 2
+        self.max_posts_per_subject = 10           # увеличено
+        self.subject_min_interval_hours = 1       # уменьшено
         self.same_subject_similarity_threshold = 0.60
-        self.same_subject_cooldown_hours = 2
 
         self.alternation_enabled = True
 
-        self.min_post_length = 700          # увеличено, чтобы короткая вода не проходила
-        self.max_article_age_hours = 336    # 14 дней – не меняем по просьбе
-        self.min_ai_score = 0
+        self.min_post_length = 700
+        self.max_article_age_hours = 336          # 14 дней
+        self.min_ai_score = 1
         self.max_repeat_sentences = 2
 
         self.diversity_window = 8
-        self.same_topic_limit = 3
+        self.same_topic_limit = 4                 # увеличено
 
         self.rotation_history_size = 10
-        self.rotation_max_per_subject = 2
         self.rotation_max_per_source = 6
-        self.min_subjects_between_repeats = 3
+        self.min_subjects_between_repeats = 10    # отключаем ротацию тем (10 > истории)
 
         self.source_min_posts_between = 1
         self.source_max_in_window = 6
 
-        self.batch_subject_limit = 5
+        self.batch_subject_limit = 10             # увеличено с 5
 
         self.groq_retries_per_model = 2
         self.groq_base_delay = 2.0
@@ -128,7 +125,6 @@ GROQ_MODELS = [
     "llama-3.1-8b-instant",
 ]
 
-# ---------- RSS-фиды ----------
 RSS_FEEDS = [
     ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch AI"),
     ("https://venturebeat.com/category/ai/feed/", "VentureBeat AI"),
@@ -210,8 +206,10 @@ PROMO_PATTERNS = [
     "купить vpn", "vpn сервис", "тариф", "промокод"
 ]
 
+# ---------- ДОПОЛНИТЕЛЬНЫЕ ФИЛЬТРЫ ДЛЯ МУСОРА ----------
+REVIEW_KEYWORDS = ["review", "tested", "hands-on", "обзор", "тест", "скидка", "discount", "deal", "best", "top 10"]
 
-# ---------- DATACLASS ARTICLE ----------
+
 @dataclass
 class Article:
     title: str
@@ -221,7 +219,6 @@ class Article:
     published: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-# ---------- ТОПИКИ ----------
 class Topic:
     LLM = "llm"
     IMAGE_GEN = "image_gen"
@@ -419,11 +416,13 @@ def is_promo_content(text: str) -> bool:
 def is_relevant(article: Article) -> bool:
     text = f"{article.title} {article.summary}".lower()
 
+    # Проверка возраста
     age_hours = (datetime.now(timezone.utc) - article.published).total_seconds() / 3600
     if age_hours > config.max_article_age_hours:
         logger.info(f"  ⏰ TOO_OLD ({age_hours:.0f}h): {article.title[:50]}")
         return False
 
+    # Исключаем игры, бизнес, рекламу
     if any(g in text for g in GAMES_EXCLUDE):
         logger.info(f"  🎮 GAME: {article.title[:50]}")
         return False
@@ -436,14 +435,24 @@ def is_relevant(article: Article) -> bool:
         logger.info(f"  📢 PROMO: {article.title[:50]}")
         return False
 
-    is_ai = (ai_relevance_score(text) >= config.min_ai_score or
-             "ai" in text or "нейросеть" in text or "ии" in text)
+    # НОВОЕ: отсекаем обзоры, скидки, рейтинги (даже если есть слово AI)
+    if any(rw in text for rw in REVIEW_KEYWORDS):
+        # Но если это явно про AI-модель (например, обзор GPT-5), то пропускаем
+        if not any(kw in text for kw in AI_KEYWORDS_STRONG):
+            logger.info(f"  📝 REVIEW/DEAL (нет сильного AI): {article.title[:50]}")
+            return False
+
+    # Определяем AI и блокировки
+    has_strong_ai = any(kw in text for kw in AI_KEYWORDS_STRONG)
+    has_weak_ai = any(kw in text for kw in AI_KEYWORDS_WEAK)
+    is_ai = has_strong_ai or (has_weak_ai and config.min_ai_score <= 1)
     is_block = any(kw in text for kw in BLOCK_KEYWORDS)
 
     if not (is_ai or is_block):
         logger.info(f"  🚫 NEITHER AI NOR BLOCK: {article.title[:50]}")
         return False
 
+    # Доп. проверка: если это блокировка, но явно реклама VPN
     if is_block and any(ad in text for ad in ["купить", "скидка", "промокод", "тариф"]):
         logger.info(f"  🛑 VPN_AD: {article.title[:50]}")
         return False
@@ -539,31 +548,12 @@ class PostedManager:
         logger.info("📚 База данных инициализирована")
 
     def _add_rejected(self, norm_url: str, title: str, reason: str):
-        try:
-            with self._lock:
-                conn = self._get_conn()
-                conn.execute(
-                    'INSERT OR REPLACE INTO rejected_urls '
-                    '(norm_url, title, reason, rejected_at) VALUES (?, ?, ?, datetime("now"))',
-                    (norm_url, title[:200], reason)
-                )
-                conn.commit()
-        except Exception as e:
-            logger.error(f"Ошибка добавления в rejected: {e}")
+        # Чёрный список больше не используем – заглушка
+        pass
 
     def is_rejected(self, url: str) -> Tuple[bool, str]:
-        norm_url = normalize_url(url)
-        with self._lock:
-            cursor = self._get_conn().cursor()
-            cursor.execute(
-                'SELECT reason FROM rejected_urls WHERE norm_url = ? '
-                'AND rejected_at > datetime("now", ?)',
-                (norm_url, f'-{config.rejected_retention_days} days')
-            )
-            row = cursor.fetchone()
-            if row:
-                return True, row[0]
-            return False, ""
+        # Чёрный список отключён – всегда False
+        return False, ""
 
     def get_subject_posts_in_window(self, subject: str, hours: int) -> List[dict]:
         with self._lock:
@@ -614,16 +604,7 @@ class PostedManager:
             return [row[0] for row in cursor.fetchall()]
 
     def can_post_subject(self, subject: str) -> Tuple[bool, str]:
-        if subject == "other":
-            return True, ""
-        last_subjects = self.get_last_n_subjects(config.min_subjects_between_repeats)
-        if subject in last_subjects:
-            position = last_subjects.index(subject) + 1
-            return (
-                False,
-                f"RECENT ({subject} был {position}-м из последних "
-                f"{config.min_subjects_between_repeats})"
-            )
+        # ОТКЛЮЧАЕМ ротацию тем – всегда можно постить любую тему
         return True, ""
 
     def check_subject_limit(
@@ -673,15 +654,7 @@ class PostedManager:
             content_hash = get_content_hash(f"{title} {summary}")
             domain = get_domain(url)
 
-            cursor.execute(
-                'SELECT reason FROM rejected_urls WHERE norm_url = ? '
-                'AND rejected_at > datetime("now", ?)',
-                (norm_url, f'-{config.rejected_retention_days} days')
-            )
-            row = cursor.fetchone()
-            if row:
-                result.add_reason(f"BLACKLISTED ({row[0]})", 1.0, title)
-                return result
+            # Чёрный список не проверяем
 
             cursor.execute(
                 'SELECT title FROM posted_articles WHERE norm_url = ? '
@@ -829,8 +802,7 @@ class PostedManager:
 
     def log_rejected(self, article: Article, reason: str):
         logger.info(f"🚫 [{reason}]: {article.title[:50]}")
-        norm_url = normalize_url(article.link)
-        self._add_rejected(norm_url, article.title, reason)
+        # Не записываем в rejected_urls
 
     def get_recent_posts(self, limit: int = 5) -> List[dict]:
         with self._lock:
@@ -856,18 +828,6 @@ class PostedManager:
             row = cursor.fetchone()
             return row[0] if row else None
 
-    def get_recent_subjects(self, hours: int = 24) -> Dict[str, int]:
-        with self._lock:
-            cursor = self._get_conn().cursor()
-            cursor.execute('''
-                SELECT subject, COUNT(*) as cnt
-                FROM posted_articles
-                WHERE posted_date > datetime('now', ?)
-                GROUP BY subject
-                ORDER BY cnt DESC
-            ''', (f'-{hours} hours',))
-            return {row[0]: row[1] for row in cursor.fetchall()}
-
     def cleanup(self, days: int = 90):
         with self._lock:
             conn = self._get_conn()
@@ -876,14 +836,11 @@ class PostedManager:
                 f"DELETE FROM posted_articles WHERE posted_date < datetime('now', '-{days} days')"
             )
             deleted_posted = cursor.rowcount
-            cursor.execute(
-                f"DELETE FROM rejected_urls "
-                f"WHERE rejected_at < datetime('now', '-{config.rejected_retention_days} days')"
-            )
+            # Очищаем rejected_urls полностью при запуске
+            cursor.execute("DELETE FROM rejected_urls")
             deleted_rejected = cursor.rowcount
             conn.commit()
-            if deleted_posted > 0 or deleted_rejected > 0:
-                logger.info(f"🧹 Очищено: {deleted_posted} posted, {deleted_rejected} rejected")
+            logger.info(f"🧹 Очищено: {deleted_posted} posted, {deleted_rejected} rejected (вся таблица)")
 
     def get_stats(self) -> dict:
         with self._lock:
@@ -998,12 +955,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     }
 
     for article in articles:
-        is_blacklisted, bl_reason = posted.is_rejected(article.link)
-        if is_blacklisted:
-            logger.info(f"  ⛔ BLACKLISTED ({bl_reason}): {article.title[:50]}")
-            stats["blacklisted"] += 1
-            continue
-
+        # Чёрный список отключён
         if not is_relevant(article):
             stats["filtered_out"] += 1
             continue
@@ -1026,11 +978,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         text = f"{article.title} {article.summary}"
         subject = Topic.detect(text)
 
-        subj_rot_ok, subj_rot_reason = posted.can_post_subject(subject)
-        if not subj_rot_ok:
-            logger.info(f"  ⏭️ SUBJECT_ROTATION ({subj_rot_reason}): {article.title[:50]}")
-            stats["subject_rotation"] += 1
-            continue
+        # Ротация тем отключена (can_post_subject всегда True)
 
         if subject != "other" and batch_subject_counts[subject] >= config.batch_subject_limit:
             logger.info(f"  ⏭️ BATCH_SUBJECT_LIMIT ({subject}, {batch_subject_counts[subject]} in batch): {article.title[:50]}")
@@ -1158,7 +1106,6 @@ async def generate_summary(article: Article) -> Optional[str]:
     topic = Topic.detect(text_for_topic)
     is_block_topic = topic in (Topic.BLOCK, Topic.BYPASS, Topic.WHITELIST)
 
-    # Пример качественного поста
     example_post = """
 Новый CEO Apple Джон Тернус — это инженер-хардверщик, который 20 лет делал Mac и iPad. Под его началом вышли MacBook Air, iPad Pro и переход на Apple Silicon.
 
@@ -1270,7 +1217,6 @@ async def generate_summary(article: Article) -> Optional[str]:
                     logger.warning(f"  ⚠️ Короткий ({len(text)} симв.), следующая модель...")
                     break
 
-                # Жёсткая проверка на запрещённые фразы
                 if any(phrase in text.lower() for phrase in water_phrases):
                     logger.warning("  ⚠️ Есть запрещённая фраза, перегенерация...")
                     if attempt == config.groq_retries_per_model - 1:
@@ -1278,7 +1224,6 @@ async def generate_summary(article: Article) -> Optional[str]:
                         return None
                     continue
 
-                # Удаление последнего абзаца с вопросом
                 last_paragraph = text.strip().split('\n')[-1].strip()
                 if any(re.search(p, last_paragraph) for p in ending_question_patterns):
                     logger.warning("  ⚠️ Вопрос в конце — удаляем последний абзац")
@@ -1393,6 +1338,7 @@ async def main():
             logger.error("❌ Проблема с БД!")
             return
 
+        # Принудительная очистка старых записей и чёрного списка
         posted.cleanup(config.retention_days)
 
         stats = posted.get_stats()

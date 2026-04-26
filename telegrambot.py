@@ -46,7 +46,7 @@ class Config:
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.channel_id = os.getenv("CHANNEL_ID")
         self.retention_days = int(os.getenv("RETENTION_DAYS", "90"))
-        self.rejected_retention_days = 7   # сокращён до 7 дней
+        self.rejected_retention_days = 7
         self.db_file = "posted_articles.db"
 
         self.title_similarity_threshold = 0.60
@@ -55,29 +55,29 @@ class Config:
         self.jaccard_threshold = 0.55
         self.same_domain_similarity = 0.65
 
-        self.subject_window_hours = 48          # увеличено
-        self.max_posts_per_subject = 8          # увеличено
+        self.subject_window_hours = 48
+        self.max_posts_per_subject = 8
         self.subject_min_interval_hours = 2
         self.same_subject_similarity_threshold = 0.60
         self.same_subject_cooldown_hours = 2
 
         self.alternation_enabled = True
 
-        self.min_post_length = 500
-        self.max_article_age_hours = 336        # 14 дней
-        self.min_ai_score = 0                   # разрешить статьи даже с 0 баллов
+        self.min_post_length = 700          # увеличено, чтобы короткая вода не проходила
+        self.max_article_age_hours = 336    # 14 дней – не меняем по просьбе
+        self.min_ai_score = 0
         self.max_repeat_sentences = 2
 
         self.diversity_window = 8
         self.same_topic_limit = 3
 
         self.rotation_history_size = 10
-        self.rotation_max_per_subject = 2       # увеличено
-        self.rotation_max_per_source = 6        # увеличено
+        self.rotation_max_per_subject = 2
+        self.rotation_max_per_source = 6
         self.min_subjects_between_repeats = 3
 
         self.source_min_posts_between = 1
-        self.source_max_in_window = 6           # увеличено
+        self.source_max_in_window = 6
 
         self.batch_subject_limit = 5
 
@@ -241,7 +241,7 @@ class Topic:
         MESSENGER: "#Telegram #мессенджеры #боты",
         GENERAL: "#ИИ #технологии #AI",
         BLOCK: "#РКН #блокировки #цензура",
-        BYPASS: "#блокировки #цензура",       # изменено: убраны методы обхода
+        BYPASS: "#блокировки #цензура",
         WHITELIST: "#белыйсписок #доступность",
     }
 
@@ -933,22 +933,12 @@ async def fetch_feed(url: str, source: str) -> List[Article]:
         for entry in feed.entries[:20]:
             link = entry.get('link', '').strip()
             title = entry.get('title', '').strip()
-            summary = re.sub(
-                r'<[^>]+>', '',
-                entry.get('summary', entry.get('description', '')).strip()
-            )
+            summary = re.sub(r'<[^>]+>', '', entry.get('summary', entry.get('description', '')).strip())
             if not link or not title or len(title) < 15:
                 continue
             pub_date = entry.get('published_parsed') or entry.get('updated_parsed')
-            published = (
-                datetime(*pub_date[:6], tzinfo=timezone.utc)
-                if pub_date
-                else datetime.now(timezone.utc)
-            )
-            articles.append(Article(
-                title=title, summary=summary, link=link,
-                source=source, published=published
-            ))
+            published = datetime(*pub_date[:6], tzinfo=timezone.utc) if pub_date else datetime.now(timezone.utc)
+            articles.append(Article(title=title, summary=summary, link=link, source=source, published=published))
         logger.info(f"  ✅ {source}: {len(articles)}")
         return articles
     except asyncio.TimeoutError:
@@ -1038,7 +1028,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
         subj_rot_ok, subj_rot_reason = posted.can_post_subject(subject)
         if not subj_rot_ok:
-            # Временный отказ – не записываем в rejected_urls
             logger.info(f"  ⏭️ SUBJECT_ROTATION ({subj_rot_reason}): {article.title[:50]}")
             stats["subject_rotation"] += 1
             continue
@@ -1050,7 +1039,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
         subj_ok, subj_reason = posted.check_subject_limit(subject, article.title)
         if not subj_ok:
-            # Временный отказ – не записываем в rejected_urls
             logger.info(f"  ⏭️ {subj_reason}: {article.title[:50]}")
             stats["subject_limit"] += 1
             continue
@@ -1065,7 +1053,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         topic = subject
         div_ok, div_reason = posted.check_diversity(topic, article.source)
         if not div_ok:
-            # Временный отказ – не записываем в rejected_urls
             logger.info(f"  ⏭️ DIVERSITY ({div_reason}): {article.title[:50]}")
             stats["diversity"] += 1
             continue
@@ -1101,14 +1088,8 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     candidates = interleave_by_source(candidates)
 
     logger.info("📊 Итоги фильтрации:")
-    logger.info(
-        f"   filtered={stats['filtered_out']}, batch_dup={stats['batch_dup']}, "
-        f"db_dup={stats['db_dup']}, diversity={stats['diversity']}"
-    )
-    logger.info(
-        f"   subject_limit={stats['subject_limit']}, subject_rotation={stats['subject_rotation']}, "
-        f"batch_subject={stats['batch_subject']}, blacklisted={stats['blacklisted']}"
-    )
+    logger.info(f"   filtered={stats['filtered_out']}, batch_dup={stats['batch_dup']}, db_dup={stats['db_dup']}, diversity={stats['diversity']}")
+    logger.info(f"   subject_limit={stats['subject_limit']}, subject_rotation={stats['subject_rotation']}, batch_subject={stats['batch_subject']}, blacklisted={stats['blacklisted']}")
     logger.info(f"✅ Кандидатов: {len(candidates)} из {len(articles)}")
 
     return candidates
@@ -1132,15 +1113,10 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
         src = art.source
         if src in last_n_sources:
             pos = last_n_sources.index(src) + 1
-            logger.info(
-                f"   ⬇️ DEPRIO [src {src}] был {pos}-м из последних "
-                f"{config.source_min_posts_between}: {art.title[:40]}"
-            )
+            logger.info(f"   ⬇️ DEPRIO [src {src}] был {pos}-м из последних {config.source_min_posts_between}: {art.title[:40]}")
             deprioritized.append(art)
         elif source_counts.get(src, 0) >= config.source_max_in_window:
-            logger.info(
-                f"   ⬇️ DEPRIO [src {src}] x{source_counts[src]} в истории: {art.title[:40]}"
-            )
+            logger.info(f"   ⬇️ DEPRIO [src {src}] x{source_counts[src]} в истории: {art.title[:40]}")
             deprioritized.append(art)
         else:
             priority.append(art)
@@ -1182,52 +1158,75 @@ async def generate_summary(article: Article) -> Optional[str]:
     topic = Topic.detect(text_for_topic)
     is_block_topic = topic in (Topic.BLOCK, Topic.BYPASS, Topic.WHITELIST)
 
+    # Пример качественного поста
+    example_post = """
+Новый CEO Apple Джон Тернус — это инженер-хардверщик, который 20 лет делал Mac и iPad. Под его началом вышли MacBook Air, iPad Pro и переход на Apple Silicon.
+
+Что меняется? Тернус не будет гнаться за сервисами (как Cook), а вернёт фокус на железо. В разработке — складной iPad с механическим шарниром (патент 2025) и Mac с сенсорным экраном. Это прямой удар по Surface и Galaxy Tab.
+
+Для пользователей: новые продукты в 2026–2027, но, возможно, подорожание (инженерные решения всегда дороже). Акции Apple выросли на 2% после анонса. Следим за WWDC в июне.
+""".strip()
+
     if is_block_topic:
-        prompt = f"""Ты — редактор канала про интернет-блокировки и цифровые ограничения.
+        prompt = f"""Ты — редактор Telegram-канала про блокировки и цифровые ограничения в РФ. Твои посты читают тысячи людей, они хотят фактов, а не воды.
 
 НОВОСТЬ:
 Заголовок: {article.title}
-Содержание: {article.summary[:1200]}
+Содержание: {article.summary[:2000]}
 Источник: {article.source}
 
-Напиши Telegram-пост по схеме:
-1. Что именно заблокировали или ограничили (сайт, сервис, приложение).
-2. Техническая причина блокировки (например, DPI, IP-блокировка, SNI).
-3. Как это влияет на пользователей и на рынок.
+Напиши пост по такой структуре:
+1. Что именно заблокировали или затронули (точные названия сайтов/сервисов, IP, протоколы).
+2. Техническая причина блокировки (какой метод: DPI, IP-блокировка, SNI и т.п.).
+3. Последствия для пользователей и индустрии (цифры, даты, имена).
 
-ТРЕБОВАНИЯ:
-✅ 600-800 символов, живой язык, с эмодзи.
-✅ Конкретные цифры, названия, факты.
-❌ НИКАКИХ инструкций по обходу блокировок, конфигов, команд, ссылок на прокси.
-❌ НИКАКИХ призывов поставить реакцию, написать комментарий, подписаться, купить VPN.
+ТРЕБОВАНИЯ К ПОСТУ:
+✅ 800-1000 символов, живые эмодзи, разговорный, но без сленга.
+✅ КАЖДЫЙ ФАКТ должен быть из новости: имена, даты, версии ПО, номера реестров.
+✅ Пиши короткими абзацами (3–5 строк).
+✅ Используй примеры: «По данным РКН, заблокировано 15 зеркал…», «Провайдеры МТС и Ростелеком уже применяют DPI…».
+
+❌ ЗАПРЕЩЕНО писать:
+- «возможно», «вероятно», «может привести», «можно ожидать», «эксперты считают» (если это не прямая цитата)
+- «отражает экспертизу», «пользователи могут рассчитывать», «укрепит позиции на рынке»
+- общие фразы: «в современном мире», «с каждым годом», «как мы знаем»
+- призывы подписаться, поставить лайк, купить VPN
+- инструкции по обходу (конфиги, команды, ссылки на прокси)
 
 ПОСТ:"""
     else:
-        prompt = f"""Ты — редактор Telegram-канала про AI-технологии для аудитории из РФ и СНГ.
+        prompt = f"""Ты — редактор телеграм-канала про AI и технологии. Твои читатели — профессионалы и энтузиасты, они ненавидят пустые обобщения.
+
+Вот пример отличного поста:
+--- ПРИМЕР ---
+{example_post}
+--- КОНЕЦ ПРИМЕРА ---
 
 НОВОСТЬ:
 Заголовок: {article.title}
-Содержание: {article.summary[:1200]}
+Содержание: {article.summary[:2000]}
 Источник: {article.source}
 
-Если новость НЕ про AI/нейросети — ответь одним словом: SKIP
+Если новость НЕ про AI (нейросети, LLM, генеративные модели, робототехника, AI-железо) — ответь одним словом: SKIP
 
-Напиши Telegram-пост по схеме:
-1. Главный факт с конкретными деталями (что случилось, кто, когда, цифры)
-2. Как это работает или что изменилось — раскрой суть, не скупись на детали
-3. Что это означает на практике — для пользователей, индустрии или конкурентов
+Напиши пост по такой схеме:
+1. Суть события: что произошло, кто участники, дата, цифры (например: «OpenAI выпустила GPT-5.5 с 2 млн контекста 24 апреля»).
+2. Техническая деталь или механизм: как это работает, почему это важно, какие ограничения.
+3. Практическое значение: для кого и как это изменит ситуацию (разработчики, бизнес, обычные пользователи).
 
 ТРЕБОВАНИЯ:
-✅ 700-1000 символов — пиши подробно, используй все важные детали из новости
-✅ Конкретные цифры, названия моделей, даты, имена — это важно
-✅ Живой разговорный стиль, без шаблонов и канцелярита
-✅ Каждый блок — отдельный абзац
-✅ Заканчивай уверенным утверждением или выводом — без вопросов читателю
-❌ ЗАПРЕЩЕНО: вопросы в конце ("Что думаете?", "Как вам?" и подобное)
-❌ ЗАПРЕЩЕНО: "стоит отметить", "важно понимать", "это меняет", "открывает возможности", \
-"почему это важно", "важно отметить", "стоит упомянуть", "следует сказать", нумерация (1. 2. 3.)
-❌ ЗАПРЕЩЕНО ЛЮБЫЕ ПРИЗЫВЫ: поставить реакцию (огонь, палец вверх, сердечко), \
-написать комментарий, подписаться, переслать пост.
+✅ 1000–1200 символов.
+✅ Только конкретные факты из новости. Никаких домыслов.
+✅ Примеры: «Скорость инференса выросла на 40%», «API стал дешевле в 2 раза», «Модель весит 70B».
+✅ Стиль: энергичный, без канцелярита, но без зумерского сленга.
+✅ Заканчивай чётким выводом или прогнозом на основе фактов (без вопросов).
+
+❌ ЗАПРЕЩЕНО:
+- «может быть», «вероятно», «возможно», «предположительно» (только если это цитата)
+- «как мы знаем», «в наше время», «стремительное развитие»
+- «это открывает новые возможности», «важно отметить», «стоит сказать»
+- вопросы в конце («А вы как думаете?», «Что скажете?»)
+- любые призывы (реакции, комментарии, подписка)
 
 ПОСТ:"""
 
@@ -1238,8 +1237,8 @@ async def generate_summary(article: Article) -> Optional[str]:
         "почему это важно", "для чего это важно",
         "это важно потому что", "это меняет всё",
         "это открывает возможности", "это меняет правила",
-        "почему это меняет", "вот почему это важно",
-        "важно отметить", "стоит упомянуть", "следует сказать",
+        "может привести", "можно ожидать", "вероятно", "возможно",
+        "отражает экспертизу", "укрепит позиции", "пользователи могут рассчитывать",
     ]
 
     ending_question_patterns = [
@@ -1257,8 +1256,8 @@ async def generate_summary(article: Article) -> Optional[str]:
                 resp = await asyncio.to_thread(
                     groq_client.chat.completions.create,
                     model=model,
-                    temperature=0.9,
-                    max_tokens=800,
+                    temperature=1.0,
+                    max_tokens=1000,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 text = resp.choices[0].message.content.strip()
@@ -1271,16 +1270,18 @@ async def generate_summary(article: Article) -> Optional[str]:
                     logger.warning(f"  ⚠️ Короткий ({len(text)} симв.), следующая модель...")
                     break
 
-                if any(w in text.lower() for w in water_phrases):
-                    logger.warning("  ⚠️ Обнаружена «вода», следующая модель...")
-                    break
+                # Жёсткая проверка на запрещённые фразы
+                if any(phrase in text.lower() for phrase in water_phrases):
+                    logger.warning("  ⚠️ Есть запрещённая фраза, перегенерация...")
+                    if attempt == config.groq_retries_per_model - 1:
+                        logger.warning("  ⏭️ Пропускаем статью из-за воды")
+                        return None
+                    continue
 
+                # Удаление последнего абзаца с вопросом
                 last_paragraph = text.strip().split('\n')[-1].strip()
-                has_ending_question = any(
-                    re.search(p, last_paragraph) for p in ending_question_patterns
-                )
-                if has_ending_question:
-                    logger.warning("  ⚠️ Вопрос в конце — удаляем последний абзац...")
+                if any(re.search(p, last_paragraph) for p in ending_question_patterns):
+                    logger.warning("  ⚠️ Вопрос в конце — удаляем последний абзац")
                     paragraphs = [p.strip() for p in text.strip().split('\n') if p.strip()]
                     if len(paragraphs) > 1:
                         text = '\n\n'.join(paragraphs[:-1])
@@ -1289,7 +1290,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 
                 if has_repeated_sentences(text, config.max_repeat_sentences):
                     logger.warning("  ⚠️ Повторяющиеся предложения, следующая модель...")
-                    break
+                    continue
 
                 hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
                 source_link = f'\n\n🔗 <a href="{article.link}">Источник</a>'
@@ -1316,11 +1317,7 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 
     try:
         logger.info("  📤 Отправка поста...")
-        await bot.send_message(
-            config.channel_id,
-            text,
-            disable_web_page_preview=False
-        )
+        await bot.send_message(config.channel_id, text, disable_web_page_preview=False)
         logger.info(f"✅ ОПУБЛИКОВАНО [{topic}][{article.source}]: {article.title[:50]}")
     except Exception as e:
         logger.error(f"❌ Telegram ошибка отправки: {e}")
@@ -1328,9 +1325,7 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
 
     saved = posted.add(article, topic, subject)
     if not saved:
-        logger.warning(
-            f"⚠️ Пост отправлен, но не сохранён в БД (возможно дубль): {article.title[:50]}"
-        )
+        logger.warning(f"⚠️ Пост отправлен, но не сохранён в БД (возможно дубль): {article.title[:50]}")
     return True
 
 
@@ -1365,15 +1360,10 @@ async def main():
             with open(lock_file) as f:
                 old_pid = int(f.read().strip())
             if os.path.exists(f"/proc/{old_pid}"):
-                logger.error(
-                    f"❌ Бот уже запущен (PID {old_pid})! "
-                    f"Удалите bot.lock если это ошибка."
-                )
+                logger.error(f"❌ Бот уже запущен (PID {old_pid})! Удалите bot.lock если это ошибка.")
                 return
             else:
-                logger.warning(
-                    f"⚠️ Найден устаревший lock (PID {old_pid} не существует), удаляю..."
-                )
+                logger.warning(f"⚠️ Найден устаревший lock (PID {old_pid} не существует), удаляю...")
                 os.remove(lock_file)
         except Exception:
             logger.warning("⚠️ Не удалось прочитать bot.lock, удаляю и продолжаю...")
@@ -1406,10 +1396,7 @@ async def main():
         posted.cleanup(config.retention_days)
 
         stats = posted.get_stats()
-        logger.info(
-            f"📊 Статистика: {stats['total_posted']} posted, "
-            f"{stats['total_rejected']} в чёрном списке"
-        )
+        logger.info(f"📊 Статистика: {stats['total_posted']} posted, {stats['total_rejected']} в чёрном списке")
 
         recent = posted.get_recent_posts(config.rotation_history_size)
         if recent:
@@ -1437,7 +1424,6 @@ async def main():
 
         candidates = filter_and_dedupe(raw, posted)
 
-        # FALLBACK: если кандидатов нет, взять самую релевантную из всех
         if not candidates:
             logger.info("⚠️ Кандидатов нет, пробуем fallback: выбираем статью с максимальным AI-скором")
             scored = [(article, ai_relevance_score(f"{article.title} {article.summary}")) for article in raw]
@@ -1454,8 +1440,8 @@ async def main():
 
         logger.info("🎯 Топ-10 кандидатов после ротации:")
         for i, c in enumerate(candidates[:10]):
-            topic = Topic.detect(f"{c.title} {c.summary}")
-            logger.info(f"  {i + 1}. [{topic}] [{c.source}] {c.title[:55]}")
+            topic_t = Topic.detect(f"{c.title} {c.summary}")
+            logger.info(f"  {i+1}. [{topic_t}] [{c.source}] {c.title[:55]}")
 
         published = False
         for article in candidates[:25]:
@@ -1465,10 +1451,7 @@ async def main():
 
             dup_result = posted.is_duplicate(article.link, article.title, article.summary)
             if dup_result.is_duplicate:
-                posted.log_rejected(
-                    article,
-                    f"FINAL_DUP: {'; '.join(dup_result.reasons[:2])}"
-                )
+                posted.log_rejected(article, f"FINAL_DUP: {'; '.join(dup_result.reasons[:2])}")
                 continue
 
             summary = await generate_summary(article)
@@ -1512,7 +1495,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

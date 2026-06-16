@@ -136,7 +136,6 @@ RSS_FEEDS = [
     ("https://www.securitylab.ru/rss/news/", "SecurityLab"),
     ("https://telecomdaily.ru/feed", "TelecomDaily"),
     ("https://www.cnews.ru/rss/news", "CNews"),
-    # Google News по запросу "блокировка РКН VPN" (регион Россия)
     ("https://news.google.com/rss/search?q=блокировка+РКН+VPN+россия&hl=ru&gl=RU&ceid=RU:ru", "Google News (Блокировки)"),
 
     # --- ОБЩИЕ AI-ИСТОЧНИКИ (только если нет блок-новостей) ---
@@ -152,6 +151,8 @@ RSS_FEEDS = [
     ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
     ("https://engineering.fb.com/category/ml-applications/feed/", "Meta AI Blog"),
     ("https://kod.ru/rss", "Kod.ru"),
+    # === ДОБАВЛЯЕМ HACKER NEWS ===
+    ("https://news.ycombinator.com/rss", "Hacker News"),
     ("https://habr.com/ru/rss/feed/1cf1798b4d67ac63d1869bba8f26920f"
      "?fl=ru&complexity=high&rating=10&types%5B%5D=article"
      "&types%5B%5D=post&types%5B%5D=news", "Habr AI"),

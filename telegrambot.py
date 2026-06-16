@@ -125,7 +125,21 @@ GROQ_MODELS = [
     "llama-3.1-8b-instant",
 ]
 
+# ====================== ИЗМЕНЕНИЕ: НОВЫЙ СПИСОК RSS ======================
 RSS_FEEDS = [
+    # --- ПРИОРИТЕТНЫЕ РОССИЙСКИЕ ИСТОЧНИКИ (блокировки, регулирование) ---
+    ("https://roskomsvoboda.org/feed/", "Роскомсвобода"),
+    ("https://rkn.gov.ru/rss/news.xml", "РКН"),
+    ("https://opennet.me/rss/news", "OpenNet"),
+    ("https://www.comnews.ru/rss/news", "ComNews"),
+    ("https://habr.com/ru/rss/hub/internet_regulation/all/", "Habr Регулирование"),
+    ("https://www.securitylab.ru/rss/news/", "SecurityLab"),
+    ("https://telecomdaily.ru/feed", "TelecomDaily"),
+    ("https://www.cnews.ru/rss/news", "CNews"),
+    # Google News по запросу "блокировка РКН VPN" (регион Россия)
+    ("https://news.google.com/rss/search?q=блокировка+РКН+VPN+россия&hl=ru&gl=RU&ceid=RU:ru", "Google News (Блокировки)"),
+
+    # --- ОБЩИЕ AI-ИСТОЧНИКИ (только если нет блок-новостей) ---
     ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch AI"),
     ("https://venturebeat.com/category/ai/feed/", "VentureBeat AI"),
     ("https://arstechnica.com/tag/artificial-intelligence/feed/", "Ars Technica AI"),
@@ -138,17 +152,9 @@ RSS_FEEDS = [
     ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
     ("https://engineering.fb.com/category/ml-applications/feed/", "Meta AI Blog"),
     ("https://kod.ru/rss", "Kod.ru"),
-    (
-        "https://habr.com/ru/rss/feed/1cf1798b4d67ac63d1869bba8f26920f"
-        "?fl=ru&complexity=high&rating=10&types%5B%5D=article"
-        "&types%5B%5D=post&types%5B%5D=news",
-        "Habr AI"
-    ),
-    ("https://rkn.gov.ru/rss/news.xml", "РКН новости"),
-    ("https://roskomsvoboda.org/feed/", "Роскомсвобода"),
-    ("https://opennet.me/rss/news", "OpenNet"),
-    ("https://habr.com/ru/rss/hub/internet_regulation/all/", "Habr Регулирование"),
-    ("https://www.comnews.ru/rss/news", "ComNews"),
+    ("https://habr.com/ru/rss/feed/1cf1798b4d67ac63d1869bba8f26920f"
+     "?fl=ru&complexity=high&rating=10&types%5B%5D=article"
+     "&types%5B%5D=post&types%5B%5D=news", "Habr AI"),
 ]
 
 # ---------- КЛЮЧЕВЫЕ СЛОВА ----------
@@ -207,6 +213,9 @@ PROMO_PATTERNS = [
 ]
 
 REVIEW_KEYWORDS = ["review", "tested", "hands-on", "обзор", "тест", "скидка", "discount", "deal", "best", "top 10"]
+
+# ====================== ИЗМЕНЕНИЕ: ГЕО-ФИЛЬТР ======================
+RUSSIA_KEYWORDS = ["россия", "рф", "минц", "госдума", "путин", "москва", "санкт-петербург", "совет федерации", "кремль", "правительство рф", "роскомнадзор", "ркн"]
 
 
 @dataclass
@@ -315,7 +324,7 @@ def get_title_words(title: str) -> frozenset:
         'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
         'should', 'may', 'might', 'must', 'shall', 'can', 'need', 'to', 'of',
         'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through',
-        'during', 'before', 'after', 'above', 'below', 'between', 'under',
+        'during', 'before', 'above', 'below', 'between', 'under',
         'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where',
         'why', 'how', 'all', 'each', 'few', 'more', 'most', 'other', 'some',
         'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too',
@@ -392,6 +401,7 @@ def safe_json_loads(value: str, default=None):
         return default if default is not None else []
 
 
+# ====================== ИЗМЕНЕНИЕ: УСИЛЕННЫЙ СКОР ДЛЯ БЛОКИРОВОК ======================
 def ai_relevance_score(text: str) -> int:
     text_lower = text.lower()
     score = 0
@@ -406,12 +416,29 @@ def ai_relevance_score(text: str) -> int:
     return score
 
 
+def block_relevance_score(text: str) -> int:
+    """Дополнительный высокий вес для блокировок."""
+    text_lower = text.lower()
+    score = 0
+    for kw in BLOCK_KEYWORDS:
+        if kw in text_lower:
+            score += 5   # очень высокий приоритет
+    return score
+
+
+def is_russian_related(text: str) -> bool:
+    """Проверяет, упоминается ли Россия или её институции."""
+    text_lower = text.lower()
+    return any(kw in text_lower for kw in RUSSIA_KEYWORDS)
+
+
 def is_promo_content(text: str) -> bool:
     text_lower = text.lower()
     promo_count = sum(1 for p in PROMO_PATTERNS if p in text_lower)
     return promo_count >= 2
 
 
+# ====================== ИЗМЕНЕНИЕ: is_relevant С ПРИОРИТЕТОМ БЛОКИРОВОК ======================
 def is_relevant(article: Article) -> bool:
     text = f"{article.title} {article.summary}".lower()
 
@@ -441,6 +468,16 @@ def is_relevant(article: Article) -> bool:
     has_weak_ai = any(kw in text for kw in AI_KEYWORDS_WEAK)
     is_ai = has_strong_ai or (has_weak_ai and config.min_ai_score <= 1)
     is_block = any(kw in text for kw in BLOCK_KEYWORDS)
+
+    # === ИЗМЕНЕНИЕ: если это блокировка — пропускаем даже без AI ===
+    if is_block:
+        logger.info(f"  ✅ BLOCK (приоритет): {article.title[:55]}")
+        return True
+
+    # === ИЗМЕНЕНИЕ: для AI-статей требуем упоминание России, если нет блокировки ===
+    if is_ai and not is_russian_related(text):
+        logger.info(f"  🌍 FOREIGN AI (нет России): {article.title[:50]}")
+        return False
 
     if not (is_ai or is_block):
         logger.info(f"  🚫 NEITHER AI NOR BLOCK: {article.title[:50]}")
@@ -924,6 +961,7 @@ def interleave_by_source(candidates: List[Article]) -> List[Article]:
     return result
 
 
+# ====================== ИЗМЕНЕНИЕ: filter_and_dedupe С ПРИОРИТЕТОМ БЛОКИРОВОК ======================
 def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Article]:
     logger.info("🔍 Фильтрация...")
     logger.info(f"   Входящих статей: {len(articles)}")
@@ -997,31 +1035,38 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         candidates.append(article)
         stats["passed"] += 1
 
-    last_topic = posted.get_last_topic()
-    if config.alternation_enabled and last_topic:
-        ai_topics = {Topic.LLM, Topic.IMAGE_GEN, Topic.ROBOTICS, Topic.HARDWARE,
-                     Topic.MESSENGER, Topic.GENERAL}
-        block_topics = {Topic.BLOCK, Topic.BYPASS, Topic.WHITELIST}
-        preferred_group = block_topics if last_topic in ai_topics else ai_topics
+    # ========== ИЗМЕНЕНИЕ: отделяем блокировки от остальных ==========
+    block_candidates = []
+    ai_candidates = []
+    for art in candidates:
+        text = f"{art.title} {art.summary}".lower()
+        if any(kw in text for kw in BLOCK_KEYWORDS):
+            block_candidates.append(art)
+        else:
+            ai_candidates.append(art)
 
-        def alternation_score(art: Article) -> int:
-            art_topic = Topic.detect(f"{art.title} {art.summary}")
-            return 1 if art_topic in preferred_group else 0
-
-        candidates.sort(key=alternation_score, reverse=True)
+    # Если есть блок-новости — публикуем только их (сортируем по скору блокировок)
+    if block_candidates:
+        logger.info(f"🔒 Найдено {len(block_candidates)} блок-статей, берём их в приоритет")
+        # Сортируем блокировки по убыванию скора (чтобы самые «блоковые» шли первыми)
+        block_candidates.sort(key=lambda a: block_relevance_score(f"{a.title} {a.summary}"), reverse=True)
+        candidates = block_candidates
     else:
-        def simple_score(art: Article) -> float:
-            t = f"{art.title} {art.summary}"
-            return ai_relevance_score(t) + (10 if any(kw in t for kw in BLOCK_KEYWORDS) else 0)
+        # Если блок-новостей нет — берём AI-статьи, но только те, что связаны с Россией
+        logger.info(f"🌐 Блок-новостей нет, берём {len(ai_candidates)} AI-статей (с фильтром России)")
+        # Фильтруем AI по России (уже сделано в is_relevant, но дополнительно)
+        ai_candidates = [a for a in ai_candidates if is_russian_related(f"{a.title} {a.summary}")]
+        # Сортируем по AI-скору и блок-скору (на всякий)
+        ai_candidates.sort(key=lambda a: ai_relevance_score(f"{a.title} {a.summary}") + block_relevance_score(f"{a.title} {a.summary}"), reverse=True)
+        candidates = ai_candidates[:5]   # берём только топ-5, чтобы не заваливать
 
-        candidates.sort(key=simple_score, reverse=True)
-
+    # Чередование по источникам (для разнообразия)
     candidates = interleave_by_source(candidates)
 
     logger.info("📊 Итоги фильтрации:")
     logger.info(f"   filtered={stats['filtered_out']}, batch_dup={stats['batch_dup']}, db_dup={stats['db_dup']}, diversity={stats['diversity']}")
     logger.info(f"   subject_limit={stats['subject_limit']}, subject_rotation={stats['subject_rotation']}, batch_subject={stats['batch_subject']}, blacklisted={stats['blacklisted']}")
-    logger.info(f"✅ Кандидатов: {len(candidates)} из {len(articles)}")
+    logger.info(f"✅ Кандидатов после приоритета: {len(candidates)} из {len(articles)}")
 
     return candidates
 
@@ -1301,7 +1346,7 @@ async def main():
         f.write(str(os.getpid()))
 
     logger.info("=" * 60)
-    logger.info("🚀 БЛОКИРОВКИ + AI (без игр/бизнеса/рекламы, без призывов и инструкций по обходу)")
+    logger.info("🚀 БЛОКИРОВКИ + AI (с приоритетом российских блокировок)")
     logger.info("=" * 60)
 
     posted = None
@@ -1352,37 +1397,30 @@ async def main():
 
         candidates = filter_and_dedupe(raw, posted)
 
-        # ====================== НОВЫЙ FALLBACK с приоритетом Habr ======================
+        # === ИЗМЕНЕНИЕ: если кандидатов нет — пробуем взять самую свежую блок-новость из всех ===
         if not candidates:
-            logger.info("⚠️ Кандидатов нет, пробуем fallback на Habr...")
-            habr_articles = [art for art in raw if art.source == "Habr AI"]
-            fallback_article = None
-            for art in habr_articles:
-                # Для fallback применяем мягкие фильтры: не старше 30 дней, не игры/бизнес/реклама
-                age_hours = (datetime.now(timezone.utc) - art.published).total_seconds() / 3600
-                if age_hours > 720:  # 30 дней
-                    continue
+            logger.info("⚠️ Кандидатов нет, ищем любую блок-новость в сырых данных...")
+            for art in raw:
                 text = f"{art.title} {art.summary}".lower()
-                if any(g in text for g in GAMES_EXCLUDE) or any(b in text for b in BUSINESS_EXCLUDE) or is_promo_content(text):
-                    continue
-                dup_res = posted.is_duplicate(art.link, art.title, art.summary)
-                if not dup_res.is_duplicate:
-                    fallback_article = art
-                    break
-            if fallback_article:
-                logger.info(f"  🔄 Fallback Habr выбран: {fallback_article.title[:60]}")
-                candidates = [fallback_article]
-            else:
-                logger.info("⚠️ Fallback Habr не дал статьи, используем общий fallback по AI-скору")
-                scored = [(article, ai_relevance_score(f"{article.title} {article.summary}")) for article in raw]
-                scored.sort(key=lambda x: x[1], reverse=True)
-                if scored and scored[0][1] > 0:
-                    fallback_article = scored[0][0]
-                    logger.info(f"  🔄 Fallback AI-скор выбран: {fallback_article.title[:60]} (score={scored[0][1]})")
-                    candidates = [fallback_article]
-                else:
-                    logger.info("📭 Даже fallback не нашёл подходящей статьи")
-                    return
+                if any(kw in text for kw in BLOCK_KEYWORDS):
+                    dup = posted.is_duplicate(art.link, art.title, art.summary)
+                    if not dup.is_duplicate:
+                        logger.info(f"  🔄 Найдена блок-статья: {art.title[:60]}")
+                        candidates = [art]
+                        break
+            if not candidates:
+                logger.info("📭 Блок-новостей нет, публикуем топ AI (если есть)")
+                # берём любую AI-статью с упоминанием России
+                for art in raw:
+                    if is_russian_related(f"{art.title} {art.summary}"):
+                        dup = posted.is_duplicate(art.link, art.title, art.summary)
+                        if not dup.is_duplicate:
+                            candidates = [art]
+                            break
+
+        if not candidates:
+            logger.info("📭 Совсем нет подходящих статей")
+            return
 
         candidates = rotate_candidates(candidates, posted)
 

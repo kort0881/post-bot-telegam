@@ -81,7 +81,7 @@ class Config:
         self.groq_retries_per_model = 2
         self.groq_base_delay = 2.0
         self.telegram_timeout = 30
-        self.http_timeout = 30
+        self.http_timeout = 60  # было 30
 
         missing = []
         for var, name in [(self.groq_api_key, "GROQ_API_KEY"),
@@ -125,17 +125,22 @@ GROQ_MODELS = [
     "llama-3.1-8b-instant",
 ]
 
-# ====================== ИЗМЕНЕНИЕ: НОВЫЙ СПИСОК RSS ======================
+# ====================== RSS FEEDS ======================
 RSS_FEEDS = [
     # --- ПРИОРИТЕТНЫЕ РОССИЙСКИЕ ИСТОЧНИКИ (блокировки, регулирование) ---
     ("https://roskomsvoboda.org/feed/", "Роскомсвобода"),
     ("https://rkn.gov.ru/rss/news.xml", "РКН"),
-    ("https://opennet.me/rss/news", "OpenNet"),
+    # OpenNet – основной RSS
+    ("https://www.opennet.ru/opennews/opennews.rss", "OpenNet"),
     ("https://www.comnews.ru/rss/news", "ComNews"),
-    ("https://habr.com/ru/rss/hub/internet_regulation/all/", "Habr Регулирование"),
-    ("https://www.securitylab.ru/rss/news/", "SecurityLab"),
-    ("https://telecomdaily.ru/feed", "TelecomDaily"),
-    ("https://www.cnews.ru/rss/news", "CNews"),
+    # Habr Регулирование – без /all/ в конце
+    ("https://habr.com/ru/rss/hub/internet_regulation/", "Habr Регулирование"),
+    # SecurityLab – альтернативный путь
+    ("https://www.securitylab.ru/news/export/rss2/", "SecurityLab"),
+    # TelecomDaily – /rss
+    ("https://telecomdaily.ru/rss", "TelecomDaily"),
+    # CNews – /news/rss
+    ("https://www.cnews.ru/news/rss", "CNews"),
     ("https://news.google.com/rss/search?q=блокировка+РКН+VPN+россия&hl=ru&gl=RU&ceid=RU:ru", "Google News (Блокировки)"),
 
     # --- ОБЩИЕ AI-ИСТОЧНИКИ (только если нет блок-новостей) ---
@@ -151,7 +156,6 @@ RSS_FEEDS = [
     ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
     ("https://engineering.fb.com/category/ml-applications/feed/", "Meta AI Blog"),
     ("https://kod.ru/rss", "Kod.ru"),
-    # === ДОБАВЛЯЕМ HACKER NEWS ===
     ("https://news.ycombinator.com/rss", "Hacker News"),
     ("https://habr.com/ru/rss/feed/1cf1798b4d67ac63d1869bba8f26920f"
      "?fl=ru&complexity=high&rating=10&types%5B%5D=article"
@@ -215,7 +219,7 @@ PROMO_PATTERNS = [
 
 REVIEW_KEYWORDS = ["review", "tested", "hands-on", "обзор", "тест", "скидка", "discount", "deal", "best", "top 10"]
 
-# ====================== ИЗМЕНЕНИЕ: ГЕО-ФИЛЬТР ======================
+# ====================== ГЕО-ФИЛЬТР ======================
 RUSSIA_KEYWORDS = ["россия", "рф", "минц", "госдума", "путин", "москва", "санкт-петербург", "совет федерации", "кремль", "правительство рф", "роскомнадзор", "ркн"]
 
 
@@ -402,7 +406,7 @@ def safe_json_loads(value: str, default=None):
         return default if default is not None else []
 
 
-# ====================== ИЗМЕНЕНИЕ: УСИЛЕННЫЙ СКОР ДЛЯ БЛОКИРОВОК ======================
+# ====================== УСИЛЕННЫЙ СКОР ДЛЯ БЛОКИРОВОК ======================
 def ai_relevance_score(text: str) -> int:
     text_lower = text.lower()
     score = 0
@@ -439,7 +443,7 @@ def is_promo_content(text: str) -> bool:
     return promo_count >= 2
 
 
-# ====================== ИЗМЕНЕНИЕ: is_relevant С ПРИОРИТЕТОМ БЛОКИРОВОК ======================
+# ====================== is_relevant С ПРИОРИТЕТОМ БЛОКИРОВОК ======================
 def is_relevant(article: Article) -> bool:
     text = f"{article.title} {article.summary}".lower()
 
@@ -470,12 +474,12 @@ def is_relevant(article: Article) -> bool:
     is_ai = has_strong_ai or (has_weak_ai and config.min_ai_score <= 1)
     is_block = any(kw in text for kw in BLOCK_KEYWORDS)
 
-    # === ИЗМЕНЕНИЕ: если это блокировка — пропускаем даже без AI ===
+    # если это блокировка — пропускаем даже без AI
     if is_block:
         logger.info(f"  ✅ BLOCK (приоритет): {article.title[:55]}")
         return True
 
-    # === ИЗМЕНЕНИЕ: для AI-статей требуем упоминание России, если нет блокировки ===
+    # для AI-статей требуем упоминание России, если нет блокировки
     if is_ai and not is_russian_related(text):
         logger.info(f"  🌍 FOREIGN AI (нет России): {article.title[:50]}")
         return False
@@ -962,7 +966,7 @@ def interleave_by_source(candidates: List[Article]) -> List[Article]:
     return result
 
 
-# ====================== ИЗМЕНЕНИЕ: filter_and_dedupe С ПРИОРИТЕТОМ БЛОКИРОВОК ======================
+# ====================== filter_and_dedupe С ПРИОРИТЕТОМ БЛОКИРОВОК ======================
 def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Article]:
     logger.info("🔍 Фильтрация...")
     logger.info(f"   Входящих статей: {len(articles)}")
@@ -1036,7 +1040,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         candidates.append(article)
         stats["passed"] += 1
 
-    # ========== ИЗМЕНЕНИЕ: отделяем блокировки от остальных ==========
+    # отделяем блокировки от остальных
     block_candidates = []
     ai_candidates = []
     for art in candidates:
@@ -1046,22 +1050,17 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         else:
             ai_candidates.append(art)
 
-    # Если есть блок-новости — публикуем только их (сортируем по скору блокировок)
+    # Если есть блок-новости — публикуем только их
     if block_candidates:
         logger.info(f"🔒 Найдено {len(block_candidates)} блок-статей, берём их в приоритет")
-        # Сортируем блокировки по убыванию скора (чтобы самые «блоковые» шли первыми)
         block_candidates.sort(key=lambda a: block_relevance_score(f"{a.title} {a.summary}"), reverse=True)
         candidates = block_candidates
     else:
-        # Если блок-новостей нет — берём AI-статьи, но только те, что связаны с Россией
         logger.info(f"🌐 Блок-новостей нет, берём {len(ai_candidates)} AI-статей (с фильтром России)")
-        # Фильтруем AI по России (уже сделано в is_relevant, но дополнительно)
         ai_candidates = [a for a in ai_candidates if is_russian_related(f"{a.title} {a.summary}")]
-        # Сортируем по AI-скору и блок-скору (на всякий)
         ai_candidates.sort(key=lambda a: ai_relevance_score(f"{a.title} {a.summary}") + block_relevance_score(f"{a.title} {a.summary}"), reverse=True)
-        candidates = ai_candidates[:5]   # берём только топ-5, чтобы не заваливать
+        candidates = ai_candidates[:5]
 
-    # Чередование по источникам (для разнообразия)
     candidates = interleave_by_source(candidates)
 
     logger.info("📊 Итоги фильтрации:")
@@ -1129,11 +1128,13 @@ def has_repeated_sentences(text: str, max_repeats: int = 2) -> bool:
     return False
 
 
+# ====================== ГЕНЕРАЦИЯ ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     text_for_topic = f"{article.title} {article.summary}"
     topic = Topic.detect(text_for_topic)
-    is_block_topic = topic in (Topic.BLOCK, Topic.BYPASS, Topic.WHITELIST)
+
+    is_block_topic = any(kw in text_for_topic.lower() for kw in BLOCK_KEYWORDS)
 
     example_post = """
 Новый CEO Apple Джон Тернус — это инженер-хардверщик, который 20 лет делал Mac и iPad. Под его началом вышли MacBook Air, iPad Pro и переход на Apple Silicon.
@@ -1238,7 +1239,7 @@ async def generate_summary(article: Article) -> Optional[str]:
                 )
                 text = resp.choices[0].message.content.strip()
 
-                if "SKIP" in text.upper()[:10]:
+                if not is_block_topic and "SKIP" in text.upper()[:10]:
                     logger.info("  ⏭️ SKIP (не подходит)")
                     return None
 
@@ -1266,7 +1267,8 @@ async def generate_summary(article: Article) -> Optional[str]:
                     logger.warning("  ⚠️ Повторяющиеся предложения, следующая модель...")
                     continue
 
-                hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
+                actual_topic = Topic.BLOCK if is_block_topic else topic
+                hashtags = Topic.HASHTAGS.get(actual_topic, Topic.HASHTAGS[Topic.GENERAL])
                 source_link = f'\n\n🔗 <a href="{article.link}">Источник</a>'
                 final = f"{text}\n\n{hashtags}{source_link}{DISCLAIMER}"
 
@@ -1398,7 +1400,6 @@ async def main():
 
         candidates = filter_and_dedupe(raw, posted)
 
-        # === ИЗМЕНЕНИЕ: если кандидатов нет — пробуем взять самую свежую блок-новость из всех ===
         if not candidates:
             logger.info("⚠️ Кандидатов нет, ищем любую блок-новость в сырых данных...")
             for art in raw:
@@ -1411,7 +1412,6 @@ async def main():
                         break
             if not candidates:
                 logger.info("📭 Блок-новостей нет, публикуем топ AI (если есть)")
-                # берём любую AI-статью с упоминанием России
                 for art in raw:
                     if is_russian_related(f"{art.title} {art.summary}"):
                         dup = posted.is_duplicate(art.link, art.title, art.summary)

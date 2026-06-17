@@ -1158,7 +1158,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 3. Последствия для пользователей и индустрии (цифры, даты, имена).
 
 ТРЕБОВАНИЯ К ПОСТУ:
-✅ 800-1000 символов, живые эмодзи, разговорный, но без сленга.
+✅ 500-800 символов, живые эмодзи, разговорный, но без сленга.
 ✅ КАЖДЫЙ ФАКТ должен быть из новости: имена, даты, версии ПО, номера реестров.
 ✅ Пиши короткими абзацами (3–5 строк).
 ✅ Используй примеры: «По данным РКН, заблокировано 15 зеркал…», «Провайдеры МТС и Ростелеком уже применяют DPI…».
@@ -1234,7 +1234,7 @@ async def generate_summary(article: Article) -> Optional[str]:
                     groq_client.chat.completions.create,
                     model=model,
                     temperature=1.0,
-                    max_tokens=1000,
+                    max_tokens=1500,   # увеличено для блок-постов
                     messages=[{"role": "user", "content": prompt}],
                 )
                 text = resp.choices[0].message.content.strip()
@@ -1243,8 +1243,10 @@ async def generate_summary(article: Article) -> Optional[str]:
                     logger.info("  ⏭️ SKIP (не подходит)")
                     return None
 
-                if len(text) < config.min_post_length:
-                    logger.warning(f"  ⚠️ Короткий ({len(text)} симв.), следующая модель...")
+                # Разный порог длины для блок- и AI-статей
+                min_len = 500 if is_block_topic else config.min_post_length
+                if len(text) < min_len:
+                    logger.warning(f"  ⚠️ Короткий ({len(text)} симв., минимум {min_len}), следующая модель...")
                     break
 
                 if any(phrase in text.lower() for phrase in water_phrases):

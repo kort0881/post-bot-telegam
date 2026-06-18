@@ -13,7 +13,7 @@ import sqlite3
 import threading
 import signal
 import sys
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import List, Set, Optional, Tuple, Dict
 from urllib.parse import urlparse, parse_qs, urlencode
 from dataclasses import dataclass, field
@@ -62,7 +62,7 @@ class Config:
         self.alternation_enabled = True
 
         self.min_post_length = 700
-        self.max_article_age_hours = 720   # 30 дней
+        self.max_article_age_hours = 720
         self.min_ai_score = 1
         self.max_repeat_sentences = 2
 
@@ -85,6 +85,7 @@ class Config:
 
         self.critical_style = True          # Включить критический стиль
         self.report_interval_hours = 24     # Отчёт не чаще раза в сутки
+        self.lively_tone = True             # Живой, ироничный тон (мат разрешён)
 
         missing = []
         for var, name in [(self.groq_api_key, "GROQ_API_KEY"),
@@ -545,7 +546,6 @@ class PostedManager:
                     rejected_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-            # Таблица для состояния приложения
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS app_state (
                     key TEXT PRIMARY KEY,
@@ -575,6 +575,7 @@ class PostedManager:
             conn.commit()
         logger.info("📚 База данных инициализирована")
 
+    # ---- Методы для отчётов ----
     def get_last_report_time(self) -> Optional[datetime]:
         with self._lock:
             cursor = self._get_conn().cursor()
@@ -618,17 +619,325 @@ class PostedManager:
                 })
             return results
 
-    # ... остальные методы (is_duplicate, add, cleanup, etc.) оставляем как есть ...
-    # (в предыдущих версиях они уже были, я не буду их дублировать для краткости,
-    # но в полном файле они присутствуют)
+    # ---- Остальные методы ----
+    def _add_rejected(self, norm_url: str, title: str, reason: str):
+        pass
 
-    # ВАЖНО: Ниже должны быть все методы, которые были ранее (is_duplicate, add, check_diversity, ...)
-    # Поскольку мы не можем вместить весь код в одно сообщение, я предполагаю,
-    # что у вас уже есть полная реализация PostedManager из предыдущих версий.
-    # В финальном коде, который я пришлю, все методы будут на месте.
+    def is_rejected(self, url: str) -> Tuple[bool, str]:
+        return False, ""
 
-    # Для краткости здесь я пропускаю методы, которые уже были в коде.
-    # В финальном ответе я дам полный файл.
+    def get_subject_posts_in_window(self, subject: str, hours: int) -> List[dict]:
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute('''
+                SELECT title, posted_date, title_normalized, entities
+                FROM posted_articles
+                WHERE subject = ?
+                  AND posted_date > datetime('now', ?)
+                ORDER BY posted_date DESC
+            ''', (subject, f'-{hours} hours'))
+            results = []
+            for r in cursor.fetchall():
+                results.append({
+                    'title': r[0],
+                    'date': r[1],
+                    'normalized': r[2],
+                    'entities': r[3]
+                })
+            return results
+
+    def get_subject_stats_cached(self, hours: int = 24) -> Dict[str, List[dict]]:
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute('''
+                SELECT subject, title, posted_date, title_normalized
+                FROM posted_articles
+                WHERE posted_date > datetime('now', ?)
+                ORDER BY posted_date DESC
+            ''', (f'-{hours} hours',))
+            result: Dict[str, List[dict]] = defaultdict(list)
+            for r in cursor.fetchall():
+                result[r[0]].append({
+                    'title': r[1],
+                    'date': r[2],
+                    'normalized': r[3]
+                })
+            return dict(result)
+
+    def get_last_n_subjects(self, n: int = 5) -> List[str]:
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute('''
+                SELECT subject FROM posted_articles
+                ORDER BY posted_date DESC
+                LIMIT ?
+            ''', (n,))
+            return [row[0] for row in cursor.fetchall()]
+
+    def can_post_subject(self, subject: str) -> Tuple[bool, str]:
+        return True, ""
+
+    def check_subject_limit(
+        self,
+        subject: str,
+        new_title: str,
+        new_entities: Set[str] = None
+    ) -> Tuple[bool, str]:
+        if subject == "other":
+            return True, ""
+
+        recent_posts = self.get_subject_posts_in_window(subject, config.subject_window_hours)
+
+        if len(recent_posts) >= config.max_posts_per_subject:
+            return (
+                False,
+                f"SUBJECT_LIMIT ({subject}: {len(recent_posts)}/"
+                f"{config.max_posts_per_subject} за {config.subject_window_hours}h)"
+            )
+
+        if recent_posts:
+            last_date = parse_db_datetime(recent_posts[0]['date'])
+            hours_since = (datetime.now(timezone.utc) - last_date).total_seconds() / 3600
+            if hours_since < config.subject_min_interval_hours:
+                return (
+                    False,
+                    f"SUBJECT_COOLDOWN ({subject}: {hours_since:.1f}h "
+                    f"< {config.subject_min_interval_hours}h)"
+                )
+
+        new_normalized = normalize_title(new_title)
+        for post in recent_posts:
+            sim = calculate_similarity(new_normalized, post['normalized'])
+            if sim > config.same_subject_similarity_threshold:
+                return False, f"SUBJECT_SIMILAR ({subject}, sim={sim:.0%})"
+
+        return True, ""
+
+    def is_duplicate(self, url: str, title: str, summary: str = "") -> DuplicateCheckResult:
+        result = DuplicateCheckResult(is_duplicate=False, reasons=[])
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            norm_url = normalize_url(url)
+            title_normalized = normalize_title(title)
+            title_words = set(get_title_words(title))
+            content_hash = get_content_hash(f"{title} {summary}")
+            domain = get_domain(url)
+
+            cursor.execute(
+                'SELECT title FROM posted_articles WHERE norm_url = ? '
+                'AND posted_date > datetime("now", ?)',
+                (norm_url, f'-{config.retention_days} days')
+            )
+            row = cursor.fetchone()
+            if row:
+                result.add_reason("URL_EXACT", 1.0, row[0])
+                return result
+
+            if content_hash:
+                cursor.execute(
+                    'SELECT title FROM posted_articles WHERE content_hash = ? '
+                    'AND posted_date > datetime("now", ?)',
+                    (content_hash, f'-{config.retention_days} days')
+                )
+                row = cursor.fetchone()
+                if row:
+                    result.add_reason("CONTENT_HASH", 1.0, row[0])
+                    return result
+
+            cursor.execute(
+                'SELECT title FROM posted_articles WHERE title_normalized = ? '
+                'AND posted_date > datetime("now", ?)',
+                (title_normalized, f'-{config.retention_days} days')
+            )
+            row = cursor.fetchone()
+            if row:
+                result.add_reason("TITLE_EXACT", 1.0, row[0])
+                return result
+
+            cursor.execute('''
+                SELECT id, title, title_normalized, title_words, domain
+                FROM posted_articles
+                WHERE posted_date > datetime('now', ?)
+            ''', (f'-{config.retention_days} days',))
+            all_posts = cursor.fetchall()
+
+            for row in all_posts:
+                existing_id, existing_title, existing_normalized, existing_words_json, existing_domain = row
+
+                seq_sim = calculate_similarity(title_normalized, existing_normalized or "")
+                if seq_sim > config.title_similarity_threshold:
+                    result.add_reason(f"TITLE_SIM ({seq_sim:.0%})", seq_sim, existing_title)
+
+                ngram_sim = ngram_similarity(title, existing_title)
+                if ngram_sim > config.ngram_similarity_threshold:
+                    result.add_reason(f"NGRAM ({ngram_sim:.0%})", ngram_sim, existing_title)
+
+                existing_words = set(safe_json_loads(existing_words_json, []))
+                if existing_words:
+                    jaccard = jaccard_similarity(title_words, existing_words)
+                    if jaccard > config.jaccard_threshold:
+                        result.add_reason(f"JACCARD ({jaccard:.0%})", jaccard, existing_title)
+
+                if domain == existing_domain:
+                    same_sim = calculate_similarity(title_normalized, existing_normalized or "")
+                    if same_sim > config.same_domain_similarity:
+                        result.add_reason(f"SAME_DOMAIN ({same_sim:.0%})", same_sim, existing_title)
+
+            return result
+
+    def check_diversity(self, topic: str, source: str = "") -> Tuple[bool, str]:
+        with self._lock:
+            cursor = self._get_conn().cursor()
+
+            if source:
+                cursor.execute(
+                    'SELECT source FROM posted_articles ORDER BY posted_date DESC LIMIT ?',
+                    (config.rotation_history_size,)
+                )
+                recent_sources = [row[0] for row in cursor.fetchall()]
+                last_few = recent_sources[:config.source_min_posts_between]
+
+                if source in last_few:
+                    pos = last_few.index(source) + 1
+                    return (
+                        False,
+                        f"SOURCE_TOO_RECENT ({source} был {pos}-м из последних "
+                        f"{config.source_min_posts_between})"
+                    )
+
+                source_count = sum(1 for s in recent_sources if s == source)
+                if source_count >= config.source_max_in_window:
+                    return (
+                        False,
+                        f"SOURCE_LIMIT ({source}: {source_count}/{config.source_max_in_window} "
+                        f"за последние {config.rotation_history_size})"
+                    )
+
+            if topic == Topic.GENERAL:
+                return True, ""
+
+            cursor.execute(
+                'SELECT topic FROM posted_articles ORDER BY posted_date DESC LIMIT ?',
+                (config.diversity_window,)
+            )
+            recent_topics = [row[0] for row in cursor.fetchall()]
+            if not recent_topics:
+                return True, ""
+
+            same_count = sum(1 for t in recent_topics if t == topic)
+            if same_count >= config.same_topic_limit:
+                return False, f"TOO_MANY: {same_count}/{config.diversity_window} = {topic}"
+
+            return True, ""
+
+    def add(self, article: Article, topic: str = Topic.GENERAL, subject: str = "other") -> bool:
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            norm_url = normalize_url(article.link)
+            domain_val = get_domain(article.link)
+            title_normalized = normalize_title(article.title)
+            title_words = list(get_title_words(article.title))
+            word_signature = get_sorted_word_signature(article.title)
+            content_hash = get_content_hash(f"{article.title} {article.summary}")
+            try:
+                cursor.execute('''
+                    INSERT INTO posted_articles
+                    (url, norm_url, domain, title, title_normalized, title_words,
+                     title_word_signature, summary, content_hash, entities, topic, subject, source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    article.link, norm_url, domain_val, article.title, title_normalized,
+                    json.dumps(title_words), word_signature, article.summary[:1000],
+                    content_hash, json.dumps([]), topic, subject, article.source
+                ))
+                conn.commit()
+                cursor.execute('SELECT id FROM posted_articles WHERE norm_url = ?', (norm_url,))
+                saved = cursor.fetchone()
+                if saved:
+                    logger.info(f"💾 Сохранено (ID={saved[0]}, topic={topic}): {article.title[:50]}...")
+                    return True
+                else:
+                    logger.error(f"❌ Не сохранено: {article.title[:50]}")
+                    return False
+            except sqlite3.IntegrityError:
+                logger.warning(f"⚠️ Уже существует: {article.title[:40]}")
+                return False
+            except Exception as e:
+                logger.error(f"❌ Ошибка сохранения: {e}")
+                return False
+
+    def log_rejected(self, article: Article, reason: str):
+        logger.info(f"🚫 [{reason}]: {article.title[:50]}")
+
+    def get_recent_posts(self, limit: int = 5) -> List[dict]:
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute('''
+                SELECT title, topic, source, posted_date, subject
+                FROM posted_articles
+                ORDER BY posted_date DESC
+                LIMIT ?
+            ''', (limit,))
+            results = []
+            for r in cursor.fetchall():
+                results.append({
+                    'title': r[0], 'topic': r[1], 'source': r[2],
+                    'date': r[3], 'subject': r[4] if len(r) > 4 else 'other'
+                })
+            return results
+
+    def get_last_topic(self) -> Optional[str]:
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute('SELECT topic FROM posted_articles ORDER BY posted_date DESC LIMIT 1')
+            row = cursor.fetchone()
+            return row[0] if row else None
+
+    def cleanup(self, days: int = 90):
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute(
+                f"DELETE FROM posted_articles WHERE posted_date < datetime('now', '-{days} days')"
+            )
+            deleted_posted = cursor.rowcount
+            cursor.execute("DELETE FROM rejected_urls")
+            deleted_rejected = cursor.rowcount
+            conn.commit()
+            logger.info(f"🧹 Очищено: {deleted_posted} posted, {deleted_rejected} rejected (вся таблица)")
+
+    def get_stats(self) -> dict:
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute('SELECT COUNT(*) FROM posted_articles')
+            total = cursor.fetchone()[0]
+            cursor.execute('SELECT COUNT(*) FROM rejected_urls')
+            rejected = cursor.fetchone()[0]
+            return {'total_posted': total, 'total_rejected': rejected}
+
+    def verify_db(self) -> bool:
+        with self._lock:
+            try:
+                cursor = self._get_conn().cursor()
+                cursor.execute('PRAGMA integrity_check')
+                return cursor.fetchone()[0] == 'ok'
+            except Exception:
+                return False
+
+    def close(self):
+        with self._lock:
+            conn = getattr(self._local, 'conn', None)
+            if conn:
+                try:
+                    conn.commit()
+                    conn.close()
+                    logger.info("🔒 БД закрыта")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка закрытия БД: {e}")
+                finally:
+                    self._local.conn = None
 
 
 # ====================== RSS LOADING ======================
@@ -855,23 +1164,21 @@ def has_repeated_sentences(text: str, max_repeats: int = 2) -> bool:
     return False
 
 
-# ====================== ГЕНЕРАЦИЯ ПОСТА (с поддержкой отчётов) ======================
-async def generate_summary(article: Article, posted: PostedManager, is_report: bool = False, recent_articles: List[dict] = None) -> Optional[str]:
+# ====================== ГЕНЕРАЦИЯ ПОСТА (с живым языком) ======================
+async def generate_summary(article: Optional[Article], posted: PostedManager, is_report: bool = False, recent_articles: List[dict] = None) -> Optional[str]:
     if is_report:
         logger.info("📊 Генерация аналитического отчёта на основе последних публикаций...")
-        # Формируем контекст из последних статей
         if not recent_articles:
             recent_articles = posted.get_recent_articles_for_report(days=7, limit=10)
         if not recent_articles:
             logger.warning("  ⚠️ Нет статей для отчёта")
             return None
 
-        # Строим список статей для отчёта
         articles_text = ""
         for i, art in enumerate(recent_articles, 1):
             articles_text += f"{i}. **{art['title']}** (источник: {art['source']}, тема: {art['topic']})\n   {art['summary'][:300]}\n\n"
 
-        prompt = f"""Ты — редактор Telegram-канала про блокировки, VPN и AI. Твоя аудитория — россияне, интересующиеся цифровыми свободами и технологиями.
+        prompt = f"""Ты — редактор Telegram-канала про блокировки, VPN и AI. Твоя аудитория — россияне, интересующиеся цифровыми свободами и технологиями. Твои посты должны быть живыми, с иронией и сарказмом, но по делу.
 
 В последние дни вышло несколько важных материалов. Напиши **аналитический отчёт** – итоговый пост, который подводит черту, анализирует тренды, выделяет плюсы и минусы происходящего.
 
@@ -887,22 +1194,22 @@ async def generate_summary(article: Article, posted: PostedManager, is_report: b
 5. **Прогноз** – куда всё это ведёт? (кратко, на основе фактов)
 6. **Вопрос к читателям** – вовлеки аудиторию в обсуждение (например: «Как вы оцениваете эти изменения?»)
 
-ТРЕБОВАНИЯ:
-✅ Длина: 1200–1500 символов.
-✅ Только факты из предоставленных статей.
-✅ Критический, но аргументированный стиль.
-✅ Никаких общих фраз и воды.
-✅ Заканчивать вопросом.
+ОФОРМЛЕНИЕ И СТИЛЬ:
+- Пиши живо, с иронией и сарказмом, используй разговорные обороты.
+- Можно использовать лёгкий мат или сленг для эмоциональности, но не перебарщивай.
+- Факты должны быть точными, выводы — аргументированными.
+- Длина: 1200–1500 символов.
+- Не используй слова «возможно», «вероятно» (только в цитатах). 
+- Ставь вопросы к читателям, чтобы обсуждение было активным.
 
 ПОСТ-ОТЧЁТ:"""
     else:
-        # Обычная генерация (существующий код)
+        # Обычный пост
         logger.info(f"📝 Генерация: {article.title[:55]}...")
         text_for_topic = f"{article.title} {article.summary}"
         topic = Topic.detect(text_for_topic)
         is_block_topic = any(kw in text_for_topic.lower() for kw in BLOCK_KEYWORDS)
 
-        # Получаем контекст последних постов по теме (для критического стиля)
         context_posts = []
         if config.critical_style:
             with posted._lock:
@@ -937,7 +1244,7 @@ async def generate_summary(article: Article, posted: PostedManager, is_report: b
 
         if config.critical_style:
             if is_block_topic:
-                prompt = f"""Ты — редактор Telegram-канала про блокировки и цифровые ограничения в РФ. Твоя задача — не просто пересказать новость, а дать критический анализ с аргументами.
+                prompt = f"""Ты — редактор Telegram-канала про блокировки и цифровые ограничения в РФ. Твоя задача — не просто пересказать новость, а дать критический анализ с аргументами. Пиши живо, с иронией, сарказмом — как будто комментируешь новость в баре с друзьями.
 
 НОВОСТЬ:
 Заголовок: {article.title}
@@ -946,26 +1253,28 @@ async def generate_summary(article: Article, posted: PostedManager, is_report: b
 
 {context_text}
 
-Напиши пост в критическом стиле:
+Напиши пост в критическом, но живом стиле:
 
 1. **Факты** – что именно произошло? (цифры, даты, имена, методы)
 2. **Анализ** – почему это важно? Есть ли противоречия с предыдущими заявлениями властей или компаний? Сравни с тем, что мы уже публиковали.
-3. **Критика** – укажи на слабые места, нелогичности, возможные последствия, которые не упоминаются в новости.
-4. **Аргументированное мнение** – выскажи обоснованную оценку (на основе фактов), но без эмоций.
+3. **Критика** – укажи на слабые места, нелогичности, возможные последствия, которые не упоминаются в новости. Выскажи своё мнение с долей сарказма.
+4. **Аргументированное мнение** – обоснуй свою оценку фактами.
 
-В конце обязательно задай вопрос читателям, чтобы вовлечь их в обсуждение.
+В конце обязательно задай вопрос читателям, чтобы вовлечь их в обсуждение (можно с юмором).
 
-ТРЕБОВАНИЯ:
-✅ Длина: 800–1000 символов.
-✅ Факты из новости обязательны.
-✅ Короткие абзацы, живые эмодзи.
-✅ Без воды и общих фраз.
+ТРЕБОВАНИЯ К СТИЛЮ:
+- Разговорный, живой язык, без канцелярита.
+- Используй иронию, сарказм, иногда лёгкий мат (по ситуации).
+- Не будь сухим роботом – пусть пост звучит как мнение живого человека.
+- Длина: 800–1000 символов.
+- Факты из новости обязательны.
+- Короткие абзацы, эмодзи приветствуются.
 
-❌ Нельзя писать: «возможно», «вероятно» (только если это цитата), общие рассуждения без фактов.
+❌ Нельзя писать: «возможно», «вероятно» (только в цитатах), общие фразы без фактов.
 
 ПОСТ:"""
             else:
-                prompt = f"""Ты — редактор телеграм-канала про AI и технологии. Твоя задача — критически анализировать новости, а не просто пересказывать.
+                prompt = f"""Ты — редактор Telegram-канала про AI и технологии. Твоя задача — критически анализировать новости, но делать это живо, с юмором и самоиронией.
 
 НОВОСТЬ:
 Заголовок: {article.title}
@@ -974,31 +1283,60 @@ async def generate_summary(article: Article, posted: PostedManager, is_report: b
 
 {context_text}
 
-Напиши пост в критическом стиле:
+Напиши пост в критическом, но живом стиле:
 
 1. **Суть события** – что произошло? (цифры, даты, компании)
 2. **Анализ** – почему это важно? Что это меняет на рынке? Есть ли противоречия с предыдущими заявлениями?
-3. **Критика** – укажи на слабые стороны, маркетинговые уловки, риски, которые не упоминаются в новости.
-4. **Мнение** – дай аргументированную оценку.
+3. **Критика** – укажи на слабые стороны, маркетинговые уловки, риски, которые не упоминаются в новости. Не стесняйся шутить над абсурдными моментами.
+4. **Мнение** – дай аргументированную оценку, но с лёгкой иронией.
 
-В конце задай вопрос читателям.
+В конце задай вопрос читателям, можно в шутливой форме.
 
-ТРЕБОВАНИЯ:
-✅ 1000–1200 символов.
-✅ Только факты и аргументы.
-✅ Энергичный стиль, без воды.
-
-❌ Запрещены: «возможно», «вероятно», общие фразы, вопросы без аргументов.
+СТИЛЬ:
+- Разговорный, живой, с юмором.
+- Можно использовать сленг, лёгкий мат для эмоций.
+- Факты точны, выводы аргументированы.
+- Длина: 1000–1200 символов.
+- Запрещены сухие канцеляризмы и общие фразы.
 
 ПОСТ:"""
         else:
-            # Старый промпт (без критики) – оставляем для обратной совместимости
+            # Не-критический стиль (оставим старые промпты, но добавим живого тона)
             if is_block_topic:
-                prompt = f"""... (старый блок-промпт) ..."""
-            else:
-                prompt = f"""... (старый AI-промпт) ..."""
+                prompt = f"""Ты — редактор Telegram-канала про блокировки и цифровые ограничения в РФ. Пиши живо, с иронией, как будто обсуждаешь с друзьями.
 
-    # ---- ОБЩАЯ ЧАСТЬ ГЕНЕРАЦИИ (для обоих режимов) ----
+НОВОСТЬ:
+Заголовок: {article.title}
+Содержание: {article.summary[:2000]}
+Источник: {article.source}
+
+Напиши пост в стиле живого комментария:
+- Что случилось? (факты)
+- Почему это бесит/радует? (твоё мнение)
+- К чему это приведёт? (краткий прогноз)
+
+СТИЛЬ: разговорный, с юмором, эмодзи. Факты точные, но подача неофициальная. Длина 500–800 символов.
+
+ПОСТ:"""
+            else:
+                prompt = f"""Ты — редактор Telegram-канала про AI и технологии. Твоя задача — рассказать о новости так, чтобы было интересно читать.
+
+НОВОСТЬ:
+Заголовок: {article.title}
+Содержание: {article.summary[:2000]}
+Источник: {article.source}
+
+Напиши пост в живом стиле:
+- Суть события (кратко)
+- Почему это круто или смешно?
+- Какие последствия?
+
+Используй разговорный язык, иронию, шутки. Не будь роботом. Длина 700–900 символов.
+
+ПОСТ:"""
+
+    # ---- Общая часть генерации (для обоих режимов) ----
+    # Список "водных" фраз – теперь мы не будем их строго запрещать, но всё равно проверим
     water_phrases = [
         "стоит отметить", "важно понимать", "интересно, что",
         "давайте разберёмся", "как мы знаем", "не секрет",
@@ -1025,18 +1363,16 @@ async def generate_summary(article: Article, posted: PostedManager, is_report: b
                 resp = await asyncio.to_thread(
                     groq_client.chat.completions.create,
                     model=model,
-                    temperature=1.0,
+                    temperature=1.2,          # повышаем для живости
                     max_tokens=2000 if is_report else 1500,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 text = resp.choices[0].message.content.strip()
 
                 if is_report:
-                    # Отчёт не проверяем на SKIP
                     pass
                 else:
-                    # Обычный пост: проверка SKIP
-                    if not is_block_topic and not config.critical_style and "SKIP" in text.upper()[:10]:
+                    if not config.critical_style and "SKIP" in text.upper()[:10]:
                         logger.info("  ⏭️ SKIP (не подходит)")
                         return None
 
@@ -1045,14 +1381,16 @@ async def generate_summary(article: Article, posted: PostedManager, is_report: b
                     logger.warning(f"  ⚠️ Короткий ({len(text)} симв., минимум {min_len}), следующая модель...")
                     break
 
-                if any(phrase in text.lower() for phrase in water_phrases):
-                    logger.warning("  ⚠️ Есть запрещённая фраза, перегенерация...")
+                # Проверка на водные фразы – теперь только если их слишком много (>=3)
+                water_count = sum(1 for phrase in water_phrases if phrase in text.lower())
+                if water_count >= 4:
+                    logger.warning(f"  ⚠️ Слишком много штампов ({water_count}), перегенерация...")
                     if attempt == config.groq_retries_per_model - 1:
-                        logger.warning("  ⏭️ Пропускаем статью из-за воды")
+                        logger.warning("  ⏭️ Пропускаем статью из-за штампов")
                         return None
                     continue
 
-                # Удаляем вопросы в конце ТОЛЬКО если не критический стиль и не отчёт
+                # Удаляем вопросы только если не критический стиль и не отчёт
                 if not config.critical_style and not is_report:
                     last_paragraph = text.strip().split('\n')[-1].strip()
                     if any(re.search(p, last_paragraph) for p in ending_question_patterns):
@@ -1087,9 +1425,12 @@ async def generate_summary(article: Article, posted: PostedManager, is_report: b
                     actual_topic = Topic.BLOCK if is_block_topic else topic
                     hashtags = Topic.HASHTAGS.get(actual_topic, Topic.HASHTAGS[Topic.GENERAL])
 
-                source_link = f'\n\n🔗 <a href="{article.link if not is_report else "https://t.me/vlessprotokol"}">Источник</a>' if not is_report else "\n\n🔗 Обзор на основе публикаций канала"
-                final = f"{text}\n\n{hashtags}{source_link}{DISCLAIMER}"
+                if is_report:
+                    source_link = "\n\n🔗 Обзор на основе публикаций канала"
+                else:
+                    source_link = f'\n\n🔗 <a href="{article.link}">Источник</a>'
 
+                final = f"{text}\n\n{hashtags}{source_link}{DISCLAIMER}"
                 logger.info(f"  ✅ [{model}]: {len(text)} симв.")
                 return final
 
@@ -1218,7 +1559,7 @@ async def main():
 
         candidates = filter_and_dedupe(raw, posted)
 
-        # ========== НОВАЯ ЛОГИКА: если нет кандидатов, пробуем сделать отчёт ==========
+        # ---- Логика отчёта, если нет кандидатов ----
         if not candidates:
             logger.info("⚠️ Кандидатов нет, проверяем возможность сделать аналитический отчёт...")
             last_report = posted.get_last_report_time()
@@ -1230,8 +1571,6 @@ async def main():
                 if recent_articles:
                     report_text = await generate_summary(None, posted, is_report=True, recent_articles=recent_articles)
                     if report_text:
-                        # Отправляем отчёт как пост (без конкретной статьи)
-                        # Создаём фиктивную статью для сохранения в БД (чтобы не дублировать)
                         dummy_article = Article(
                             title="Аналитический отчёт за неделю",
                             summary="Отчёт на основе последних публикаций",
@@ -1254,13 +1593,10 @@ async def main():
                 hours_since = (now - last_report).total_seconds() / 3600
                 logger.info(f"⏳ Отчёт был менее {config.report_interval_hours} часов назад ({hours_since:.1f} ч). Пропускаем.")
 
-            # Если отчёт не опубликован, выходим
             logger.info("😔 Нет подходящих статей и отчёт не был сгенерирован (или уже был недавно).")
             return
 
-        # Если кандидаты есть – продолжаем как обычно
-        # Дополнительный fallback: если кандидаты есть, но все они отсеются позже – уже не нужно
-
+        # ---- Если кандидаты есть ----
         candidates = rotate_candidates(candidates, posted)
 
         logger.info("🎯 Топ-10 кандидатов после ротации:")
@@ -1293,7 +1629,6 @@ async def main():
 
         if not published:
             logger.info("😔 Не удалось опубликовать ни одну статью. Попробуем отчёт, если давно не было.")
-            # Если ни одна статья не опубликовалась, и отчёта давно не было – делаем отчёт
             last_report = posted.get_last_report_time()
             now = datetime.now(timezone.utc)
             if last_report is None or (now - last_report).total_seconds() / 3600 > config.report_interval_hours:
@@ -1342,8 +1677,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
-
 
 
 

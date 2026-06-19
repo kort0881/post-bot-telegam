@@ -46,7 +46,6 @@ class Config:
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.channel_id = os.getenv("CHANNEL_ID")
         self.retention_days = 90
-        self.rejected_retention_days = 0
         self.db_file = "posted_articles.db"
 
         self.title_similarity_threshold = 0.60
@@ -57,11 +56,11 @@ class Config:
         self.subject_window_hours = 48
         self.max_posts_per_subject = 10
         self.subject_min_interval_hours = 1
-        self.same_subject_similarity_threshold = 0.60
+        self.same_subject_similarity_threshold = 0.70   # чуть выше, чтобы меньше блокировать
 
         self.alternation_enabled = True
 
-        self.min_post_length = 700
+        self.min_post_length = 600
         self.max_article_age_hours = 720
         self.min_ai_score = 1
         self.max_repeat_sentences = 2
@@ -71,7 +70,6 @@ class Config:
 
         self.rotation_history_size = 10
         self.rotation_max_per_source = 6
-        self.min_subjects_between_repeats = 10
 
         self.source_min_posts_between = 1
         self.source_max_in_window = 6
@@ -82,9 +80,6 @@ class Config:
         self.groq_base_delay = 2.0
         self.telegram_timeout = 30
         self.http_timeout = 60
-
-        self.critical_style = True
-        self.report_interval_hours = 24
 
         missing = []
         for var, name in [(self.groq_api_key, "GROQ_API_KEY"),
@@ -208,6 +203,12 @@ PROMO_PATTERNS = [
 ]
 
 REVIEW_KEYWORDS = ["review", "tested", "hands-on", "обзор", "тест", "скидка", "discount", "deal", "best", "top 10"]
+
+# Дополнительный фильтр для вакансий и прочей ерунды
+JUNK_KEYWORDS = [
+    "вакансия", "ищет менеджера", "требуется", "softline ищет", "менеджер продукта",
+    "вакансия", "резюме", "работа", "сотрудник", "нанимает", "hr", "рекрутинг"
+]
 
 # ====================== ГЕО-ФИЛЬТР ======================
 RUSSIA_KEYWORDS = ["россия", "рф", "минц", "госдума", "путин", "москва", "санкт-петербург", "совет федерации", "кремль", "правительство рф", "роскомнадзор", "ркн"]
@@ -396,7 +397,7 @@ def safe_json_loads(value: str, default=None):
         return default if default is not None else []
 
 
-# ====================== УСИЛЕННЫЙ СКОР ======================
+# ====================== СКОРЫ ======================
 def ai_relevance_score(text: str) -> int:
     text_lower = text.lower()
     score = 0
@@ -431,6 +432,12 @@ def is_promo_content(text: str) -> bool:
     return promo_count >= 2
 
 
+def is_junk_content(text: str) -> bool:
+    """Фильтрует вакансии, объявления о работе и прочий мусор."""
+    text_lower = text.lower()
+    return any(kw in text_lower for kw in JUNK_KEYWORDS)
+
+
 # ====================== is_relevant ======================
 def is_relevant(article: Article) -> bool:
     text = f"{article.title} {article.summary}".lower()
@@ -452,6 +459,10 @@ def is_relevant(article: Article) -> bool:
         logger.info(f"  📢 PROMO: {article.title[:50]}")
         return False
 
+    if is_junk_content(text):
+        logger.info(f"  🗑️ JUNK (вакансия/реклама): {article.title[:50]}")
+        return False
+
     if any(rw in text for rw in REVIEW_KEYWORDS):
         if not any(kw in text for kw in AI_KEYWORDS_STRONG):
             logger.info(f"  📝 REVIEW/DEAL (нет сильного AI): {article.title[:50]}")
@@ -466,16 +477,13 @@ def is_relevant(article: Article) -> bool:
         logger.info(f"  ✅ BLOCK (приоритет): {article.title[:55]}")
         return True
 
+    # Для AI-статей требуем упоминание России (если нет блокировки)
     if is_ai and not is_russian_related(text):
         logger.info(f"  🌍 FOREIGN AI (нет России): {article.title[:50]}")
         return False
 
     if not (is_ai or is_block):
         logger.info(f"  🚫 NEITHER AI NOR BLOCK: {article.title[:50]}")
-        return False
-
-    if is_block and any(ad in text for ad in ["купить", "скидка", "промокод", "тариф"]):
-        logger.info(f"  🛑 VPN_AD: {article.title[:50]}")
         return False
 
     logger.info(f"  ✅ PASS (ai={is_ai}, block={is_block}): {article.title[:55]}")
@@ -545,12 +553,6 @@ class PostedManager:
                     rejected_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS app_state (
-                    key TEXT PRIMARY KEY,
-                    value TEXT
-                )
-            ''')
             try:
                 cursor.execute("ALTER TABLE posted_articles ADD COLUMN subject TEXT DEFAULT 'other'")
                 conn.commit()
@@ -574,51 +576,7 @@ class PostedManager:
             conn.commit()
         logger.info("📚 База данных инициализирована")
 
-    # ---- Методы для отчётов ----
-    def get_last_report_time(self) -> Optional[datetime]:
-        with self._lock:
-            cursor = self._get_conn().cursor()
-            cursor.execute("SELECT value FROM app_state WHERE key = 'last_report_time'")
-            row = cursor.fetchone()
-            if row:
-                try:
-                    return datetime.fromisoformat(row[0])
-                except:
-                    return None
-            return None
-
-    def update_last_report_time(self, dt: datetime):
-        with self._lock:
-            cursor = self._get_conn().cursor()
-            cursor.execute(
-                "INSERT OR REPLACE INTO app_state (key, value) VALUES ('last_report_time', ?)",
-                (dt.isoformat(),)
-            )
-            self._get_conn().commit()
-
-    def get_recent_articles_for_report(self, days: int = 7, limit: int = 10) -> List[dict]:
-        with self._lock:
-            cursor = self._get_conn().cursor()
-            cursor.execute('''
-                SELECT title, summary, topic, source, posted_date
-                FROM posted_articles
-                WHERE posted_date > datetime('now', ?)
-                ORDER BY posted_date DESC
-                LIMIT ?
-            ''', (f'-{days} days', limit))
-            rows = cursor.fetchall()
-            results = []
-            for row in rows:
-                results.append({
-                    'title': row[0],
-                    'summary': row[1][:500] if row[1] else "",
-                    'topic': row[2],
-                    'source': row[3],
-                    'date': row[4]
-                })
-            return results
-
-    # ---- Остальные методы ----
+    # ---- Остальные методы (без отчётов) ----
     def _add_rejected(self, norm_url: str, title: str, reason: str):
         pass
 
@@ -1091,9 +1049,9 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         block_candidates.sort(key=lambda a: block_relevance_score(f"{a.title} {a.summary}"), reverse=True)
         candidates = block_candidates
     else:
-        logger.info(f"🌐 Блок-новостей нет, берём {len(ai_candidates)} AI-статей (с фильтром России)")
+        logger.info(f"🌐 Блок-новостей нет, берём AI-статьи с фильтром России")
         ai_candidates = [a for a in ai_candidates if is_russian_related(f"{a.title} {a.summary}")]
-        ai_candidates.sort(key=lambda a: ai_relevance_score(f"{a.title} {a.summary}") + block_relevance_score(f"{a.title} {a.summary}"), reverse=True)
+        ai_candidates.sort(key=lambda a: ai_relevance_score(f"{a.title} {a.summary}"), reverse=True)
         candidates = ai_candidates[:5]
 
     candidates = interleave_by_source(candidates)
@@ -1163,157 +1121,49 @@ def has_repeated_sentences(text: str, max_repeats: int = 2) -> bool:
     return False
 
 
-# ====================== ГЕНЕРАЦИЯ ПОСТА (умеренная критика, без издевательств) ======================
-async def generate_summary(article: Optional[Article], posted: PostedManager, is_report: bool = False, recent_articles: List[dict] = None) -> Optional[str]:
-    if is_report:
-        logger.info("📊 Генерация аналитического отчёта на основе последних публикаций...")
-        if not recent_articles:
-            recent_articles = posted.get_recent_articles_for_report(days=7, limit=10)
-        if not recent_articles:
-            logger.warning("  ⚠️ Нет статей для отчёта")
-            return None
+# ====================== ГЕНЕРАЦИЯ ПОСТА (простой пересказ, без критики и вопросов) ======================
+async def generate_summary(article: Article) -> Optional[str]:
+    logger.info(f"📝 Генерация: {article.title[:55]}...")
+    text_for_topic = f"{article.title} {article.summary}"
+    topic = Topic.detect(text_for_topic)
+    is_block_topic = any(kw in text_for_topic.lower() for kw in BLOCK_KEYWORDS)
 
-        articles_text = ""
-        for i, art in enumerate(recent_articles, 1):
-            articles_text += f"{i}. **{art['title']}** (источник: {art['source']}, тема: {art['topic']})\n   {art['summary'][:300]}\n\n"
+    if is_block_topic:
+        prompt = f"""Ты — редактор Telegram-канала про блокировки и цифровые ограничения в РФ. Напиши краткий пост по новости.
 
-        prompt = f"""Ты — аналитик Telegram-канала, который освещает темы блокировок, VPN и AI для российской аудитории. Твой стиль — спокойный, взвешенный, но с заметной долей здоровой иронии. Критика должна быть аргументированной и конструктивной, направленной на недостатки технологий, решений или логики, а не на личности или власть в целом.
+НОВОСТЬ:
+Заголовок: {article.title}
+Содержание: {article.summary[:2000]}
+Источник: {article.source}
 
-На основе последних публикаций (за 7 дней) подготовь аналитический отчёт.
+Напиши пост в нейтральном, информативном тоне:
+- Что произошло? (факты: кто, что, когда, как)
+- Какие последствия для пользователей или индустрии?
+- Не добавляй своего мнения, критики или оценок.
+- Не используй слова «власть», «правительство», «путин» и т.п. – просто опиши событие технически.
+- Не задавай вопросов читателям.
+- Пиши кратко, по делу, живым языком.
 
-Вот список статей:
-{articles_text}
-
-Структура отчёта:
-1. **Краткое введение** — о чём был этот период.
-2. **Основные тренды** — что происходило чаще всего? (ужесточение блокировок, появление новых обходных путей, развитие AI и т.п.)
-3. **Аргументированные плюсы** — что можно считать позитивом? (технические прорывы, решения судов, новые инструменты)
-4. **Критические замечания** — что вызывает сомнения или разочарование? Укажи на нелогичные решения, маркетинговые уловки, несоответствие заявленного реальности (с примерами, без переходов на личности).
-5. **Прогноз** — куда движется ситуация? (основано на фактах)
-6. **Вопрос для обсуждения** — корректный, вовлекающий.
-
-ТРЕБОВАНИЯ К ТОНУ:
-- Умеренная ирония допустима, но без сарказма и издёвок.
-- Никакого мата, грубостей, личных оскорблений.
-- Основной упор — на логику, факты и аргументы.
-- Длина: 1200–1500 символов.
-- Избегай общих фраз, канцеляритов.
-
-ОТЧЁТ:"""
+Длина: 600–800 символов.
+ПОСТ:"""
     else:
-        # Обычный пост
-        logger.info(f"📝 Генерация: {article.title[:55]}...")
-        text_for_topic = f"{article.title} {article.summary}"
-        topic = Topic.detect(text_for_topic)
-        is_block_topic = any(kw in text_for_topic.lower() for kw in BLOCK_KEYWORDS)
-
-        context_posts = []
-        if config.critical_style:
-            with posted._lock:
-                cursor = posted._get_conn().cursor()
-                topic_filter = "block" if is_block_topic else "general"
-                cursor.execute('''
-                    SELECT title, summary, topic FROM posted_articles
-                    WHERE topic = ? OR topic = ?
-                    ORDER BY posted_date DESC LIMIT 5
-                ''', (topic_filter, topic))
-                rows = cursor.fetchall()
-                for row in rows:
-                    context_posts.append({
-                        'title': row[0],
-                        'summary': row[1][:300] if row[1] else "",
-                        'topic': row[2]
-                    })
-
-        context_text = ""
-        if context_posts:
-            context_text = "\n\n--- ПРЕДЫДУЩИЕ ПУБЛИКАЦИИ ПО ТЕМЕ (для сравнения) ---\n"
-            for i, p in enumerate(context_posts, 1):
-                context_text += f"{i}. {p['title']}\n   Кратко: {p['summary'][:200]}\n"
-
-        if config.critical_style:
-            if is_block_topic:
-                prompt = f"""Ты — аналитик Telegram-канала по теме блокировок и цифровых ограничений в РФ. Твой стиль — спокойный, фактологичный, с элементами здоровой иронии, но без грубости. Критика должна касаться конкретных решений, технологий, заявлений — и быть обоснованной.
+        prompt = f"""Ты — редактор Telegram-канала про AI и технологии. Напиши краткий пост по новости.
 
 НОВОСТЬ:
 Заголовок: {article.title}
 Содержание: {article.summary[:2000]}
 Источник: {article.source}
 
-{context_text}
-
-Напиши пост, который:
-1. Излагает факты (кто, что, когда, как).
-2. Анализирует логику произошедшего: есть ли противоречия, нестыковки, слабые места?
-3. Даёт умеренную критику (если уместно) — например, указывает на маркетинговые преувеличения, технические недостатки, нелогичные ограничения.
-4. Делает вывод, основанный на фактах.
-5. Заканчивается корректным вопросом к читателям (для вовлечения).
-
-ТРЕБОВАНИЯ К ТОНУ:
-- Допустима лёгкая ирония, но не сарказм.
-- Нельзя использовать мат, грубость, личные оскорбления.
-- Основной акцент — на аргументацию и факты.
-- Длина: 800–1000 символов.
-- Короткие абзацы, допустимы смайлы (умеренно).
-
-❌ Не использовать фразы «возможно», «вероятно» (только если цитата).
-
-ПОСТ:"""
-            else:
-                prompt = f"""Ты — аналитик Telegram-канала по теме AI и технологий. Твой стиль — спокойный, фактологичный, с элементами здоровой иронии, но без грубости. Критика должна касаться технологических решений, маркетинга, логики компаний.
-
-НОВОСТЬ:
-Заголовок: {article.title}
-Содержание: {article.summary[:2000]}
-Источник: {article.source}
-
-{context_text}
-
-Напиши пост, который:
-1. Кратко описывает суть события (кто, что, когда).
-2. Анализирует, почему это важно: что меняется на рынке, для пользователей, для разработчиков.
-3. Даёт аргументированную критику, если есть повод (например, маркетинговые уловки, преувеличения, технические недостатки).
-4. Формулирует взвешенный вывод (на основе фактов).
-5. Завершается корректным вопросом к читателям.
-
-ТРЕБОВАНИЯ К ТОНУ:
-- Умеренная ирония допустима, но не переходить в насмешки.
-- Без мата и оскорблений.
-- Основной упор — на аргументы и логику.
-- Длина: 1000–1200 символов.
-- Избегать канцеляризма.
-
-ПОСТ:"""
-        else:
-            # Не-критический стиль (нейтральный)
-            if is_block_topic:
-                prompt = f"""Ты — редактор Telegram-канала по теме блокировок и цифровых ограничений в РФ. Пиши в спокойном, информативном тоне, с лёгкой иронией, но без сарказма.
-
-НОВОСТЬ:
-Заголовок: {article.title}
-Содержание: {article.summary[:2000]}
-Источник: {article.source}
-
-Опиши факты, кратко проанализируй последствия, добавь аргументированное мнение (без грубости). В конце — вопрос для обсуждения.
-
-Длина: 500–800 символов. Избегай общих фраз.
-
-ПОСТ:"""
-            else:
-                prompt = f"""Ты — редактор Telegram-канала по теме AI и технологий. Пиши в живом, но уважительном тоне, с фактами и лёгкой иронией.
-
-НОВОСТЬ:
-Заголовок: {article.title}
-Содержание: {article.summary[:2000]}
-Источник: {article.source}
-
-Кратко о сути, о последствиях, добавь своё аргументированное мнение (без агрессии). В конце — вопрос к читателям.
+Напиши пост в нейтральном, информативном тоне:
+- Что произошло? (суть события)
+- Почему это важно? (для кого и зачем)
+- Без оценок, критики и лишних эмоций.
+- Без вопросов к читателям.
+- Пиши кратко, по делу, живым языком.
 
 Длина: 700–900 символов.
-
 ПОСТ:"""
 
-    # ---- Общая часть генерации ----
     water_phrases = [
         "стоит отметить", "важно понимать", "интересно, что",
         "давайте разберёмся", "как мы знаем", "не секрет",
@@ -1325,12 +1175,6 @@ async def generate_summary(article: Optional[Article], posted: PostedManager, is
         "отражает экспертизу", "укрепит позиции", "пользователи могут рассчитывать",
     ]
 
-    ending_question_patterns = [
-        r'[Чч]то думаете', r'[Кк]ак вам', r'[Кк]аков ваш', r'[Вв]аше мнение',
-        r'[Пп]оделитесь', r'[Жж]дём ваших', r'[Нн]апишите в комментар',
-        r'[Аа] вы', r'\?$', r'\?\s*$',
-    ]
-
     for model in GROQ_MODELS:
         for attempt in range(config.groq_retries_per_model):
             try:
@@ -1340,43 +1184,28 @@ async def generate_summary(article: Optional[Article], posted: PostedManager, is
                 resp = await asyncio.to_thread(
                     groq_client.chat.completions.create,
                     model=model,
-                    temperature=1.0,
-                    max_tokens=2000 if is_report else 1500,
+                    temperature=0.7,
+                    max_tokens=1200,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 text = resp.choices[0].message.content.strip()
 
-                if is_report:
-                    pass
-                else:
-                    if not config.critical_style and "SKIP" in text.upper()[:10]:
-                        logger.info("  ⏭️ SKIP (не подходит)")
-                        return None
+                if not is_block_topic and "SKIP" in text.upper()[:10]:
+                    logger.info("  ⏭️ SKIP (не подходит)")
+                    return None
 
-                min_len = 600 if is_report else (500 if is_block_topic else config.min_post_length)
-                if len(text) < min_len:
-                    logger.warning(f"  ⚠️ Короткий ({len(text)} симв., минимум {min_len}), следующая модель...")
+                if len(text) < config.min_post_length:
+                    logger.warning(f"  ⚠️ Короткий ({len(text)} симв., минимум {config.min_post_length}), следующая модель...")
                     break
 
-                # Проверка на штампы – если их >= 4, перегенерируем
+                # Проверка на водные фразы (если больше 3 – перегенерируем)
                 water_count = sum(1 for phrase in water_phrases if phrase in text.lower())
-                if water_count >= 4:
-                    logger.warning(f"  ⚠️ Слишком много штампов ({water_count}), перегенерация...")
+                if water_count >= 3:
+                    logger.warning(f"  ⚠️ Штампы ({water_count}), перегенерация...")
                     if attempt == config.groq_retries_per_model - 1:
-                        logger.warning("  ⏭️ Пропускаем статью из-за штампов")
+                        logger.warning("  ⏭️ Пропускаем из-за штампов")
                         return None
                     continue
-
-                # Удаляем вопросы только если не критический стиль и не отчёт
-                if not config.critical_style and not is_report:
-                    last_paragraph = text.strip().split('\n')[-1].strip()
-                    if any(re.search(p, last_paragraph) for p in ending_question_patterns):
-                        logger.warning("  ⚠️ Вопрос в конце — удаляем последний абзац")
-                        paragraphs = [p.strip() for p in text.strip().split('\n') if p.strip()]
-                        if len(paragraphs) > 1:
-                            text = '\n\n'.join(paragraphs[:-1])
-                        else:
-                            text = re.sub(r'[\.\s]*[А-Яа-яA-Za-z\s,]+\?[\s]*$', '.', text).strip()
 
                 if has_repeated_sentences(text, config.max_repeat_sentences):
                     logger.warning("  ⚠️ Повторяющиеся предложения, следующая модель...")
@@ -1396,17 +1225,11 @@ async def generate_summary(article: Optional[Article], posted: PostedManager, is
                 text = re.sub(r'\bИсточник\s*:\s*', '', text, flags=re.IGNORECASE)
                 text = re.sub(r'\bНОВОСТЬ\s*:\s*', '', text, flags=re.IGNORECASE)
 
-                if is_report:
-                    hashtags = "#Аналитика #Блокировки #VPN #Итоги"
-                else:
-                    actual_topic = Topic.BLOCK if is_block_topic else topic
-                    hashtags = Topic.HASHTAGS.get(actual_topic, Topic.HASHTAGS[Topic.GENERAL])
+                # Убираем вопросы в конце (если вдруг появятся)
+                text = re.sub(r'\?$', '.', text.strip())
 
-                if is_report:
-                    source_link = "\n\n🔗 Обзор на основе публикаций канала"
-                else:
-                    source_link = f'\n\n🔗 <a href="{article.link}">Источник</a>'
-
+                hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
+                source_link = f'\n\n🔗 <a href="{article.link}">Источник</a>'
                 final = f"{text}\n\n{hashtags}{source_link}{DISCLAIMER}"
                 logger.info(f"  ✅ [{model}]: {len(text)} симв.")
                 return final
@@ -1485,7 +1308,7 @@ async def main():
         f.write(str(os.getpid()))
 
     logger.info("=" * 60)
-    logger.info("🚀 БЛОКИРОВКИ + AI (с приоритетом российских блокировок)")
+    logger.info("🚀 БЛОКИРОВКИ + AI (простой пересказ новостей)")
     logger.info("=" * 60)
 
     posted = None
@@ -1536,44 +1359,11 @@ async def main():
 
         candidates = filter_and_dedupe(raw, posted)
 
-        # ---- Логика отчёта, если нет кандидатов ----
+        # ---- УБРАНА ВСЯ ЛОГИКА С ОТЧЁТАМИ ----
         if not candidates:
-            logger.info("⚠️ Кандидатов нет, проверяем возможность сделать аналитический отчёт...")
-            last_report = posted.get_last_report_time()
-            now = datetime.now(timezone.utc)
-
-            if last_report is None or (now - last_report).total_seconds() / 3600 > config.report_interval_hours:
-                logger.info("📊 Прошло достаточно времени, генерируем аналитический отчёт.")
-                recent_articles = posted.get_recent_articles_for_report(days=7, limit=10)
-                if recent_articles:
-                    report_text = await generate_summary(None, posted, is_report=True, recent_articles=recent_articles)
-                    if report_text:
-                        dummy_article = Article(
-                            title="Аналитический отчёт за неделю",
-                            summary="Отчёт на основе последних публикаций",
-                            link="https://t.me/vlessprotokol",
-                            source="Аналитика",
-                            published=now
-                        )
-                        success = await post_article(dummy_article, report_text, posted)
-                        if success:
-                            posted.update_last_report_time(now)
-                            logger.info("✅ Отчёт успешно опубликован")
-                            return
-                        else:
-                            logger.warning("⚠️ Не удалось опубликовать отчёт")
-                    else:
-                        logger.warning("⚠️ Не удалось сгенерировать отчёт")
-                else:
-                    logger.info("📭 Нет статей для отчёта (база пуста). Пропускаем.")
-            else:
-                hours_since = (now - last_report).total_seconds() / 3600
-                logger.info(f"⏳ Отчёт был менее {config.report_interval_hours} часов назад ({hours_since:.1f} ч). Пропускаем.")
-
-            logger.info("😔 Нет подходящих статей и отчёт не был сгенерирован (или уже был недавно).")
+            logger.info("📭 Нет подходящих новостей. Завершаем работу.")
             return
 
-        # ---- Если кандидаты есть ----
         candidates = rotate_candidates(candidates, posted)
 
         logger.info("🎯 Топ-10 кандидатов после ротации:")
@@ -1592,7 +1382,7 @@ async def main():
                 posted.log_rejected(article, f"FINAL_DUP: {'; '.join(dup_result.reasons[:2])}")
                 continue
 
-            summary = await generate_summary(article, posted, is_report=False)
+            summary = await generate_summary(article)
             if not summary:
                 posted.log_rejected(article, "GENERATION_FAILED")
                 continue
@@ -1605,28 +1395,7 @@ async def main():
             await asyncio.sleep(2)
 
         if not published:
-            logger.info("😔 Не удалось опубликовать ни одну статью. Попробуем отчёт, если давно не было.")
-            last_report = posted.get_last_report_time()
-            now = datetime.now(timezone.utc)
-            if last_report is None or (now - last_report).total_seconds() / 3600 > config.report_interval_hours:
-                recent_articles = posted.get_recent_articles_for_report(days=7, limit=10)
-                if recent_articles:
-                    report_text = await generate_summary(None, posted, is_report=True, recent_articles=recent_articles)
-                    if report_text:
-                        dummy_article = Article(
-                            title="Аналитический отчёт за неделю",
-                            summary="Отчёт на основе последних публикаций",
-                            link="https://t.me/vlessprotokol",
-                            source="Аналитика",
-                            published=now
-                        )
-                        if await post_article(dummy_article, report_text, posted):
-                            posted.update_last_report_time(now)
-                            logger.info("✅ Отчёт успешно опубликован (после неудачной публикации статей)")
-                        else:
-                            logger.warning("⚠️ Не удалось опубликовать отчёт")
-                    else:
-                        logger.warning("⚠️ Не удалось сгенерировать отчёт")
+            logger.info("😔 Не удалось опубликовать ни одну статью.")
 
     except asyncio.CancelledError:
         logger.info("🛑 Операция отменена")
@@ -1654,7 +1423,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

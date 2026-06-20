@@ -56,7 +56,7 @@ class Config:
         self.subject_window_hours = 48
         self.max_posts_per_subject = 10
         self.subject_min_interval_hours = 1
-        self.same_subject_similarity_threshold = 0.70   # чуть выше, чтобы меньше блокировать
+        self.same_subject_similarity_threshold = 0.70
 
         self.alternation_enabled = True
 
@@ -204,13 +204,13 @@ PROMO_PATTERNS = [
 
 REVIEW_KEYWORDS = ["review", "tested", "hands-on", "обзор", "тест", "скидка", "discount", "deal", "best", "top 10"]
 
-# Дополнительный фильтр для вакансий и прочей ерунды
+# Фильтр мусора (вакансии, работа)
 JUNK_KEYWORDS = [
     "вакансия", "ищет менеджера", "требуется", "softline ищет", "менеджер продукта",
     "вакансия", "резюме", "работа", "сотрудник", "нанимает", "hr", "рекрутинг"
 ]
 
-# ====================== ГЕО-ФИЛЬТР ======================
+# ====================== ГЕО-ФИЛЬТР (теперь только для блокировок, для AI не используется) ======================
 RUSSIA_KEYWORDS = ["россия", "рф", "минц", "госдума", "путин", "москва", "санкт-петербург", "совет федерации", "кремль", "правительство рф", "роскомнадзор", "ркн"]
 
 
@@ -433,7 +433,6 @@ def is_promo_content(text: str) -> bool:
 
 
 def is_junk_content(text: str) -> bool:
-    """Фильтрует вакансии, объявления о работе и прочий мусор."""
     text_lower = text.lower()
     return any(kw in text_lower for kw in JUNK_KEYWORDS)
 
@@ -473,21 +472,19 @@ def is_relevant(article: Article) -> bool:
     is_ai = has_strong_ai or (has_weak_ai and config.min_ai_score <= 1)
     is_block = any(kw in text for kw in BLOCK_KEYWORDS)
 
+    # Блок-новости всегда пропускаем
     if is_block:
         logger.info(f"  ✅ BLOCK (приоритет): {article.title[:55]}")
         return True
 
-    # Для AI-статей требуем упоминание России (если нет блокировки)
-    if is_ai and not is_russian_related(text):
-        logger.info(f"  🌍 FOREIGN AI (нет России): {article.title[:50]}")
-        return False
+    # Для AI-новостей: убираем географический фильтр – публикуем любые AI-новости
+    if is_ai:
+        logger.info(f"  ✅ AI (без гео-фильтра): {article.title[:55]}")
+        return True
 
-    if not (is_ai or is_block):
-        logger.info(f"  🚫 NEITHER AI NOR BLOCK: {article.title[:50]}")
-        return False
-
-    logger.info(f"  ✅ PASS (ai={is_ai}, block={is_block}): {article.title[:55]}")
-    return True
+    # Если не AI и не блок – отсекаем
+    logger.info(f"  🚫 NEITHER AI NOR BLOCK: {article.title[:50]}")
+    return False
 
 
 @dataclass
@@ -1049,8 +1046,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         block_candidates.sort(key=lambda a: block_relevance_score(f"{a.title} {a.summary}"), reverse=True)
         candidates = block_candidates
     else:
-        logger.info(f"🌐 Блок-новостей нет, берём AI-статьи с фильтром России")
-        ai_candidates = [a for a in ai_candidates if is_russian_related(f"{a.title} {a.summary}")]
+        logger.info(f"🌐 Блок-новостей нет, берём AI-статьи (без гео-фильтра)")
         ai_candidates.sort(key=lambda a: ai_relevance_score(f"{a.title} {a.summary}"), reverse=True)
         candidates = ai_candidates[:5]
 
@@ -1121,7 +1117,7 @@ def has_repeated_sentences(text: str, max_repeats: int = 2) -> bool:
     return False
 
 
-# ====================== ГЕНЕРАЦИЯ ПОСТА (простой пересказ, без критики и вопросов) ======================
+# ====================== ГЕНЕРАЦИЯ ПОСТА (простой пересказ) ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     text_for_topic = f"{article.title} {article.summary}"
@@ -1198,7 +1194,6 @@ async def generate_summary(article: Article) -> Optional[str]:
                     logger.warning(f"  ⚠️ Короткий ({len(text)} симв., минимум {config.min_post_length}), следующая модель...")
                     break
 
-                # Проверка на водные фразы (если больше 3 – перегенерируем)
                 water_count = sum(1 for phrase in water_phrases if phrase in text.lower())
                 if water_count >= 3:
                     logger.warning(f"  ⚠️ Штампы ({water_count}), перегенерация...")
@@ -1225,7 +1220,6 @@ async def generate_summary(article: Article) -> Optional[str]:
                 text = re.sub(r'\bИсточник\s*:\s*', '', text, flags=re.IGNORECASE)
                 text = re.sub(r'\bНОВОСТЬ\s*:\s*', '', text, flags=re.IGNORECASE)
 
-                # Убираем вопросы в конце (если вдруг появятся)
                 text = re.sub(r'\?$', '.', text.strip())
 
                 hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
@@ -1359,7 +1353,6 @@ async def main():
 
         candidates = filter_and_dedupe(raw, posted)
 
-        # ---- УБРАНА ВСЯ ЛОГИКА С ОТЧЁТАМИ ----
         if not candidates:
             logger.info("📭 Нет подходящих новостей. Завершаем работу.")
             return
@@ -1423,7 +1416,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

@@ -27,7 +27,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from groq import Groq
 
-# ====================== Р›РћР“Р ======================
+# ====================== ЛОГИ ======================
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(levelname)s | %(message)s',
@@ -60,7 +60,7 @@ class Config:
 
         self.alternation_enabled = True
 
-        self.min_post_length = 700  # РЈРІРµР»РёС‡РµРЅРѕ СЃ 600
+        self.min_post_length = 700  # Увеличено с 600
         self.max_article_age_hours = 720
         self.min_ai_score = 1
         self.max_repeat_sentences = 2
@@ -88,7 +88,7 @@ class Config:
             if not var:
                 missing.append(name)
         if missing:
-            raise SystemExit(f"вќЊ РћС‚СЃСѓС‚СЃС‚РІСѓСЋС‚: {', '.join(missing)}")
+            raise SystemExit(f"❌ Отсутствуют: {', '.join(missing)}")
 
 
 config = Config()
@@ -106,15 +106,15 @@ def init_clients():
             token=config.telegram_token,
             default=DefaultBotProperties(parse_mode=ParseMode.HTML)
         )
-        logger.info("вњ… Telegram Bot РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅ")
+        logger.info("✅ Telegram Bot инициализирован")
     except Exception as e:
-        logger.error(f"вќЊ РћС€РёР±РєР° РёРЅРёС†РёР°Р»РёР·Р°С†РёРё Telegram Bot: {e}")
+        logger.error(f"❌ Ошибка инициализации Telegram Bot: {e}")
         raise
     try:
         groq_client = Groq(api_key=config.groq_api_key)
-        logger.info("вњ… Groq client РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅ")
+        logger.info("✅ Groq client инициализирован")
     except Exception as e:
-        logger.error(f"вќЊ РћС€РёР±РєР° РёРЅРёС†РёР°Р»РёР·Р°С†РёРё Groq: {e}")
+        logger.error(f"❌ Ошибка инициализации Groq: {e}")
         raise
 
 
@@ -125,10 +125,10 @@ GROQ_MODELS = [
 
 # ====================== RSS FEEDS ======================
 RSS_FEEDS = [
-    ("https://roskomsvoboda.org/feed/", "Р РѕСЃРєРѕРјСЃРІРѕР±РѕРґР°"),
-    ("https://rkn.gov.ru/rss/news.xml", "Р РљРќ"),
+    ("https://roskomsvoboda.org/feed/", "Роскомсвобода"),
+    ("https://rkn.gov.ru/rss/news.xml", "РКН"),
     ("https://www.comnews.ru/rss/news", "ComNews"),
-    ("https://news.google.com/rss/search?q=Р±Р»РѕРєРёСЂРѕРІРєР°+Р РљРќ+VPN+СЂРѕСЃСЃРёСЏ&hl=ru&gl=RU&ceid=RU:ru", "Google News (Р‘Р»РѕРєРёСЂРѕРІРєРё)"),
+    ("https://news.google.com/rss/search?q=блокировка+РКН+VPN+россия&hl=ru&gl=RU&ceid=RU:ru", "Google News (Блокировки)"),
     ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch AI"),
     ("https://venturebeat.com/category/ai/feed/", "VentureBeat AI"),
     ("https://arstechnica.com/tag/artificial-intelligence/feed/", "Ars Technica AI"),
@@ -147,7 +147,7 @@ RSS_FEEDS = [
      "&types%5B%5D=post&types%5B%5D=news", "Habr AI"),
 ]
 
-# ---------- РљР›Р®Р§Р•Р’Р«Р• РЎР›РћР’Рђ ----------
+# ---------- КЛЮЧЕВЫЕ СЛОВА ----------
 AI_KEYWORDS_STRONG = [
     "artificial intelligence", "machine learning", "deep learning",
     "neural network", "llm", "large language model",
@@ -159,8 +159,8 @@ AI_KEYWORDS_STRONG = [
     "generative ai", "gen ai",
     "computer vision", "natural language processing",
     "reinforcement learning", "ai safety", "agi",
-    "РЅРµР№СЂРѕСЃРµС‚СЊ", "РЅРµР№СЂРѕСЃРµС‚Рё", "РёСЃРєСѓСЃСЃС‚РІРµРЅРЅС‹Р№ РёРЅС‚РµР»Р»РµРєС‚",
-    "РјР°С€РёРЅРЅРѕРµ РѕР±СѓС‡РµРЅРёРµ", "РіРµРЅРµСЂР°С‚РёРІРЅС‹Р№ РёРё",
+    "нейросеть", "нейросети", "искусственный интеллект",
+    "машинное обучение", "генеративный ии",
 ]
 
 AI_KEYWORDS_WEAK = [
@@ -168,22 +168,22 @@ AI_KEYWORDS_WEAK = [
     "multimodal", "reasoning", "inference", "embedding",
     "robotics", "humanoid", "automation",
     "nlp", "ai model", "ai training",
-    "Р±РѕС‚", "Р±РѕС‚С‹", "Р°РІС‚РѕРјР°С‚РёР·Р°С†РёСЏ",
-    "РЅРµР№СЂРѕ", "РёРё",
+    "бот", "боты", "автоматизация",
+    "нейро", "ии",
 ]
 
 BLOCK_KEYWORDS = [
-    "Р±Р»РѕРєРёСЂРѕРІРєР°", "Р·Р°Р±Р»РѕРєРёСЂРѕРІР°РЅ", "СЂРµРµСЃС‚СЂ СЂРєРЅ", "roskomnadzor", "rkn",
-    "РѕР±С…РѕРґ Р±Р»РѕРєРёСЂРѕРІРѕРє", "dpi", "Р·Р°РјРµРґР»РµРЅРёРµ С‚СЂР°С„РёРєР°", "sniffing",
+    "блокировка", "заблокирован", "реестр ркн", "roskomnadzor", "rkn",
+    "обход блокировок", "dpi", "замедление трафика", "sniffing",
     "vless", "v2ray", "xray", "wireguard", "openvpn", "amnezia",
-    "Р±РµР»С‹Р№ СЃРїРёСЃРѕРє", "whitelist", "РїСЂРѕРєСЃРё", "С‚СѓРЅРЅРµР»РёСЂРѕРІР°РЅРёРµ",
-    "utls", "fragment", "Р°РЅС‚РёР·Р°РїСЂРµС‚", "antizapret",
-    "Р·Р°РјРµРґР»РµРЅРёРµ youtube", "Р·Р°РјРµРґР»РµРЅРёРµ СЋС‚СѓР±",
+    "белый список", "whitelist", "прокси", "туннелирование",
+    "utls", "fragment", "антизапрет", "antizapret",
+    "замедление youtube", "замедление ютуб",
 ]
 
 GAMES_EXCLUDE = [
     "ps5", "xbox", "nintendo", "game review", "baldur's gate", "roblox", "esports",
-    "twitch streamer", "fortnite", "РёРіСЂР°", "РёРіСЂРѕРІР°СЏ", "РіРµР№РјРёРЅРі", "РєРёР±РµСЂСЃРїРѕСЂС‚"
+    "twitch streamer", "fortnite", "игра", "игровая", "гейминг", "киберспорт"
 ]
 
 BUSINESS_EXCLUDE = [
@@ -191,27 +191,27 @@ BUSINESS_EXCLUDE = [
     "promoted to", "departing", "leaves company", "board meeting", "shareholder",
     "quarterly earnings", "earnings call", "revenue report", "stock price", "ipo",
     "merger", "acquisition", "lawsuit filed", "sued by", "legal battle",
-    "СѓС…РѕРґРёС‚", "СѓРІРѕР»РµРЅ", "СѓРІРѕР»СЊРЅРµРЅРёРµ", "СЃРѕРєСЂР°С‰РµРЅРёРµ", "РЅР°Р·РЅР°С‡РµРЅ", "РїРѕРєРёРґР°РµС‚",
-    "СЃРѕРІРµС‚ РґРёСЂРµРєС‚РѕСЂРѕРІ", "Р°РєС†РёРѕРЅРµСЂС‹", "РєРІР°СЂС‚Р°Р»СЊРЅС‹Р№ РѕС‚С‡С‘С‚", "РІС‹СЂСѓС‡РєР°", "РєР°РїРёС‚Р°Р»РёР·Р°С†РёСЏ",
-    "СЃР»РёСЏРЅРёРµ", "РїРѕРіР»РѕС‰РµРЅРёРµ", "СЃСѓРґРµР±РЅС‹Р№ РёСЃРє"
+    "уходит", "уволен", "увольнение", "сокращение", "назначен", "покидает",
+    "совет директоров", "акционеры", "квартальный отчёт", "выручка", "капитализация",
+    "слияние", "поглощение", "судебный иск"
 ]
 
 PROMO_PATTERNS = [
-    "newsletter", "СЂР°СЃСЃС‹Р»РєР°", "РїРѕРґРїРёС€РёС‚РµСЃСЊ", "subscribe", "sign up",
-    "free trial", "СЃРєРёРґРєР° РЅР° РїРѕРґРїРёСЃРєСѓ", "РІРµР±РёРЅР°СЂ", "webinar", "buy now", "special offer",
-    "РєСѓРїРёС‚СЊ vpn", "vpn СЃРµСЂРІРёСЃ", "С‚Р°СЂРёС„", "РїСЂРѕРјРѕРєРѕРґ"
+    "newsletter", "рассылка", "подпишитесь", "subscribe", "sign up",
+    "free trial", "скидка на подписку", "вебинар", "webinar", "buy now", "special offer",
+    "купить vpn", "vpn сервис", "тариф", "промокод"
 ]
 
-REVIEW_KEYWORDS = ["review", "tested", "hands-on", "РѕР±Р·РѕСЂ", "С‚РµСЃС‚", "СЃРєРёРґРєР°", "discount", "deal", "best", "top 10"]
+REVIEW_KEYWORDS = ["review", "tested", "hands-on", "обзор", "тест", "скидка", "discount", "deal", "best", "top 10"]
 
-# Р¤РёР»СЊС‚СЂ РјСѓСЃРѕСЂР° (РІР°РєР°РЅСЃРёРё, СЂР°Р±РѕС‚Р°)
+# Фильтр мусора (вакансии, работа)
 JUNK_KEYWORDS = [
-    "РІР°РєР°РЅСЃРёСЏ", "РёС‰РµС‚ РјРµРЅРµРґР¶РµСЂР°", "С‚СЂРµР±СѓРµС‚СЃСЏ", "softline РёС‰РµС‚", "РјРµРЅРµРґР¶РµСЂ РїСЂРѕРґСѓРєС‚Р°",
-    "РІР°РєР°РЅСЃРёСЏ", "СЂРµР·СЋРјРµ", "СЂР°Р±РѕС‚Р°", "СЃРѕС‚СЂСѓРґРЅРёРє", "РЅР°РЅРёРјР°РµС‚", "hr", "СЂРµРєСЂСѓС‚РёРЅРі"
+    "вакансия", "ищет менеджера", "требуется", "softline ищет", "менеджер продукта",
+    "вакансия", "резюме", "работа", "сотрудник", "нанимает", "hr", "рекрутинг"
 ]
 
-# ====================== Р“Р•Рћ-Р¤РР›Р¬РўР  (С‚РµРїРµСЂСЊ С‚РѕР»СЊРєРѕ РґР»СЏ Р±Р»РѕРєРёСЂРѕРІРѕРє, РґР»СЏ AI РЅРµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ) ======================
-RUSSIA_KEYWORDS = ["СЂРѕСЃСЃРёСЏ", "СЂС„", "РјРёРЅС†", "РіРѕСЃРґСѓРјР°", "РїСѓС‚РёРЅ", "РјРѕСЃРєРІР°", "СЃР°РЅРєС‚-РїРµС‚РµСЂР±СѓСЂРі", "СЃРѕРІРµС‚ С„РµРґРµСЂР°С†РёРё", "РєСЂРµРјР»СЊ", "РїСЂР°РІРёС‚РµР»СЊСЃС‚РІРѕ СЂС„", "СЂРѕСЃРєРѕРјРЅР°РґР·РѕСЂ", "СЂРєРЅ"]
+# ====================== ГЕО-ФИЛЬТР (теперь только для блокировок, для AI не используется) ======================
+RUSSIA_KEYWORDS = ["россия", "рф", "минц", "госдума", "путин", "москва", "санкт-петербург", "совет федерации", "кремль", "правительство рф", "роскомнадзор", "ркн"]
 
 
 @dataclass
@@ -235,27 +235,27 @@ class Topic:
     WHITELIST = "whitelist"
 
     HASHTAGS = {
-        LLM: "#ChatGPT #LLM #OpenAI #РЅРµР№СЂРѕСЃРµС‚Рё",
-        IMAGE_GEN: "#Midjourney #StableDiffusion #РРРђСЂС‚",
-        ROBOTICS: "#СЂРѕР±РѕС‚С‹ #СЂРѕР±РѕС‚РѕС‚РµС…РЅРёРєР° #Р°РІС‚РѕРјР°С‚РёР·Р°С†РёСЏ",
-        HARDWARE: "#NVIDIA #С‡РёРїС‹ #GPU",
-        MESSENGER: "#Telegram #РјРµСЃСЃРµРЅРґР¶РµСЂС‹ #Р±РѕС‚С‹",
-        GENERAL: "#РР #С‚РµС…РЅРѕР»РѕРіРёРё #AI",
-        BLOCK: "#Р РљРќ #Р±Р»РѕРєРёСЂРѕРІРєРё #С†РµРЅР·СѓСЂР°",
-        BYPASS: "#Р±Р»РѕРєРёСЂРѕРІРєРё #С†РµРЅР·СѓСЂР°",
-        WHITELIST: "#Р±РµР»С‹Р№СЃРїРёСЃРѕРє #РґРѕСЃС‚СѓРїРЅРѕСЃС‚СЊ",
+        LLM: "#ChatGPT #LLM #OpenAI #нейросети",
+        IMAGE_GEN: "#Midjourney #StableDiffusion #ИИАрт",
+        ROBOTICS: "#роботы #робототехника #автоматизация",
+        HARDWARE: "#NVIDIA #чипы #GPU",
+        MESSENGER: "#Telegram #мессенджеры #боты",
+        GENERAL: "#ИИ #технологии #AI",
+        BLOCK: "#РКН #блокировки #цензура",
+        BYPASS: "#блокировки #цензура",
+        WHITELIST: "#белыйсписок #доступность",
     }
 
     @staticmethod
     def detect(text: str) -> str:
         t = text.lower()
-        if any(x in t for x in ["Р±Р»РѕРєРёСЂРѕРІРє", "СЂРєРЅ", "roskomnadzor", "Р·Р°Р±Р»РѕРєРёСЂРѕРІР°РЅ", "СЂРµРµСЃС‚СЂ"]):
+        if any(x in t for x in ["блокировк", "ркн", "roskomnadzor", "заблокирован", "реестр"]):
             return Topic.BLOCK
-        if any(x in t for x in ["vless", "v2ray", "xray", "wireguard", "РѕР±С…РѕРґ", "dpi", "Р°РЅС‚РёР·Р°РїСЂРµС‚"]):
+        if any(x in t for x in ["vless", "v2ray", "xray", "wireguard", "обход", "dpi", "антизапрет"]):
             return Topic.BYPASS
-        if any(x in t for x in ["Р±РµР»С‹Р№ СЃРїРёСЃРѕРє", "whitelist", "РґРѕСЃС‚СѓРїРЅРѕСЃС‚СЊ СЃР°Р№С‚Р°"]):
+        if any(x in t for x in ["белый список", "whitelist", "доступность сайта"]):
             return Topic.WHITELIST
-        if any(x in t for x in ["telegram", "С‚РµР»РµРіСЂР°Рј", "РјРµСЃСЃРµРЅРґР¶РµСЂ", "durov"]):
+        if any(x in t for x in ["telegram", "телеграм", "мессенджер", "durov"]):
             return Topic.MESSENGER
         if any(x in t for x in ["gpt", "claude", "gemini", "llm", "chatgpt", "llama"]):
             return Topic.LLM
@@ -268,7 +268,7 @@ class Topic:
         return Topic.GENERAL
 
 
-# ---------- Р’РЎРџРћРњРћР“РђРўР•Р›Р¬РќР«Р• Р¤РЈРќРљР¦РР ----------
+# ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
 def normalize_url(url: str) -> str:
     try:
         u = url.lower().strip()
@@ -305,7 +305,7 @@ def normalize_title(title: str) -> str:
     t = re.sub(r'[^\w\s]', ' ', t)
     t = re.sub(r'\s+', ' ', t).strip()
     t = re.sub(
-        r'([a-zA-ZР°-СЏРђ-РЇС‘РЃ]+)\s*[-.]?\s*(\d+(?:\.\d+)?)',
+        r'([a-zA-Zа-яА-ЯёЁ]+)\s*[-.]?\s*(\d+(?:\.\d+)?)',
         lambda m: m.group(1) + m.group(2).replace('.', ''),
         t
     )
@@ -314,7 +314,7 @@ def normalize_title(title: str) -> str:
 
 @lru_cache(maxsize=2000)
 def get_title_words(title: str) -> frozenset:
-    words = re.findall(r'\b[a-zA-ZР°-СЏРђ-РЇС‘РЃ0-9]+\b', title.lower())
+    words = re.findall(r'\b[a-zA-Zа-яА-ЯёЁ0-9]+\b', title.lower())
     stop_words = {
         'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
         'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
@@ -330,11 +330,11 @@ def get_title_words(title: str) -> frozenset:
         'out', 'up', 'what', 'which', 'who', 'this', 'that', 'these', 'those',
         'it', 'its', 'you', 'your', 'we', 'our', 'they', 'their', 'he', 'she',
         'him', 'her', 'his', 'hers', 'my', 'mine', 'yours', 'ours', 'theirs',
-        'Рё', 'РІ', 'РЅР°', 'СЃ', 'РїРѕ', 'РґР»СЏ', 'РѕС‚', 'РёР·', 'Р·Р°', 'РґРѕ', 'РЅРµ',
-        'С‡С‚Рѕ', 'РєР°Рє', 'СЌС‚Рѕ', 'РІСЃРµ', 'РµРіРѕ', 'РѕРЅР°', 'РѕРЅРё', 'РјС‹', 'РІС‹', 'РѕРЅ',
-        'РЅРѕ', 'С‚Рѕ', 'С‚Р°Рє', 'СѓР¶Рµ', 'РёР»Рё', 'РµС‰С‘', 'РµС‰Рµ', 'РїСЂРё', 'Р±РµР·',
-        'С‚РѕР¶Рµ', 'С‚Р°РєР¶Рµ', 'Р±СѓРґРµС‚', 'Р±С‹Р»Р°', 'Р±С‹Р»Рё', 'Р±С‹С‚СЊ', 'РјРѕР¶РµС‚',
-        'СЌС‚РѕС‚', 'СЌС‚Р°', 'СЌС‚Рё', 'С‚РѕС‚', 'С‚РѕРіРѕ', 'СЌС‚РѕРіРѕ', 'СЃРІРѕР№', 'СЃРІРѕРё',
+        'и', 'в', 'на', 'с', 'по', 'для', 'от', 'из', 'за', 'до', 'не',
+        'что', 'как', 'это', 'все', 'его', 'она', 'они', 'мы', 'вы', 'он',
+        'но', 'то', 'так', 'уже', 'или', 'ещё', 'еще', 'при', 'без',
+        'тоже', 'также', 'будет', 'была', 'были', 'быть', 'может',
+        'этот', 'эта', 'эти', 'тот', 'того', 'этого', 'свой', 'свои',
     }
     return frozenset(w for w in words if len(w) > 2 and w not in stop_words)
 
@@ -397,7 +397,7 @@ def safe_json_loads(value: str, default=None):
         return default if default is not None else []
 
 
-# ====================== РЎРљРћР Р« ======================
+# ====================== СКОРЫ ======================
 def ai_relevance_score(text: str) -> int:
     text_lower = text.lower()
     score = 0
@@ -407,7 +407,7 @@ def ai_relevance_score(text: str) -> int:
     for kw in AI_KEYWORDS_WEAK:
         if kw in text_lower:
             score += 1
-    if score == 0 and ("ai" in text_lower or "РЅРµР№СЂРѕСЃРµС‚СЊ" in text_lower or "РёРё" in text_lower):
+    if score == 0 and ("ai" in text_lower or "нейросеть" in text_lower or "ии" in text_lower):
         score = 1
     return score
 
@@ -443,28 +443,28 @@ def is_relevant(article: Article) -> bool:
 
     age_hours = (datetime.now(timezone.utc) - article.published).total_seconds() / 3600
     if age_hours > config.max_article_age_hours:
-        logger.info(f"  вЏ° TOO_OLD ({age_hours:.0f}h): {article.title[:50]}")
+        logger.info(f"  ⏰ TOO_OLD ({age_hours:.0f}h): {article.title[:50]}")
         return False
 
     if any(g in text for g in GAMES_EXCLUDE):
-        logger.info(f"  рџЋ® GAME: {article.title[:50]}")
+        logger.info(f"  🎮 GAME: {article.title[:50]}")
         return False
 
     if any(b in text for b in BUSINESS_EXCLUDE):
-        logger.info(f"  рџЏў BUSINESS: {article.title[:50]}")
+        logger.info(f"  🏢 BUSINESS: {article.title[:50]}")
         return False
 
     if is_promo_content(text):
-        logger.info(f"  рџ“ў PROMO: {article.title[:50]}")
+        logger.info(f"  📢 PROMO: {article.title[:50]}")
         return False
 
     if is_junk_content(text):
-        logger.info(f"  рџ—‘пёЏ JUNK (РІР°РєР°РЅСЃРёСЏ/СЂРµРєР»Р°РјР°): {article.title[:50]}")
+        logger.info(f"  🗑️ JUNK (вакансия/реклама): {article.title[:50]}")
         return False
 
     if any(rw in text for rw in REVIEW_KEYWORDS):
         if not any(kw in text for kw in AI_KEYWORDS_STRONG):
-            logger.info(f"  рџ“ќ REVIEW/DEAL (РЅРµС‚ СЃРёР»СЊРЅРѕРіРѕ AI): {article.title[:50]}")
+            logger.info(f"  📝 REVIEW/DEAL (нет сильного AI): {article.title[:50]}")
             return False
 
     has_strong_ai = any(kw in text for kw in AI_KEYWORDS_STRONG)
@@ -472,18 +472,18 @@ def is_relevant(article: Article) -> bool:
     is_ai = has_strong_ai or (has_weak_ai and config.min_ai_score <= 1)
     is_block = any(kw in text for kw in BLOCK_KEYWORDS)
 
-    # Р‘Р»РѕРє-РЅРѕРІРѕСЃС‚Рё РІСЃРµРіРґР° РїСЂРѕРїСѓСЃРєР°РµРј
+    # Блок-новости всегда пропускаем
     if is_block:
-        logger.info(f"  вњ… BLOCK (РїСЂРёРѕСЂРёС‚РµС‚): {article.title[:55]}")
+        logger.info(f"  ✅ BLOCK (приоритет): {article.title[:55]}")
         return True
 
-    # Р”Р»СЏ AI-РЅРѕРІРѕСЃС‚РµР№: СѓР±РёСЂР°РµРј РіРµРѕРіСЂР°С„РёС‡РµСЃРєРёР№ С„РёР»СЊС‚СЂ вЂ“ РїСѓР±Р»РёРєСѓРµРј Р»СЋР±С‹Рµ AI-РЅРѕРІРѕСЃС‚Рё
+    # Для AI-новостей: убираем географический фильтр – публикуем любые AI-новости
     if is_ai:
-        logger.info(f"  вњ… AI (Р±РµР· РіРµРѕ-С„РёР»СЊС‚СЂР°): {article.title[:55]}")
+        logger.info(f"  ✅ AI (без гео-фильтра): {article.title[:55]}")
         return True
 
-    # Р•СЃР»Рё РЅРµ AI Рё РЅРµ Р±Р»РѕРє вЂ“ РѕС‚СЃРµРєР°РµРј
-    logger.info(f"  рџљ« NEITHER AI NOR BLOCK: {article.title[:50]}")
+    # Если не AI и не блок – отсекаем
+    logger.info(f"  🚫 NEITHER AI NOR BLOCK: {article.title[:50]}")
     return False
 
 
@@ -571,9 +571,9 @@ class PostedManager:
                 except Exception:
                     pass
             conn.commit()
-        logger.info("рџ“љ Р‘Р°Р·Р° РґР°РЅРЅС‹С… РёРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°РЅР°")
+        logger.info("📚 База данных инициализирована")
 
-    # ---- РћСЃС‚Р°Р»СЊРЅС‹Рµ РјРµС‚РѕРґС‹ (Р±РµР· РѕС‚С‡С‘С‚РѕРІ) ----
+    # ---- Остальные методы (без отчётов) ----
     def _add_rejected(self, norm_url: str, title: str, reason: str):
         pass
 
@@ -646,7 +646,7 @@ class PostedManager:
             return (
                 False,
                 f"SUBJECT_LIMIT ({subject}: {len(recent_posts)}/"
-                f"{config.max_posts_per_subject} Р·Р° {config.subject_window_hours}h)"
+                f"{config.max_posts_per_subject} за {config.subject_window_hours}h)"
             )
 
         if recent_posts:
@@ -756,7 +756,7 @@ class PostedManager:
                     pos = last_few.index(source) + 1
                     return (
                         False,
-                        f"SOURCE_TOO_RECENT ({source} Р±С‹Р» {pos}-Рј РёР· РїРѕСЃР»РµРґРЅРёС… "
+                        f"SOURCE_TOO_RECENT ({source} был {pos}-м из последних "
                         f"{config.source_min_posts_between})"
                     )
 
@@ -765,7 +765,7 @@ class PostedManager:
                     return (
                         False,
                         f"SOURCE_LIMIT ({source}: {source_count}/{config.source_max_in_window} "
-                        f"Р·Р° РїРѕСЃР»РµРґРЅРёРµ {config.rotation_history_size})"
+                        f"за последние {config.rotation_history_size})"
                     )
 
             if topic == Topic.GENERAL:
@@ -810,20 +810,20 @@ class PostedManager:
                 cursor.execute('SELECT id FROM posted_articles WHERE norm_url = ?', (norm_url,))
                 saved = cursor.fetchone()
                 if saved:
-                    logger.info(f"рџ’ѕ РЎРѕС…СЂР°РЅРµРЅРѕ (ID={saved[0]}, topic={topic}): {article.title[:50]}...")
+                    logger.info(f"💾 Сохранено (ID={saved[0]}, topic={topic}): {article.title[:50]}...")
                     return True
                 else:
-                    logger.error(f"вќЊ РќРµ СЃРѕС…СЂР°РЅРµРЅРѕ: {article.title[:50]}")
+                    logger.error(f"❌ Не сохранено: {article.title[:50]}")
                     return False
             except sqlite3.IntegrityError:
-                logger.warning(f"вљ пёЏ РЈР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚: {article.title[:40]}")
+                logger.warning(f"⚠️ Уже существует: {article.title[:40]}")
                 return False
             except Exception as e:
-                logger.error(f"вќЊ РћС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ: {e}")
+                logger.error(f"❌ Ошибка сохранения: {e}")
                 return False
 
     def log_rejected(self, article: Article, reason: str):
-        logger.info(f"рџљ« [{reason}]: {article.title[:50]}")
+        logger.info(f"🚫 [{reason}]: {article.title[:50]}")
 
     def get_recent_posts(self, limit: int = 5) -> List[dict]:
         with self._lock:
@@ -860,7 +860,7 @@ class PostedManager:
             cursor.execute("DELETE FROM rejected_urls")
             deleted_rejected = cursor.rowcount
             conn.commit()
-            logger.info(f"рџ§№ РћС‡РёС‰РµРЅРѕ: {deleted_posted} posted, {deleted_rejected} rejected (РІСЃСЏ С‚Р°Р±Р»РёС†Р°)")
+            logger.info(f"🧹 Очищено: {deleted_posted} posted, {deleted_rejected} rejected (вся таблица)")
 
     def get_stats(self) -> dict:
         with self._lock:
@@ -887,9 +887,9 @@ class PostedManager:
                 try:
                     conn.commit()
                     conn.close()
-                    logger.info("рџ”’ Р‘Р” Р·Р°РєСЂС‹С‚Р°")
+                    logger.info("🔒 БД закрыта")
                 except Exception as e:
-                    logger.error(f"вќЊ РћС€РёР±РєР° Р·Р°РєСЂС‹С‚РёСЏ Р‘Р”: {e}")
+                    logger.error(f"❌ Ошибка закрытия БД: {e}")
                 finally:
                     self._local.conn = None
 
@@ -902,7 +902,7 @@ async def fetch_feed(url: str, source: str) -> List[Article]:
         async with aiohttp.ClientSession(timeout=timeout) as sess:
             async with sess.get(url, headers=HEADERS) as resp:
                 if resp.status != 200:
-                    logger.warning(f"  вљ пёЏ {source}: HTTP {resp.status}")
+                    logger.warning(f"  ⚠️ {source}: HTTP {resp.status}")
                     return []
                 content = await resp.text()
         feed = await asyncio.to_thread(feedparser.parse, content)
@@ -916,27 +916,27 @@ async def fetch_feed(url: str, source: str) -> List[Article]:
             pub_date = entry.get('published_parsed') or entry.get('updated_parsed')
             published = datetime(*pub_date[:6], tzinfo=timezone.utc) if pub_date else datetime.now(timezone.utc)
             articles.append(Article(title=title, summary=summary, link=link, source=source, published=published))
-        logger.info(f"  вњ… {source}: {len(articles)}")
+        logger.info(f"  ✅ {source}: {len(articles)}")
         return articles
     except asyncio.TimeoutError:
-        logger.warning(f"  вљ пёЏ {source}: Timeout")
+        logger.warning(f"  ⚠️ {source}: Timeout")
         return []
     except Exception as e:
-        logger.warning(f"  вљ пёЏ {source}: {e}")
+        logger.warning(f"  ⚠️ {source}: {e}")
         return []
 
 
 async def load_all_feeds() -> List[Article]:
-    logger.info("рџ“Ґ Р—Р°РіСЂСѓР·РєР° RSS...")
+    logger.info("📥 Загрузка RSS...")
     tasks = [fetch_feed(url, source) for url, source in RSS_FEEDS]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     all_articles = []
     for i, result in enumerate(results):
         if isinstance(result, Exception):
-            logger.warning(f"  вљ пёЏ {RSS_FEEDS[i][1]}: {result}")
+            logger.warning(f"  ⚠️ {RSS_FEEDS[i][1]}: {result}")
         elif result:
             all_articles.extend(result)
-    logger.info(f"рџ“¦ Р’СЃРµРіРѕ: {len(all_articles)}")
+    logger.info(f"📦 Всего: {len(all_articles)}")
     return all_articles
 
 
@@ -960,8 +960,8 @@ def interleave_by_source(candidates: List[Article]) -> List[Article]:
 
 # ====================== filter_and_dedupe ======================
 def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Article]:
-    logger.info("рџ”Ќ Р¤РёР»СЊС‚СЂР°С†РёСЏ...")
-    logger.info(f"   Р’С…РѕРґСЏС‰РёС… СЃС‚Р°С‚РµР№: {len(articles)}")
+    logger.info("🔍 Фильтрация...")
+    logger.info(f"   Входящих статей: {len(articles)}")
 
     candidates = []
     seen_normalized_titles: Set[str] = set()
@@ -999,13 +999,13 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         subject = Topic.detect(text)
 
         if subject != "other" and batch_subject_counts[subject] >= config.batch_subject_limit:
-            logger.info(f"  вЏ­пёЏ BATCH_SUBJECT_LIMIT ({subject}, {batch_subject_counts[subject]} in batch): {article.title[:50]}")
+            logger.info(f"  ⏭️ BATCH_SUBJECT_LIMIT ({subject}, {batch_subject_counts[subject]} in batch): {article.title[:50]}")
             stats["batch_subject"] += 1
             continue
 
         subj_ok, subj_reason = posted.check_subject_limit(subject, article.title)
         if not subj_ok:
-            logger.info(f"  вЏ­пёЏ {subj_reason}: {article.title[:50]}")
+            logger.info(f"  ⏭️ {subj_reason}: {article.title[:50]}")
             stats["subject_limit"] += 1
             continue
 
@@ -1019,7 +1019,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         topic = subject
         div_ok, div_reason = posted.check_diversity(topic, article.source)
         if not div_ok:
-            logger.info(f"  вЏ­пёЏ DIVERSITY ({div_reason}): {article.title[:50]}")
+            logger.info(f"  ⏭️ DIVERSITY ({div_reason}): {article.title[:50]}")
             stats["diversity"] += 1
             continue
 
@@ -1042,20 +1042,20 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
             ai_candidates.append(art)
 
     if block_candidates:
-        logger.info(f"рџ”’ РќР°Р№РґРµРЅРѕ {len(block_candidates)} Р±Р»РѕРє-СЃС‚Р°С‚РµР№, Р±РµСЂС‘Рј РёС… РІ РїСЂРёРѕСЂРёС‚РµС‚")
+        logger.info(f"🔒 Найдено {len(block_candidates)} блок-статей, берём их в приоритет")
         block_candidates.sort(key=lambda a: block_relevance_score(f"{a.title} {a.summary}"), reverse=True)
         candidates = block_candidates
     else:
-        logger.info(f"рџЊђ Р‘Р»РѕРє-РЅРѕРІРѕСЃС‚РµР№ РЅРµС‚, Р±РµСЂС‘Рј AI-СЃС‚Р°С‚СЊРё (Р±РµР· РіРµРѕ-С„РёР»СЊС‚СЂР°)")
+        logger.info(f"🌐 Блок-новостей нет, берём AI-статьи (без гео-фильтра)")
         ai_candidates.sort(key=lambda a: ai_relevance_score(f"{a.title} {a.summary}"), reverse=True)
         candidates = ai_candidates[:5]
 
     candidates = interleave_by_source(candidates)
 
-    logger.info("рџ“Љ РС‚РѕРіРё С„РёР»СЊС‚СЂР°С†РёРё:")
+    logger.info("📊 Итоги фильтрации:")
     logger.info(f"   filtered={stats['filtered_out']}, batch_dup={stats['batch_dup']}, db_dup={stats['db_dup']}, diversity={stats['diversity']}")
     logger.info(f"   subject_limit={stats['subject_limit']}, subject_rotation={stats['subject_rotation']}, batch_subject={stats['batch_subject']}, blacklisted={stats['blacklisted']}")
-    logger.info(f"вњ… РљР°РЅРґРёРґР°С‚РѕРІ РїРѕСЃР»Рµ РїСЂРёРѕСЂРёС‚РµС‚Р°: {len(candidates)} РёР· {len(articles)}")
+    logger.info(f"✅ Кандидатов после приоритета: {len(candidates)} из {len(articles)}")
 
     return candidates
 
@@ -1078,10 +1078,10 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
         src = art.source
         if src in last_n_sources:
             pos = last_n_sources.index(src) + 1
-            logger.info(f"   в¬‡пёЏ DEPRIO [src {src}] Р±С‹Р» {pos}-Рј РёР· РїРѕСЃР»РµРґРЅРёС… {config.source_min_posts_between}: {art.title[:40]}")
+            logger.info(f"   ⬇️ DEPRIO [src {src}] был {pos}-м из последних {config.source_min_posts_between}: {art.title[:40]}")
             deprioritized.append(art)
         elif source_counts.get(src, 0) >= config.source_max_in_window:
-            logger.info(f"   в¬‡пёЏ DEPRIO [src {src}] x{source_counts[src]} РІ РёСЃС‚РѕСЂРёРё: {art.title[:40]}")
+            logger.info(f"   ⬇️ DEPRIO [src {src}] x{source_counts[src]} в истории: {art.title[:40]}")
             deprioritized.append(art)
         else:
             priority.append(art)
@@ -1091,9 +1091,9 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
 
 
 DISCLAIMER = (
-    "\n\nвљ пёЏ РћС‚РґРµР»СЊРЅС‹Рµ РѕСЂРіР°РЅРёР·Р°С†РёРё, СѓРїРѕРјСЏРЅСѓС‚С‹Рµ РІ РґР°РЅРЅРѕРј РјР°С‚РµСЂРёР°Р»Рµ, РјРѕРіСѓС‚ РёРјРµС‚СЊ СЃС‚Р°С‚СѓСЃ "
-    "В«РЅРµР¶РµР»Р°С‚РµР»СЊРЅС‹С…В» РЅР° С‚РµСЂСЂРёС‚РѕСЂРёРё Р Р¤. РђРєС‚СѓР°Р»СЊРЅС‹Р№ РїРµСЂРµС‡РµРЅСЊ СЂР°Р·РјРµС‰С‘РЅ РЅР° РѕС„РёС†РёР°Р»СЊРЅРѕРј СЃР°Р№С‚Рµ "
-    'РњРёРЅСЋСЃС‚Р° Р Р¤: <a href="https://minjust.gov.ru/ru/pages/perechen-inostrannyh-i-'
+    "\n\n⚠️ Отдельные организации, упомянутые в данном материале, могут иметь статус "
+    "«нежелательных» на территории РФ. Актуальный перечень размещён на официальном сайте "
+    'Минюста РФ: <a href="https://minjust.gov.ru/ru/pages/perechen-inostrannyh-i-'
     'mezhdunarodnyh-organizacij-deyatelnost-kotoryh-priznana-nezhelatelnoj-na-territorii-'
     'rossiyskoy-federacii/">minjust.gov.ru</a>'
 )
@@ -1117,157 +1117,157 @@ def has_repeated_sentences(text: str, max_repeats: int = 2) -> bool:
     return False
 
 
-# ====================== Р“Р•РќР•Р РђР¦РРЇ РџРћРЎРўРђ (СѓР»СѓС‡С€РµРЅРЅР°СЏ) ======================
+# ====================== ГЕНЕРАЦИЯ ПОСТА (улучшенная) ======================
 async def generate_summary(article: Article) -> Optional[str]:
-    logger.info(f"рџ“ќ Р“РµРЅРµСЂР°С†РёСЏ: {article.title[:55]}...")
+    logger.info(f"📝 Генерация: {article.title[:55]}...")
     text_for_topic = f"{article.title} {article.summary}"
     topic = Topic.detect(text_for_topic)
     is_block_topic = any(kw in text_for_topic.lower() for kw in BLOCK_KEYWORDS)
 
     if is_block_topic:
-        prompt = f"""РўС‹ вЂ” СЂРµРґР°РєС‚РѕСЂ Telegram-РєР°РЅР°Р»Р° РїСЂРѕ Р±Р»РѕРєРёСЂРѕРІРєРё Рё С†РёС„СЂРѕРІС‹Рµ РѕРіСЂР°РЅРёС‡РµРЅРёСЏ РІ Р Р¤. РќР°РїРёС€Рё РєСЂР°С‚РєРёР№, РЅРѕ Р·Р°РєРѕРЅС‡РµРЅРЅС‹Р№ РїРѕСЃС‚ РїРѕ РЅРѕРІРѕСЃС‚Рё.
+        prompt = f"""Ты — редактор Telegram-канала про блокировки и цифровые ограничения в РФ. Напиши краткий, но законченный пост по новости.
 
-РќРћР’РћРЎРўР¬:
-Р—Р°РіРѕР»РѕРІРѕРє: {article.title}
-РЎРѕРґРµСЂР¶Р°РЅРёРµ: {article.summary[:2000]}
-РСЃС‚РѕС‡РЅРёРє: {article.source}
+НОВОСТЬ:
+Заголовок: {article.title}
+Содержание: {article.summary[:2000]}
+Источник: {article.source}
 
-**РЎС‚СЂСѓРєС‚СѓСЂР° РїРѕСЃС‚Р°:**
-1. Р’СЃС‚СѓРїР»РµРЅРёРµ: РєСЂР°С‚РєРѕ РІРІРµРґРё РІ С‚РµРјСѓ (1 РїСЂРµРґР»РѕР¶РµРЅРёРµ, РЅР°С‡РЅРё СЃ В«РќРѕРІРѕСЃС‚СЊ:В» РёР»Рё В«Р’ Р РѕСЃСЃРёРё РїСЂРѕРёР·РѕС€Р»РѕвЂ¦В»).
-2. РЎСѓС‚СЊ: С‡С‚Рѕ РёРјРµРЅРЅРѕ РїСЂРѕРёР·РѕС€Р»Рѕ? (С„Р°РєС‚С‹: РєС‚Рѕ, С‡С‚Рѕ, РєРѕРіРґР°, РєР°Рє).
-3. РџРѕСЃР»РµРґСЃС‚РІРёСЏ: РєР°РєРёРµ РїРѕСЃР»РµРґСЃС‚РІРёСЏ РґР»СЏ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ РёР»Рё РёРЅРґСѓСЃС‚СЂРёРё?
+**Структура поста:**
+1. Вступление: кратко введи в тему (1 предложение, начни с «Новость:» или «В России произошло…»).
+2. Суть: что именно произошло? (факты: кто, что, когда, как).
+3. Последствия: какие последствия для пользователей или индустрии?
 
-**РўСЂРµР±РѕРІР°РЅРёСЏ:**
-- РќРµР№С‚СЂР°Р»СЊРЅС‹Р№, РёРЅС„РѕСЂРјР°С‚РёРІРЅС‹Р№ С‚РѕРЅ, Р±РµР· РѕС†РµРЅРѕРє.
-- РќРµ СѓРїРѕРјРёРЅР°Р№ РІР»Р°СЃС‚СЊ, РїСЂР°РІРёС‚РµР»СЊСЃС‚РІРѕ, РџСѓС‚РёРЅР° вЂ“ С‚РѕР»СЊРєРѕ С‚РµС…РЅРёС‡РµСЃРєРёРµ РґРµС‚Р°Р»Рё.
-- РќРµ Р·Р°РґР°РІР°Р№ РІРѕРїСЂРѕСЃРѕРІ С‡РёС‚Р°С‚РµР»СЏРј.
-- Р”Р»РёРЅР°: СЃС‚СЂРѕРіРѕ 600вЂ“800 СЃРёРјРІРѕР»РѕРІ.
-- РџРѕСЃС‚ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ СЃРІСЏР·РЅС‹Рј Рё С‡РёС‚Р°С‚СЊСЃСЏ РєР°Рє РµРґРёРЅРѕРµ С†РµР»РѕРµ.
+**Требования:**
+- Нейтральный, информативный тон, без оценок.
+- Не упоминай власть, правительство, Путина – только технические детали.
+- Не задавай вопросов читателям.
+- Длина: строго 600–800 символов.
+- Пост должен быть связным и читаться как единое целое.
 
-РџРћРЎРў:"""
+ПОСТ:"""
     else:
-        prompt = f"""РўС‹ вЂ” СЂРµРґР°РєС‚РѕСЂ Telegram-РєР°РЅР°Р»Р° РїСЂРѕ AI Рё С‚РµС…РЅРѕР»РѕРіРёРё. РќР°РїРёС€Рё РєСЂР°С‚РєРёР№, РЅРѕ Р·Р°РєРѕРЅС‡РµРЅРЅС‹Р№ РїРѕСЃС‚ РїРѕ РЅРѕРІРѕСЃС‚Рё. РўРІРѕР№ РїРѕСЃС‚ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РїРѕРЅСЏС‚РµРЅ РґР°Р¶Рµ С‚РµРј, РєС‚Рѕ РЅРµ С‡РёС‚Р°Р» РёСЃС…РѕРґРЅСѓСЋ СЃС‚Р°С‚СЊСЋ.
+        prompt = f"""Ты — редактор Telegram-канала про AI и технологии. Напиши краткий, но законченный пост по новости. Твой пост должен быть понятен даже тем, кто не читал исходную статью.
 
-РќРћР’РћРЎРўР¬:
-Р—Р°РіРѕР»РѕРІРѕРє: {article.title}
-РЎРѕРґРµСЂР¶Р°РЅРёРµ: {article.summary[:2000]}
-РСЃС‚РѕС‡РЅРёРє: {article.source}
+НОВОСТЬ:
+Заголовок: {article.title}
+Содержание: {article.summary[:2000]}
+Источник: {article.source}
 
-**РЎС‚СЂСѓРєС‚СѓСЂР° РїРѕСЃС‚Р° (СЃС‚СЂРѕРіРѕ СЃРѕР±Р»СЋРґР°Р№):**
-1. Р’СЃС‚СѓРїР»РµРЅРёРµ: РєСЂР°С‚РєРѕ РІРІРµРґРё РІ С‚РµРјСѓ (1 РїСЂРµРґР»РѕР¶РµРЅРёРµ). РќР°С‡РЅРё СЃ С„СЂР°Р·С‹ В«РќРѕРІРѕСЃС‚СЊ РґРЅСЏ:В» РёР»Рё В«РљРѕРјРїР°РЅРёСЏ X РѕР±СЉСЏРІРёР»Р° РѕвЂ¦В».
-2. РЎСѓС‚СЊ: С‡С‚Рѕ РёРјРµРЅРЅРѕ РїСЂРѕРёР·РѕС€Р»Рѕ? (С„Р°РєС‚С‹: РєС‚Рѕ, С‡С‚Рѕ, РіРґРµ, РєРѕРіРґР°). РџРµСЂРµСЃРєР°Р¶Рё СЃРІРѕРёРјРё СЃР»РѕРІР°РјРё, РЅРѕ СЃРѕС…СЂР°РЅРё РІСЃРµ РєР»СЋС‡РµРІС‹Рµ С„Р°РєС‚С‹.
-3. Р—РЅР°С‡РµРЅРёРµ: РїРѕС‡РµРјСѓ СЌС‚Рѕ РІР°Р¶РЅРѕ РґР»СЏ РёРЅРґСѓСЃС‚СЂРёРё, РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ РёР»Рё РѕР±С‰РµСЃС‚РІР°? (1вЂ“2 РїСЂРµРґР»РѕР¶РµРЅРёСЏ).
+**Структура поста (строго соблюдай):**
+1. Вступление: кратко введи в тему (1 предложение). Начни с фразы «Новость дня:» или «Компания X объявила о…».
+2. Суть: что именно произошло? (факты: кто, что, где, когда). Перескажи своими словами, но сохрани все ключевые факты.
+3. Значение: почему это важно для индустрии, пользователей или общества? (1–2 предложения).
 
-**РўСЂРµР±РѕРІР°РЅРёСЏ:**
-- РџРёС€Рё РЅРµР№С‚СЂР°Р»СЊРЅРѕ, Р±РµР· РѕС†РµРЅРѕРє Рё Р»РёС€РЅРёС… СЌРјРѕС†РёР№.
-- РќРµ Р·Р°РґР°РІР°Р№ РІРѕРїСЂРѕСЃРѕРІ С‡РёС‚Р°С‚РµР»СЏРј.
-- РќРµ РёСЃРїРѕР»СЊР·СѓР№ СЃР»РѕРІР° В«РІР»Р°СЃС‚СЊВ», В«РїСЂР°РІРёС‚РµР»СЊСЃС‚РІРѕВ», В«РїСѓС‚РёРЅВ» Рё С‚.Рї.
-- РР·Р±РµРіР°Р№ С€С‚Р°РјРїРѕРІ: В«СЃС‚РѕРёС‚ РѕС‚РјРµС‚РёС‚СЊВ», В«РІР°Р¶РЅРѕ РїРѕРЅРёРјР°С‚СЊВ», В«РґР°РІР°Р№С‚Рµ СЂР°Р·Р±РµСЂС‘РјСЃСЏВ».
-- Р”Р»РёРЅР°: СЃС‚СЂРѕРіРѕ 700вЂ“1000 СЃРёРјРІРѕР»РѕРІ (РЅРµ РјРµРЅСЊС€Рµ 700, РЅРµ Р±РѕР»СЊС€Рµ 1000).
-- РџРѕСЃС‚ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ СЃРІСЏР·РЅС‹Рј, С‡РёС‚Р°С‚СЊСЃСЏ РєР°Рє РµРґРёРЅРѕРµ С†РµР»РѕРµ Рё РЅРµ РѕР±СЂС‹РІР°С‚СЊСЃСЏ РЅР° РїРѕР»СѓСЃР»РѕРІРµ.
+**Требования:**
+- Пиши нейтрально, без оценок и лишних эмоций.
+- Не задавай вопросов читателям.
+- Не используй слова «власть», «правительство», «путин» и т.п.
+- Избегай штампов: «стоит отметить», «важно понимать», «давайте разберёмся».
+- Длина: строго 700–1000 символов (не меньше 700, не больше 1000).
+- Пост должен быть связным, читаться как единое целое и не обрываться на полуслове.
 
-РџРћРЎРў:"""
+ПОСТ:"""
 
     water_phrases = [
-        "СЃС‚РѕРёС‚ РѕС‚РјРµС‚РёС‚СЊ", "РІР°Р¶РЅРѕ РїРѕРЅРёРјР°С‚СЊ", "РёРЅС‚РµСЂРµСЃРЅРѕ, С‡С‚Рѕ",
-        "РґР°РІР°Р№С‚Рµ СЂР°Р·Р±РµСЂС‘РјСЃСЏ", "РєР°Рє РјС‹ Р·РЅР°РµРј", "РЅРµ СЃРµРєСЂРµС‚",
-        "РЅРµР»СЊР·СЏ РЅРµ РѕС‚РјРµС‚РёС‚СЊ", "СЃР»РµРґСѓРµС‚ РїРѕРґС‡РµСЂРєРЅСѓС‚СЊ",
-        "РїРѕС‡РµРјСѓ СЌС‚Рѕ РІР°Р¶РЅРѕ", "РґР»СЏ С‡РµРіРѕ СЌС‚Рѕ РІР°Р¶РЅРѕ",
-        "СЌС‚Рѕ РІР°Р¶РЅРѕ РїРѕС‚РѕРјСѓ С‡С‚Рѕ", "СЌС‚Рѕ РјРµРЅСЏРµС‚ РІСЃС‘",
-        "СЌС‚Рѕ РѕС‚РєСЂС‹РІР°РµС‚ РІРѕР·РјРѕР¶РЅРѕСЃС‚Рё", "СЌС‚Рѕ РјРµРЅСЏРµС‚ РїСЂР°РІРёР»Р°",
-        "РјРѕР¶РµС‚ РїСЂРёРІРµСЃС‚Рё", "РјРѕР¶РЅРѕ РѕР¶РёРґР°С‚СЊ", "РІРµСЂРѕСЏС‚РЅРѕ", "РІРѕР·РјРѕР¶РЅРѕ",
-        "РѕС‚СЂР°Р¶Р°РµС‚ СЌРєСЃРїРµСЂС‚РёР·Сѓ", "СѓРєСЂРµРїРёС‚ РїРѕР·РёС†РёРё", "РїРѕР»СЊР·РѕРІР°С‚РµР»Рё РјРѕРіСѓС‚ СЂР°СЃСЃС‡РёС‚С‹РІР°С‚СЊ",
+        "стоит отметить", "важно понимать", "интересно, что",
+        "давайте разберёмся", "как мы знаем", "не секрет",
+        "нельзя не отметить", "следует подчеркнуть",
+        "почему это важно", "для чего это важно",
+        "это важно потому что", "это меняет всё",
+        "это открывает возможности", "это меняет правила",
+        "может привести", "можно ожидать", "вероятно", "возможно",
+        "отражает экспертизу", "укрепит позиции", "пользователи могут рассчитывать",
     ]
 
     for model in GROQ_MODELS:
         for attempt in range(config.groq_retries_per_model):
             try:
                 await asyncio.sleep(1)
-                logger.info(f"  рџ¤– {model} (РїРѕРїС‹С‚РєР° {attempt + 1})")
+                logger.info(f"  🤖 {model} (попытка {attempt + 1})")
 
-                # Р”Р»СЏ РІС‚РѕСЂРѕР№ РїРѕРїС‹С‚РєРё РёСЃРїРѕР»СЊР·СѓРµРј С‡СѓС‚СЊ Р±РѕР»РµРµ РІС‹СЃРѕРєСѓСЋ С‚РµРјРїРµСЂР°С‚СѓСЂСѓ
+                # Для второй попытки используем чуть более высокую температуру
                 temp = 0.8 if attempt == 1 else 0.7
 
                 resp = await asyncio.to_thread(
                     groq_client.chat.completions.create,
                     model=model,
                     temperature=temp,
-                    max_tokens=1500,  # СѓРІРµР»РёС‡РµРЅРѕ СЃ 1200
+                    max_tokens=1500,  # увеличено с 1200
                     messages=[{"role": "user", "content": prompt}],
                 )
                 text = resp.choices[0].message.content.strip()
 
                 if not is_block_topic and "SKIP" in text.upper()[:10]:
-                    logger.info("  вЏ­пёЏ SKIP (РЅРµ РїРѕРґС…РѕРґРёС‚)")
+                    logger.info("  ⏭️ SKIP (не подходит)")
                     return None
 
-                # РџСЂРѕРІРµСЂРєР° РјРёРЅРёРјР°Р»СЊРЅРѕР№ РґР»РёРЅС‹
+                # Проверка минимальной длины
                 if len(text) < config.min_post_length:
-                    logger.warning(f"  вљ пёЏ РљРѕСЂРѕС‚РєРёР№ ({len(text)} СЃРёРјРІ., РјРёРЅРёРјСѓРј {config.min_post_length}), СЃР»РµРґСѓСЋС‰Р°СЏ РјРѕРґРµР»СЊ...")
+                    logger.warning(f"  ⚠️ Короткий ({len(text)} симв., минимум {config.min_post_length}), следующая модель...")
                     break
 
-                # РџСЂРѕРІРµСЂРєР° РЅР° С†РµР»РѕСЃС‚РЅРѕСЃС‚СЊ: РЅРµ РјРµРЅРµРµ 3 РїСЂРµРґР»РѕР¶РµРЅРёР№
+                # Проверка на целостность: не менее 3 предложений
                 sentences = re.split(r'[.!?]\s+', text)
                 if len(sentences) < 3:
-                    logger.warning("  вљ пёЏ РњРµРЅСЊС€Рµ 3 РїСЂРµРґР»РѕР¶РµРЅРёР№, РїРµСЂРµРіРµРЅРµСЂР°С†РёСЏ...")
+                    logger.warning("  ⚠️ Меньше 3 предложений, перегенерация...")
                     continue
 
-                # РџСЂРѕРІРµСЂРєР°: РЅР°С‡РёРЅР°РµС‚СЃСЏ СЃ Р·Р°РіР»Р°РІРЅРѕР№ Р±СѓРєРІС‹
+                # Проверка: начинается с заглавной буквы
                 if not text[0].isupper():
-                    logger.warning("  вљ пёЏ РўРµРєСЃС‚ РЅРµ РЅР°С‡РёРЅР°РµС‚СЃСЏ СЃ Р·Р°РіР»Р°РІРЅРѕР№ Р±СѓРєРІС‹, РїРµСЂРµРіРµРЅРµСЂР°С†РёСЏ...")
+                    logger.warning("  ⚠️ Текст не начинается с заглавной буквы, перегенерация...")
                     continue
 
-                # РџСЂРѕРІРµСЂРєР° РЅР° РѕР±СЂС‹РІ РІ РєРѕРЅС†Рµ (РїСЂРµРґР»РѕРі, СЃРѕСЋР·, РІРІРѕРґРЅРѕРµ СЃР»РѕРІРѕ)
-                if re.search(r'\b(Рё|РІ|РЅР°|СЃ|РїРѕ|РґР»СЏ|РѕС‚|РёР·|Р·Р°|РґРѕ|РЅРµ|С‡С‚Рѕ|РєР°Рє|СЌС‚Рѕ|РІСЃРµ|РµРіРѕ|РѕРЅР°|РѕРЅРё|РјС‹|РІС‹|РѕРЅ|РЅРѕ|С‚Рѕ|С‚Р°Рє|СѓР¶Рµ|РёР»Рё|РµС‰С‘|РµС‰Рµ|РїСЂРё|Р±РµР·|С‚РѕР¶Рµ|С‚Р°РєР¶Рµ|Р±СѓРґРµС‚|Р±С‹Р»Р°|Р±С‹Р»Рё|Р±С‹С‚СЊ|РјРѕР¶РµС‚|СЌС‚РѕС‚|СЌС‚Р°|СЌС‚Рё|С‚РѕС‚|С‚РѕРіРѕ|СЌС‚РѕРіРѕ|СЃРІРѕР№|СЃРІРѕРё)\s*$', text, re.IGNORECASE):
-                    logger.warning("  вљ пёЏ РўРµРєСЃС‚ РѕР±СЂС‹РІР°РµС‚СЃСЏ РЅР° РїСЂРµРґР»РѕРіРµ/СЃРѕСЋР·Рµ, РїРµСЂРµРіРµРЅРµСЂР°С†РёСЏ...")
+                # Проверка на обрыв в конце (предлог, союз, вводное слово)
+                if re.search(r'\b(и|в|на|с|по|для|от|из|за|до|не|что|как|это|все|его|она|они|мы|вы|он|но|то|так|уже|или|ещё|еще|при|без|тоже|также|будет|была|были|быть|может|этот|эта|эти|тот|того|этого|свой|свои)\s*$', text, re.IGNORECASE):
+                    logger.warning("  ⚠️ Текст обрывается на предлоге/союзе, перегенерация...")
                     continue
 
-                # РџСЂРѕРІРµСЂРєР° РЅР° С€С‚Р°РјРїС‹
+                # Проверка на штампы
                 water_count = sum(1 for phrase in water_phrases if phrase in text.lower())
                 if water_count >= 3:
-                    logger.warning(f"  вљ пёЏ РЁС‚Р°РјРїС‹ ({water_count}), РїРµСЂРµРіРµРЅРµСЂР°С†РёСЏ...")
+                    logger.warning(f"  ⚠️ Штампы ({water_count}), перегенерация...")
                     if attempt == config.groq_retries_per_model - 1:
-                        logger.warning("  вЏ­пёЏ РџСЂРѕРїСѓСЃРєР°РµРј РёР·-Р·Р° С€С‚Р°РјРїРѕРІ")
+                        logger.warning("  ⏭️ Пропускаем из-за штампов")
                         return None
                     continue
 
                 if has_repeated_sentences(text, config.max_repeat_sentences):
-                    logger.warning("  вљ пёЏ РџРѕРІС‚РѕСЂСЏСЋС‰РёРµСЃСЏ РїСЂРµРґР»РѕР¶РµРЅРёСЏ, СЃР»РµРґСѓСЋС‰Р°СЏ РјРѕРґРµР»СЊ...")
+                    logger.warning("  ⚠️ Повторяющиеся предложения, следующая модель...")
                     continue
 
-                # РџРѕСЃС‚-РѕР±СЂР°Р±РѕС‚РєР°: СѓРґР°Р»СЏРµРј СЃР»СѓР¶РµР±РЅС‹Рµ РјР°СЂРєРµСЂС‹
+                # Пост-обработка: удаляем служебные маркеры
                 lines = text.split('\n')
                 cleaned_lines = []
                 for line in lines:
                     line_stripped = line.strip()
-                    if re.match(r'^(РќРћР’РћРЎРўР¬|Р—Р°РіРѕР»РѕРІРѕРє|РЎРѕРґРµСЂР¶Р°РЅРёРµ|РСЃС‚РѕС‡РЅРёРє|РџРћРЎРў|РќРћР’РћРЎРўР¬\s*:|Р—Р°РіРѕР»РѕРІРѕРє\s*:|РЎРѕРґРµСЂР¶Р°РЅРёРµ\s*:|РСЃС‚РѕС‡РЅРёРє\s*:|РџРћРЎРў\s*:)\s*', line_stripped, re.IGNORECASE):
+                    if re.match(r'^(НОВОСТЬ|Заголовок|Содержание|Источник|ПОСТ|НОВОСТЬ\s*:|Заголовок\s*:|Содержание\s*:|Источник\s*:|ПОСТ\s*:)\s*', line_stripped, re.IGNORECASE):
                         continue
                     cleaned_lines.append(line)
                 text = '\n'.join(cleaned_lines)
-                text = re.sub(r'\bР—Р°РіРѕР»РѕРІРѕРє\s*:\s*', '', text, flags=re.IGNORECASE)
-                text = re.sub(r'\bРЎРѕРґРµСЂР¶Р°РЅРёРµ\s*:\s*', '', text, flags=re.IGNORECASE)
-                text = re.sub(r'\bРСЃС‚РѕС‡РЅРёРє\s*:\s*', '', text, flags=re.IGNORECASE)
-                text = re.sub(r'\bРќРћР’РћРЎРўР¬\s*:\s*', '', text, flags=re.IGNORECASE)
+                text = re.sub(r'\bЗаголовок\s*:\s*', '', text, flags=re.IGNORECASE)
+                text = re.sub(r'\bСодержание\s*:\s*', '', text, flags=re.IGNORECASE)
+                text = re.sub(r'\bИсточник\s*:\s*', '', text, flags=re.IGNORECASE)
+                text = re.sub(r'\bНОВОСТЬ\s*:\s*', '', text, flags=re.IGNORECASE)
 
-                # РЈР±РµРґРёРјСЃСЏ, С‡С‚Рѕ С‚РµРєСЃС‚ Р·Р°РєР°РЅС‡РёРІР°РµС‚СЃСЏ С‚РѕС‡РєРѕР№
+                # Убедимся, что текст заканчивается точкой
                 if not text.endswith(('.', '!', '?')):
                     text += '.'
 
                 hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
-                source_link = f'\n\nрџ”— <a href="{article.link}">РСЃС‚РѕС‡РЅРёРє</a>'
+                source_link = f'\n\n🔗 <a href="{article.link}">Источник</a>'
                 final = f"{text}\n\n{hashtags}{source_link}{DISCLAIMER}"
-                logger.info(f"  вњ… [{model}]: {len(text)} СЃРёРјРІ.")
+                logger.info(f"  ✅ [{model}]: {len(text)} симв.")
                 return final
 
             except Exception as e:
                 error_str = str(e).lower()
                 if any(x in error_str for x in ["decommissioned", "deprecated", "not found"]):
-                    logger.warning(f"  вљ пёЏ {model} РЅРµРґРѕСЃС‚СѓРїРЅР°, РїСЂРѕРїСѓСЃРєР°РµРј")
+                    logger.warning(f"  ⚠️ {model} недоступна, пропускаем")
                     break
-                logger.error(f"  вќЊ {model} РїРѕРїС‹С‚РєР° {attempt + 1}: {e}")
+                logger.error(f"  ❌ {model} попытка {attempt + 1}: {e}")
                 await asyncio.sleep(config.groq_base_delay * (2 ** attempt))
 
-    logger.error("  вќЊ Р’СЃРµ РјРѕРґРµР»Рё РЅРµ СЃСЂР°Р±РѕС‚Р°Р»Рё")
+    logger.error("  ❌ Все модели не сработали")
     return None
 
 
@@ -1276,30 +1276,30 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
     subject = topic
 
     try:
-        logger.info("  рџ“¤ РћС‚РїСЂР°РІРєР° РїРѕСЃС‚Р°...")
+        logger.info("  📤 Отправка поста...")
         await bot.send_message(config.channel_id, text, disable_web_page_preview=False)
-        logger.info(f"вњ… РћРџРЈР‘Р›РРљРћР’РђРќРћ [{topic}][{article.source}]: {article.title[:50]}")
+        logger.info(f"✅ ОПУБЛИКОВАНО [{topic}][{article.source}]: {article.title[:50]}")
     except Exception as e:
-        logger.error(f"вќЊ Telegram РѕС€РёР±РєР° РѕС‚РїСЂР°РІРєРё: {e}")
+        logger.error(f"❌ Telegram ошибка отправки: {e}")
         return False
 
     saved = posted.add(article, topic, subject)
     if not saved:
-        logger.warning(f"вљ пёЏ РџРѕСЃС‚ РѕС‚РїСЂР°РІР»РµРЅ, РЅРѕ РЅРµ СЃРѕС…СЂР°РЅС‘РЅ РІ Р‘Р” (РІРѕР·РјРѕР¶РЅРѕ РґСѓР±Р»СЊ): {article.title[:50]}")
+        logger.warning(f"⚠️ Пост отправлен, но не сохранён в БД (возможно дубль): {article.title[:50]}")
     return True
 
 
 async def check_telegram_connection() -> bool:
     try:
-        logger.info("рџ”Њ РџСЂРѕРІРµСЂРєР° РїРѕРґРєР»СЋС‡РµРЅРёСЏ Рє Telegram...")
+        logger.info("🔌 Проверка подключения к Telegram...")
         me = await asyncio.wait_for(bot.get_me(), timeout=config.telegram_timeout)
-        logger.info(f"вњ… Telegram OK: @{me.username}")
+        logger.info(f"✅ Telegram OK: @{me.username}")
         return True
     except asyncio.TimeoutError:
-        logger.error("вќЊ Telegram: Timeout РїСЂРё РїРѕРґРєР»СЋС‡РµРЅРёРё")
+        logger.error("❌ Telegram: Timeout при подключении")
         return False
     except Exception as e:
-        logger.error(f"вќЊ Telegram: {e}")
+        logger.error(f"❌ Telegram: {e}")
         return False
 
 
@@ -1307,7 +1307,7 @@ async def main():
     shutdown_event = asyncio.Event()
 
     def signal_handler(signum, frame):
-        logger.info(f"рџ›‘ РџРѕР»СѓС‡РµРЅ СЃРёРіРЅР°Р» {signum}, Р·Р°РІРµСЂС€Р°РµРј...")
+        logger.info(f"🛑 Получен сигнал {signum}, завершаем...")
         shutdown_event.set()
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -1320,20 +1320,20 @@ async def main():
             with open(lock_file) as f:
                 old_pid = int(f.read().strip())
             if os.path.exists(f"/proc/{old_pid}"):
-                logger.error(f"вќЊ Р‘РѕС‚ СѓР¶Рµ Р·Р°РїСѓС‰РµРЅ (PID {old_pid})! РЈРґР°Р»РёС‚Рµ bot.lock РµСЃР»Рё СЌС‚Рѕ РѕС€РёР±РєР°.")
+                logger.error(f"❌ Бот уже запущен (PID {old_pid})! Удалите bot.lock если это ошибка.")
                 return
             else:
-                logger.warning(f"вљ пёЏ РќР°Р№РґРµРЅ СѓСЃС‚Р°СЂРµРІС€РёР№ lock (PID {old_pid} РЅРµ СЃСѓС‰РµСЃС‚РІСѓРµС‚), СѓРґР°Р»СЏСЋ...")
+                logger.warning(f"⚠️ Найден устаревший lock (PID {old_pid} не существует), удаляю...")
                 os.remove(lock_file)
         except Exception:
-            logger.warning("вљ пёЏ РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ bot.lock, СѓРґР°Р»СЏСЋ Рё РїСЂРѕРґРѕР»Р¶Р°СЋ...")
+            logger.warning("⚠️ Не удалось прочитать bot.lock, удаляю и продолжаю...")
             os.remove(lock_file)
 
     with open(lock_file, 'w') as f:
         f.write(str(os.getpid()))
 
     logger.info("=" * 60)
-    logger.info("рџљЂ Р‘Р›РћРљРР РћР’РљР + AI (РїСЂРѕСЃС‚РѕР№ РїРµСЂРµСЃРєР°Р· РЅРѕРІРѕСЃС‚РµР№)")
+    logger.info("🚀 БЛОКИРОВКИ + AI (простой пересказ новостей)")
     logger.info("=" * 60)
 
     posted = None
@@ -1342,30 +1342,30 @@ async def main():
         init_clients()
 
         if not await check_telegram_connection():
-            logger.error("вќЊ РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ Рє Telegram. РџСЂРѕРІРµСЂСЊС‚Рµ С‚РѕРєРµРЅ Рё СЃРµС‚СЊ.")
+            logger.error("❌ Не удалось подключиться к Telegram. Проверьте токен и сеть.")
             return
 
         posted = PostedManager(config.db_file)
 
         if posted.verify_db():
-            logger.info("вњ… Р‘Р” OK")
+            logger.info("✅ БД OK")
         else:
-            logger.error("вќЊ РџСЂРѕР±Р»РµРјР° СЃ Р‘Р”!")
+            logger.error("❌ Проблема с БД!")
             return
 
         posted.cleanup(config.retention_days)
 
         stats = posted.get_stats()
-        logger.info(f"рџ“Љ РЎС‚Р°С‚РёСЃС‚РёРєР°: {stats['total_posted']} posted, {stats['total_rejected']} РІ С‡С‘СЂРЅРѕРј СЃРїРёСЃРєРµ")
+        logger.info(f"📊 Статистика: {stats['total_posted']} posted, {stats['total_rejected']} в чёрном списке")
 
         recent = posted.get_recent_posts(config.rotation_history_size)
         if recent:
-            logger.info(f"рџ“‹ РџРѕСЃР»РµРґРЅРёРµ {len(recent)} РїРѕСЃС‚РѕРІ:")
+            logger.info(f"📋 Последние {len(recent)} постов:")
             for p in recent:
-                logger.info(f"   вЂў [{p['topic']}][{p.get('source', '?')}] {p['title'][:50]}...")
+                logger.info(f"   • [{p['topic']}][{p.get('source', '?')}] {p['title'][:50]}...")
 
         if shutdown_event.is_set():
-            logger.info("рџ›‘ РџСЂРµСЂС‹РІР°РЅРёРµ РїРµСЂРµРґ Р·Р°РіСЂСѓР·РєРѕР№ RSS")
+            logger.info("🛑 Прерывание перед загрузкой RSS")
             return
 
         raw = await load_all_feeds()
@@ -1373,24 +1373,24 @@ async def main():
         sources_count: Dict[str, int] = {}
         for art in raw:
             sources_count[art.source] = sources_count.get(art.source, 0) + 1
-        logger.info(f"рџ“° РСЃС‚РѕС‡РЅРёРєРё: {sources_count}")
+        logger.info(f"📰 Источники: {sources_count}")
 
         working = sum(1 for v in sources_count.values() if v > 0)
-        logger.info(f"рџ“Ў Р Р°Р±РѕС‚Р°СЋС‰РёС… РёСЃС‚РѕС‡РЅРёРєРѕРІ: {working}/{len(RSS_FEEDS)}")
+        logger.info(f"📡 Работающих источников: {working}/{len(RSS_FEEDS)}")
 
         if shutdown_event.is_set():
-            logger.info("рџ›‘ РџСЂРµСЂС‹РІР°РЅРёРµ РїРµСЂРµРґ С„РёР»СЊС‚СЂР°С†РёРµР№")
+            logger.info("🛑 Прерывание перед фильтрацией")
             return
 
         candidates = filter_and_dedupe(raw, posted)
 
         if not candidates:
-            logger.info("рџ“­ РќРµС‚ РїРѕРґС…РѕРґСЏС‰РёС… РЅРѕРІРѕСЃС‚РµР№. Р—Р°РІРµСЂС€Р°РµРј СЂР°Р±РѕС‚Сѓ.")
+            logger.info("📭 Нет подходящих новостей. Завершаем работу.")
             return
 
         candidates = rotate_candidates(candidates, posted)
 
-        logger.info("рџЋЇ РўРѕРї-10 РєР°РЅРґРёРґР°С‚РѕРІ РїРѕСЃР»Рµ СЂРѕС‚Р°С†РёРё:")
+        logger.info("🎯 Топ-10 кандидатов после ротации:")
         for i, c in enumerate(candidates[:10]):
             topic_t = Topic.detect(f"{c.title} {c.summary}")
             logger.info(f"  {i+1}. [{topic_t}] [{c.source}] {c.title[:55]}")
@@ -1398,7 +1398,7 @@ async def main():
         published = False
         for article in candidates[:25]:
             if shutdown_event.is_set():
-                logger.info("рџ›‘ РџСЂРµСЂС‹РІР°РЅРёРµ РІ С†РёРєР»Рµ РїСѓР±Р»РёРєР°С†РёРё")
+                logger.info("🛑 Прерывание в цикле публикации")
                 break
 
             dup_result = posted.is_duplicate(article.link, article.title, article.summary)
@@ -1412,42 +1412,41 @@ async def main():
                 continue
 
             if await post_article(article, summary, posted):
-                logger.info("рџЏЃ Р“РѕС‚РѕРІРѕ!")
+                logger.info("🏁 Готово!")
                 published = True
                 break
 
             await asyncio.sleep(2)
 
         if not published:
-            logger.info("рџ” РќРµ СѓРґР°Р»РѕСЃСЊ РѕРїСѓР±Р»РёРєРѕРІР°С‚СЊ РЅРё РѕРґРЅСѓ СЃС‚Р°С‚СЊСЋ.")
+            logger.info("😔 Не удалось опубликовать ни одну статью.")
 
     except asyncio.CancelledError:
-        logger.info("рџ›‘ РћРїРµСЂР°С†РёСЏ РѕС‚РјРµРЅРµРЅР°")
+        logger.info("🛑 Операция отменена")
     except Exception as e:
-        logger.error(f"вќЊ РљСЂРёС‚РёС‡РµСЃРєР°СЏ РѕС€РёР±РєР°: {e}", exc_info=True)
+        logger.error(f"❌ Критическая ошибка: {e}", exc_info=True)
     finally:
         if posted:
             posted.close()
         if bot:
             try:
                 await bot.session.close()
-                logger.info("рџ”’ Telegram СЃРµСЃСЃРёСЏ Р·Р°РєСЂС‹С‚Р°")
+                logger.info("🔒 Telegram сессия закрыта")
             except Exception as e:
-                logger.error(f"вќЊ РћС€РёР±РєР° Р·Р°РєСЂС‹С‚РёСЏ Telegram: {e}")
+                logger.error(f"❌ Ошибка закрытия Telegram: {e}")
         if os.path.exists(lock_file):
             os.remove(lock_file)
-        logger.info("рџ‘‹ Р—Р°РІРµСЂС€РµРЅРёРµ СЂР°Р±РѕС‚С‹")
+        logger.info("👋 Завершение работы")
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("рџ›‘ РџСЂРµСЂРІР°РЅРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј")
+        logger.info("🛑 Прервано пользователем")
     except Exception as e:
-        logger.error(f"вќЊ Р¤Р°С‚Р°Р»СЊРЅР°СЏ РѕС€РёР±РєР°: {e}", exc_info=True)
+        logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

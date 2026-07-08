@@ -1117,6 +1117,84 @@ def has_repeated_sentences(text: str, max_repeats: int = 2) -> bool:
     return False
 
 
+def count_sentences(text: str) -> int:
+    parts = re.split(r'[.!?]+(?:\s+|$)', text.strip())
+    return len([p for p in parts if p.strip()])
+
+
+def strip_service_lines(text: str) -> str:
+    lines = text.split('\n')
+    cleaned_lines = []
+
+    for line in lines:
+        line_stripped = line.strip()
+        if re.match(
+            r'^(НОВОСТЬ|Заголовок|Содержание|Источник|ПОСТ|НОВОСТЬ\s*:|Заголовок\s*:|Содержание\s*:|Источник\s*:|ПОСТ\s*:)\s*',
+            line_stripped,
+            re.IGNORECASE
+        ):
+            continue
+        cleaned_lines.append(line)
+
+    text = '\n'.join(cleaned_lines)
+    text = re.sub(r'\bЗаголовок\s*:\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bСодержание\s*:\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bИсточник\s*:\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bНОВОСТЬ\s*:\s*', '', text, flags=re.IGNORECASE)
+    return text.strip()
+
+
+def is_valid_post_text(text: Optional[str], min_len: int) -> Tuple[bool, str]:
+    if text is None:
+        return False, "TEXT_NONE"
+
+    cleaned = text.strip()
+
+    if not cleaned:
+        return False, "TEXT_EMPTY"
+
+    if cleaned in {".", "...", "-", "—", ":"}:
+        return False, "TEXT_PUNCT_ONLY"
+
+    if cleaned.lower() in {"skip", "none", "null", "undefined"}:
+        return False, "TEXT_SERVICE_VALUE"
+
+    if len(cleaned) < min_len:
+        return False, f"TEXT_TOO_SHORT ({len(cleaned)} < {min_len})"
+
+    letters = sum(ch.isalpha() for ch in cleaned)
+    if letters < 50:
+        return False, f"TEXT_TOO_FEW_LETTERS ({letters})"
+
+    sentence_count = count_sentences(cleaned)
+    if sentence_count < 3:
+        return False, f"TEXT_TOO_FEW_SENTENCES ({sentence_count})"
+
+    if re.fullmatch(r'[\W_]+', cleaned, flags=re.UNICODE):
+        return False, "TEXT_NON_ALNUM_ONLY"
+
+    if re.search(
+        r'\b(и|в|на|с|по|для|от|из|за|до|не|что|как|это|все|его|она|они|мы|вы|он|но|то|так|уже|или|ещё|еще|при|без|тоже|также|будет|была|были|быть|может|этот|эта|эти|тот|того|этого|свой|свои)\s*$',
+        cleaned,
+        re.IGNORECASE
+    ):
+        return False, "TEXT_ENDS_BADLY"
+
+    return True, "OK"
+
+
+def build_final_post(article: Article, body_text: str, topic: str) -> str:
+    text = strip_service_lines(body_text)
+
+    if not text.endswith(('.', '!', '?')):
+        text += '.'
+
+    hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
+    source_link = f'\n\n🔗 <a href="{article.link}">Источник</a>'
+    final = f"{text}\n\n{hashtags}{source_link}{DISCLAIMER}"
+    return final.strip()
+
+
 # ====================== ГЕНЕРАЦИЯ ПОСТА (улучшенная) ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
@@ -1195,35 +1273,28 @@ async def generate_summary(article: Article) -> Optional[str]:
                     max_tokens=1500,  # увеличено с 1200
                     messages=[{"role": "user", "content": prompt}],
                 )
-                text = resp.choices[0].message.content.strip()
+                raw_text = resp.choices[0].message.content or ""
+                raw_text = raw_text.strip()
 
-                if not is_block_topic and "SKIP" in text.upper()[:10]:
+                logger.info(f"  ℹ️ [{model}] raw_len={len(raw_text)}")
+
+                if not is_block_topic and "SKIP" in raw_text.upper()[:10]:
                     logger.info("  ⏭️ SKIP (не подходит)")
                     return None
 
-                # Проверка минимальной длины
-                if len(text) < config.min_post_length:
-                    logger.warning(f"  ⚠️ Короткий ({len(text)} симв., минимум {config.min_post_length}), следующая модель...")
-                    break
+                cleaned_text = strip_service_lines(raw_text)
+                logger.info(f"  ℹ️ [{model}] cleaned_len={len(cleaned_text)}")
 
-                # Проверка на целостность: не менее 3 предложений
-                sentences = re.split(r'[.!?]\s+', text)
-                if len(sentences) < 3:
-                    logger.warning("  ⚠️ Меньше 3 предложений, перегенерация...")
+                ok, reason = is_valid_post_text(cleaned_text, config.min_post_length)
+                if not ok:
+                    logger.warning(f"  ⚠️ [{model}] reject before final build: {reason}")
                     continue
 
-                # Проверка: начинается с заглавной буквы
-                if not text[0].isupper():
+                if cleaned_text and not cleaned_text[0].isupper():
                     logger.warning("  ⚠️ Текст не начинается с заглавной буквы, перегенерация...")
                     continue
 
-                # Проверка на обрыв в конце (предлог, союз, вводное слово)
-                if re.search(r'\b(и|в|на|с|по|для|от|из|за|до|не|что|как|это|все|его|она|они|мы|вы|он|но|то|так|уже|или|ещё|еще|при|без|тоже|также|будет|была|были|быть|может|этот|эта|эти|тот|того|этого|свой|свои)\s*$', text, re.IGNORECASE):
-                    logger.warning("  ⚠️ Текст обрывается на предлоге/союзе, перегенерация...")
-                    continue
-
-                # Проверка на штампы
-                water_count = sum(1 for phrase in water_phrases if phrase in text.lower())
+                water_count = sum(1 for phrase in water_phrases if phrase in cleaned_text.lower())
                 if water_count >= 3:
                     logger.warning(f"  ⚠️ Штампы ({water_count}), перегенерация...")
                     if attempt == config.groq_retries_per_model - 1:
@@ -1231,32 +1302,22 @@ async def generate_summary(article: Article) -> Optional[str]:
                         return None
                     continue
 
-                if has_repeated_sentences(text, config.max_repeat_sentences):
+                if has_repeated_sentences(cleaned_text, config.max_repeat_sentences):
                     logger.warning("  ⚠️ Повторяющиеся предложения, следующая модель...")
                     continue
 
-                # Пост-обработка: удаляем служебные маркеры
-                lines = text.split('\n')
-                cleaned_lines = []
-                for line in lines:
-                    line_stripped = line.strip()
-                    if re.match(r'^(НОВОСТЬ|Заголовок|Содержание|Источник|ПОСТ|НОВОСТЬ\s*:|Заголовок\s*:|Содержание\s*:|Источник\s*:|ПОСТ\s*:)\s*', line_stripped, re.IGNORECASE):
-                        continue
-                    cleaned_lines.append(line)
-                text = '\n'.join(cleaned_lines)
-                text = re.sub(r'\bЗаголовок\s*:\s*', '', text, flags=re.IGNORECASE)
-                text = re.sub(r'\bСодержание\s*:\s*', '', text, flags=re.IGNORECASE)
-                text = re.sub(r'\bИсточник\s*:\s*', '', text, flags=re.IGNORECASE)
-                text = re.sub(r'\bНОВОСТЬ\s*:\s*', '', text, flags=re.IGNORECASE)
+                final = build_final_post(article, cleaned_text, topic)
 
-                # Убедимся, что текст заканчивается точкой
-                if not text.endswith(('.', '!', '?')):
-                    text += '.'
+                logger.info(
+                    f"  ℹ️ [{model}] final_len={len(final)} preview={final[:120].replace(chr(10), ' ')}"
+                )
 
-                hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
-                source_link = f'\n\n🔗 <a href="{article.link}">Источник</a>'
-                final = f"{text}\n\n{hashtags}{source_link}{DISCLAIMER}"
-                logger.info(f"  ✅ [{model}]: {len(text)} симв.")
+                ok_final, reason_final = is_valid_post_text(cleaned_text, config.min_post_length)
+                if not ok_final:
+                    logger.warning(f"  ⚠️ [{model}] reject after final build: {reason_final}")
+                    continue
+
+                logger.info(f"  ✅ [{model}]: body={len(cleaned_text)} symb, final={len(final)} symb")
                 return final
 
             except Exception as e:
@@ -1274,9 +1335,22 @@ async def generate_summary(article: Article) -> Optional[str]:
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
     topic = Topic.detect(f"{article.title} {article.summary}")
     subject = topic
+    body_part = text.split('\n\n🔗 <a href="', 1)[0].strip()
+    ok, reason = is_valid_post_text(body_part, config.min_post_length)
+
+    if not ok:
+        logger.error(
+            f"❌ POST_REJECTED_BEFORE_SEND: {reason} | "
+            f"body_len={len(body_part)} | final_len={len(text)} | "
+            f"title={article.title[:80]}"
+        )
+        return False
 
     try:
-        logger.info("  📤 Отправка поста...")
+        logger.info(
+            f"  📤 Отправка поста... body_len={len(body_part)} "
+            f"final_len={len(text)} preview={body_part[:120].replace(chr(10), ' ')}"
+        )
         await bot.send_message(config.channel_id, text, disable_web_page_preview=False)
         logger.info(f"✅ ОПУБЛИКОВАНО [{topic}][{article.source}]: {article.title[:50]}")
     except Exception as e:
@@ -1411,10 +1485,13 @@ async def main():
                 posted.log_rejected(article, "GENERATION_FAILED")
                 continue
 
-            if await post_article(article, summary, posted):
+            posted_ok = await post_article(article, summary, posted)
+            if posted_ok:
                 logger.info("🏁 Готово!")
                 published = True
                 break
+            else:
+                posted.log_rejected(article, "POST_VALIDATION_OR_SEND_FAILED")
 
             await asyncio.sleep(2)
 

@@ -119,8 +119,9 @@ def init_clients():
 
 
 GROQ_MODELS = [
+    "gpt-oss-20b",
+    "mixtral-8x7b-32768",
     "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
 ]
 
 # ====================== RSS FEEDS ======================
@@ -1275,6 +1276,20 @@ async def generate_summary(article: Article) -> Optional[str]:
                 )
                 raw_text = resp.choices[0].message.content or ""
                 raw_text = raw_text.strip()
+
+                # Очистка для llama-3.3-70b-versatile
+                if model == "llama-3.3-70b-versatile":
+                    raw_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', raw_text)
+                    raw_text = re.sub(r'__([^_]+)__', r'\1', raw_text)
+                    raw_text = re.sub(r'\*([^*]+)\*', r'\1', raw_text)
+                    raw_text = re.sub(r'_([^_]+)_', r'\1', raw_text)
+                    raw_text = re.sub(r'```[\s\S]*?```', '', raw_text)
+                    raw_text = re.sub(r'`([^`]+)`', r'\1', raw_text)
+                    for pref in ["ПОСТ:", "НОВОСТЬ:", "Заголовок:", "Содержание:", "Источник:"]:
+                        if raw_text.upper().startswith(pref.upper()):
+                            raw_text = raw_text[len(pref):].strip()
+                    if len(raw_text) < 100:
+                        continue
 
                 logger.info(f"  ℹ️ [{model}] raw_len={len(raw_text)}")
 

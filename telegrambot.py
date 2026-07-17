@@ -42,7 +42,6 @@ logger = logging.getLogger(__name__)
 # ====================== CONFIG ======================
 class Config:
     def __init__(self):
-        # Используем GROQ_API_KEY (как в твоём workflow)
         self.groq_api_key = os.getenv("GROQ_API_KEY")
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.channel_id = os.getenv("CHANNEL_ID")
@@ -119,7 +118,6 @@ def init_clients():
         raise
 
 
-# ====================== НОВЫЙ СПИСОК МОДЕЛЕЙ ======================
 GROQ_MODELS = [
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
@@ -1180,8 +1178,12 @@ def is_valid_post_text(text: Optional[str], min_len: int) -> Tuple[bool, str]:
     return True, "OK"
 
 
-def build_final_post(article: Article, body_text: str, topic: str) -> str:
-    text = strip_service_lines(body_text)
+# ====================== ИСПРАВЛЕННАЯ build_final_post ======================
+def build_final_post(article: Article, body_text: str, topic: str, skip_clean: bool = False) -> str:
+    if skip_clean:
+        text = body_text.strip()
+    else:
+        text = strip_service_lines(body_text)
 
     if not text.endswith(('.', '!', '?')):
         text += '.'
@@ -1192,7 +1194,7 @@ def build_final_post(article: Article, body_text: str, topic: str) -> str:
     return final.strip()
 
 
-# ====================== ГЕНЕРАЦИЯ ПОСТА (с исправленной очисткой) ======================
+# ====================== ГЕНЕРАЦИЯ ПОСТА (с исправленным вызовом build_final_post) ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     text_for_topic = f"{article.title} {article.summary}"
@@ -1274,17 +1276,14 @@ async def generate_summary(article: Article) -> Optional[str]:
 
                 logger.info(f"  ℹ️ [{model}] raw_len={len(raw_text)}")
 
-                # ========== СПЕЦИАЛЬНАЯ ОЧИСТКА ДЛЯ LLAMA-3.3 ==========
+                # Специальная очистка для llama-3.3
                 if model == "llama-3.3-70b-versatile":
-                    # Убираем только явные префиксы, но не вырезаем строки
                     for pref in ["ПОСТ:", "НОВОСТЬ:", "Заголовок:", "Содержание:", "Источник:"]:
                         if raw_text.upper().startswith(pref.upper()):
                             raw_text = raw_text[len(pref):].strip()
-                    # Не используем strip_service_lines, чтобы не занулить текст
                     cleaned_text = raw_text
                 else:
                     cleaned_text = strip_service_lines(raw_text)
-                # ========================================================
 
                 logger.info(f"  ℹ️ [{model}] cleaned_len={len(cleaned_text)}")
 
@@ -1313,13 +1312,17 @@ async def generate_summary(article: Article) -> Optional[str]:
                     logger.warning("  ⚠️ Повторяющиеся предложения, следующая модель...")
                     continue
 
-                final = build_final_post(article, cleaned_text, topic)
+                # 🔥 Передаём skip_clean=True для llama-3.3
+                skip_clean = (model == "llama-3.3-70b-versatile")
+                final = build_final_post(article, cleaned_text, topic, skip_clean=skip_clean)
 
                 logger.info(
                     f"  ℹ️ [{model}] final_len={len(final)} preview={final[:120].replace(chr(10), ' ')}"
                 )
 
-                ok_final, reason_final = is_valid_post_text(cleaned_text, config.min_post_length)
+                # Проверяем только тело поста (без хештегов и ссылки)
+                body_part = final.split('\n\n🔗 <a href="', 1)[0].strip()
+                ok_final, reason_final = is_valid_post_text(body_part, config.min_post_length)
                 if not ok_final:
                     logger.warning(f"  ⚠️ [{model}] reject after final build: {reason_final}")
                     continue
@@ -1531,7 +1534,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

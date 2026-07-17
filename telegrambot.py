@@ -42,7 +42,8 @@ logger = logging.getLogger(__name__)
 # ====================== CONFIG ======================
 class Config:
     def __init__(self):
-        self.groq_api_key = os.getenv("GROQ_API_KEY")
+        # Используем POVTORGROK (как ты просил)
+        self.groq_api_key = os.getenv("POVTORGROK")
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.channel_id = os.getenv("CHANNEL_ID")
         self.retention_days = 90
@@ -60,7 +61,7 @@ class Config:
 
         self.alternation_enabled = True
 
-        self.min_post_length = 700  # Увеличено с 600
+        self.min_post_length = 700
         self.max_article_age_hours = 720
         self.min_ai_score = 1
         self.max_repeat_sentences = 2
@@ -82,7 +83,7 @@ class Config:
         self.http_timeout = 60
 
         missing = []
-        for var, name in [(self.groq_api_key, "GROQ_API_KEY"),
+        for var, name in [(self.groq_api_key, "POVTORGROK"),
                           (self.telegram_token, "TELEGRAM_BOT_TOKEN"),
                           (self.channel_id, "CHANNEL_ID")]:
             if not var:
@@ -118,10 +119,11 @@ def init_clients():
         raise
 
 
+# ====================== НОВЫЙ СПИСОК МОДЕЛЕЙ ======================
 GROQ_MODELS = [
-    "gpt-oss-20b",
-    "mixtral-8x7b-32768",
     "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "gemma2-9b-it",
 ]
 
 # ====================== RSS FEEDS ======================
@@ -205,13 +207,11 @@ PROMO_PATTERNS = [
 
 REVIEW_KEYWORDS = ["review", "tested", "hands-on", "обзор", "тест", "скидка", "discount", "deal", "best", "top 10"]
 
-# Фильтр мусора (вакансии, работа)
 JUNK_KEYWORDS = [
     "вакансия", "ищет менеджера", "требуется", "softline ищет", "менеджер продукта",
     "вакансия", "резюме", "работа", "сотрудник", "нанимает", "hr", "рекрутинг"
 ]
 
-# ====================== ГЕО-ФИЛЬТР (теперь только для блокировок, для AI не используется) ======================
 RUSSIA_KEYWORDS = ["россия", "рф", "минц", "госдума", "путин", "москва", "санкт-петербург", "совет федерации", "кремль", "правительство рф", "роскомнадзор", "ркн"]
 
 
@@ -473,17 +473,14 @@ def is_relevant(article: Article) -> bool:
     is_ai = has_strong_ai or (has_weak_ai and config.min_ai_score <= 1)
     is_block = any(kw in text for kw in BLOCK_KEYWORDS)
 
-    # Блок-новости всегда пропускаем
     if is_block:
         logger.info(f"  ✅ BLOCK (приоритет): {article.title[:55]}")
         return True
 
-    # Для AI-новостей: убираем географический фильтр – публикуем любые AI-новости
     if is_ai:
         logger.info(f"  ✅ AI (без гео-фильтра): {article.title[:55]}")
         return True
 
-    # Если не AI и не блок – отсекаем
     logger.info(f"  🚫 NEITHER AI NOR BLOCK: {article.title[:50]}")
     return False
 
@@ -574,7 +571,6 @@ class PostedManager:
             conn.commit()
         logger.info("📚 База данных инициализирована")
 
-    # ---- Остальные методы (без отчётов) ----
     def _add_rejected(self, norm_url: str, title: str, reason: str):
         pass
 
@@ -1196,7 +1192,7 @@ def build_final_post(article: Article, body_text: str, topic: str) -> str:
     return final.strip()
 
 
-# ====================== ГЕНЕРАЦИЯ ПОСТА (улучшенная) ======================
+# ====================== ГЕНЕРАЦИЯ ПОСТА (с исправленной очисткой) ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     text_for_topic = f"{article.title} {article.summary}"
@@ -1264,41 +1260,37 @@ async def generate_summary(article: Article) -> Optional[str]:
                 await asyncio.sleep(1)
                 logger.info(f"  🤖 {model} (попытка {attempt + 1})")
 
-                # Для второй попытки используем чуть более высокую температуру
                 temp = 0.8 if attempt == 1 else 0.7
 
                 resp = await asyncio.to_thread(
                     groq_client.chat.completions.create,
                     model=model,
                     temperature=temp,
-                    max_tokens=1500,  # увеличено с 1200
+                    max_tokens=1500,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 raw_text = resp.choices[0].message.content or ""
                 raw_text = raw_text.strip()
 
-                # Очистка для llama-3.3-70b-versatile
+                logger.info(f"  ℹ️ [{model}] raw_len={len(raw_text)}")
+
+                # ========== СПЕЦИАЛЬНАЯ ОЧИСТКА ДЛЯ LLAMA-3.3 ==========
                 if model == "llama-3.3-70b-versatile":
-                    raw_text = re.sub(r'\*\*([^*]+)\*\*', r'\1', raw_text)
-                    raw_text = re.sub(r'__([^_]+)__', r'\1', raw_text)
-                    raw_text = re.sub(r'\*([^*]+)\*', r'\1', raw_text)
-                    raw_text = re.sub(r'_([^_]+)_', r'\1', raw_text)
-                    raw_text = re.sub(r'```[\s\S]*?```', '', raw_text)
-                    raw_text = re.sub(r'`([^`]+)`', r'\1', raw_text)
+                    # Убираем только явные префиксы, но не вырезаем строки
                     for pref in ["ПОСТ:", "НОВОСТЬ:", "Заголовок:", "Содержание:", "Источник:"]:
                         if raw_text.upper().startswith(pref.upper()):
                             raw_text = raw_text[len(pref):].strip()
-                    if len(raw_text) < 100:
-                        continue
+                    # Не используем strip_service_lines, чтобы не занулить текст
+                    cleaned_text = raw_text
+                else:
+                    cleaned_text = strip_service_lines(raw_text)
+                # ========================================================
 
-                logger.info(f"  ℹ️ [{model}] raw_len={len(raw_text)}")
+                logger.info(f"  ℹ️ [{model}] cleaned_len={len(cleaned_text)}")
 
                 if not is_block_topic and "SKIP" in raw_text.upper()[:10]:
                     logger.info("  ⏭️ SKIP (не подходит)")
                     return None
-
-                cleaned_text = strip_service_lines(raw_text)
-                logger.info(f"  ℹ️ [{model}] cleaned_len={len(cleaned_text)}")
 
                 ok, reason = is_valid_post_text(cleaned_text, config.min_post_length)
                 if not ok:
@@ -1539,7 +1531,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

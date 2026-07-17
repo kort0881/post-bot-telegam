@@ -42,8 +42,8 @@ logger = logging.getLogger(__name__)
 # ====================== CONFIG ======================
 class Config:
     def __init__(self):
-        # Используем POVTORGROK (как ты просил)
-        self.groq_api_key = os.getenv("POVTORGROK")
+        # Используем GROQ_API_KEY (как в твоём workflow)
+        self.groq_api_key = os.getenv("GROQ_API_KEY")
         self.telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.channel_id = os.getenv("CHANNEL_ID")
         self.retention_days = 90
@@ -83,7 +83,7 @@ class Config:
         self.http_timeout = 60
 
         missing = []
-        for var, name in [(self.groq_api_key, "POVTORGROK"),
+        for var, name in [(self.groq_api_key, "GROQ_API_KEY"),
                           (self.telegram_token, "TELEGRAM_BOT_TOKEN"),
                           (self.channel_id, "CHANNEL_ID")]:
             if not var:
@@ -1531,7 +1531,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

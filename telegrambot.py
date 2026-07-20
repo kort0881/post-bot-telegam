@@ -125,27 +125,30 @@ GROQ_MODELS = [
 ]
 
 # ====================== RSS FEEDS ======================
+# ⚠️ Единственный активный источник – 3DNews Hardware.
+# Остальные закомментированы – раскомментируйте при необходимости.
 RSS_FEEDS = [
-    ("https://roskomsvoboda.org/feed/", "Роскомсвобода"),
-    ("https://rkn.gov.ru/rss/news.xml", "РКН"),
-    ("https://www.comnews.ru/rss/news", "ComNews"),
-    ("https://news.google.com/rss/search?q=блокировка+РКН+VPN+россия&hl=ru&gl=RU&ceid=RU:ru", "Google News (Блокировки)"),
-    ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch AI"),
-    ("https://venturebeat.com/category/ai/feed/", "VentureBeat AI"),
-    ("https://arstechnica.com/tag/artificial-intelligence/feed/", "Ars Technica AI"),
-    ("https://www.wired.com/feed/tag/ai/latest/rss", "WIRED AI"),
-    ("https://the-decoder.com/feed/", "The Decoder"),
-    ("https://9to5google.com/guides/google-ai/feed/", "9to5Google AI"),
-    ("https://9to5mac.com/guides/apple-intelligence/feed/", "9to5Mac AI"),
-    ("https://www.zdnet.com/topic/artificial-intelligence/rss.xml", "ZDNet AI"),
-    ("https://www.technologyreview.com/topic/artificial-intelligence/feed", "MIT Tech Review AI"),
-    ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
-    ("https://engineering.fb.com/category/ml-applications/feed/", "Meta AI Blog"),
-    ("https://kod.ru/rss", "Kod.ru"),
-    ("https://news.ycombinator.com/rss", "Hacker News"),
-    ("https://habr.com/ru/rss/feed/1cf1798b4d67ac63d1869bba8f26920f"
-     "?fl=ru&complexity=high&rating=10&types%5B%5D=article"
-     "&types%5B%5D=post&types%5B%5D=news", "Habr AI"),
+    # ("https://roskomsvoboda.org/feed/", "Роскомсвобода"),
+    # ("https://rkn.gov.ru/rss/news.xml", "РКН"),
+    # ("https://www.comnews.ru/rss/news", "ComNews"),
+    # ("https://news.google.com/rss/search?q=блокировка+РКН+VPN+россия&hl=ru&gl=RU&ceid=RU:ru", "Google News (Блокировки)"),
+    # ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch AI"),
+    # ("https://venturebeat.com/category/ai/feed/", "VentureBeat AI"),
+    # ("https://arstechnica.com/tag/artificial-intelligence/feed/", "Ars Technica AI"),
+    # ("https://www.wired.com/feed/tag/ai/latest/rss", "WIRED AI"),
+    # ("https://the-decoder.com/feed/", "The Decoder"),
+    # ("https://9to5google.com/guides/google-ai/feed/", "9to5Google AI"),
+    # ("https://9to5mac.com/guides/apple-intelligence/feed/", "9to5Mac AI"),
+    # ("https://www.zdnet.com/topic/artificial-intelligence/rss.xml", "ZDNet AI"),
+    # ("https://www.technologyreview.com/topic/artificial-intelligence/feed", "MIT Tech Review AI"),
+    # ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
+    # ("https://engineering.fb.com/category/ml-applications/feed/", "Meta AI Blog"),
+    # ("https://kod.ru/rss", "Kod.ru"),
+    # ("https://news.ycombinator.com/rss", "Hacker News"),
+    # ("https://habr.com/ru/rss/feed/1cf1798b4d67ac63d1869bba8f26920f"
+    #  "?fl=ru&complexity=high&rating=10&types%5B%5D=article"
+    #  "&types%5B%5D=post&types%5B%5D=news", "Habr AI"),
+    ("https://3dnews.ru/hardware-news/rss", "3DNews Hardware"),  # ✅ активен
 ]
 
 # ---------- КЛЮЧЕВЫЕ СЛОВА ----------
@@ -1534,7 +1537,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

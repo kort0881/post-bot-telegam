@@ -125,7 +125,16 @@ GROQ_MODELS = [
 ]
 
 # ====================== RSS FEEDS ======================
+PRIMARY_SOURCES = {
+    "3DNews Hardware",
+    "3DNews Software",
+}
+
 RSS_FEEDS = [
+    ("https://3dnews.ru/hardware-news/rss", "3DNews Hardware"),
+    ("https://3dnews.ru/software-news/rss", "3DNews Software"),
+
+    # Остальные — резервные источники
     ("https://roskomsvoboda.org/feed/", "Роскомсвобода"),
     ("https://rkn.gov.ru/rss/news.xml", "РКН"),
     ("https://www.comnews.ru/rss/news", "ComNews"),
@@ -1027,32 +1036,47 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         candidates.append(article)
         stats["passed"] += 1
 
-    block_candidates = []
-    ai_candidates = []
-    for art in candidates:
-        text = f"{art.title} {art.summary}".lower()
-        if any(kw in text for kw in BLOCK_KEYWORDS):
-            block_candidates.append(art)
-        else:
-            ai_candidates.append(art)
+    # --- НОВАЯ ЛОГИКА ПРИОРИТЕТА 3DNews ---
+    primary_candidates = [
+        article for article in candidates
+        if article.source in PRIMARY_SOURCES
+    ]
 
-    if block_candidates:
-        logger.info(f"🔒 Найдено {len(block_candidates)} блок-статей, берём их в приоритет")
-        block_candidates.sort(key=lambda a: block_relevance_score(f"{a.title} {a.summary}"), reverse=True)
-        candidates = block_candidates
-    else:
-        logger.info(f"🌐 Блок-новостей нет, берём AI-статьи (без гео-фильтра)")
-        ai_candidates.sort(key=lambda a: ai_relevance_score(f"{a.title} {a.summary}"), reverse=True)
-        candidates = ai_candidates[:5]
+    fallback_candidates = [
+        article for article in candidates
+        if article.source not in PRIMARY_SOURCES
+    ]
 
-    candidates = interleave_by_source(candidates)
+    def relevance_score(article: Article) -> int:
+        text = f"{article.title} {article.summary}"
+        if any(kw in text.lower() for kw in BLOCK_KEYWORDS):
+            return 1000 + block_relevance_score(text)
+        return ai_relevance_score(text)
 
-    logger.info("📊 Итоги фильтрации:")
-    logger.info(f"   filtered={stats['filtered_out']}, batch_dup={stats['batch_dup']}, db_dup={stats['db_dup']}, diversity={stats['diversity']}")
-    logger.info(f"   subject_limit={stats['subject_limit']}, subject_rotation={stats['subject_rotation']}, batch_subject={stats['batch_subject']}, blacklisted={stats['blacklisted']}")
-    logger.info(f"✅ Кандидатов после приоритета: {len(candidates)} из {len(articles)}")
+    # Сначала пробуем только два главных RSS 3DNews
+    if primary_candidates:
+        primary_candidates.sort(
+            key=relevance_score,
+            reverse=True
+        )
+        logger.info(
+            f"⭐ Основные 3DNews-источники: "
+            f"{len(primary_candidates)} подходящих кандидатов"
+        )
+        return interleave_by_source(primary_candidates)[:5]
 
-    return candidates
+    # Резерв включается только при полном отсутствии кандидатов 3DNews
+    fallback_candidates.sort(
+        key=relevance_score,
+        reverse=True
+    )
+
+    logger.info(
+        f"🔄 В основных 3DNews нет подходящих новостей. "
+        f"Использую резервные источники: {len(fallback_candidates)} кандидатов"
+    )
+
+    return interleave_by_source(fallback_candidates)[:5]
 
 
 def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[Article]:
@@ -1534,7 +1558,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

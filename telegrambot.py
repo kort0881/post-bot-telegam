@@ -25,7 +25,7 @@ import feedparser
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from groq import Groq
+from openai import AsyncOpenAI   # <--- заменили
 
 # ====================== ЛОГИ ======================
 logging.basicConfig(
@@ -94,13 +94,13 @@ class Config:
 config = Config()
 
 bot: Optional[Bot] = None
-groq_client: Optional[Groq] = None
+openai_client: Optional[AsyncOpenAI] = None   # <--- заменили
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
 
 def init_clients():
-    global bot, groq_client
+    global bot, openai_client
     try:
         bot = Bot(
             token=config.telegram_token,
@@ -111,18 +111,22 @@ def init_clients():
         logger.error(f"❌ Ошибка инициализации Telegram Bot: {e}")
         raise
     try:
-        groq_client = Groq(api_key=config.groq_api_key)
-        logger.info("✅ Groq client инициализирован")
+        openai_client = AsyncOpenAI(
+            api_key=config.groq_api_key,
+            base_url="https://api.groq.com/openai/v1"
+        )
+        logger.info("✅ OpenAI-совместимый клиент инициализирован")
     except Exception as e:
-        logger.error(f"❌ Ошибка инициализации Groq: {e}")
+        logger.error(f"❌ Ошибка инициализации клиента: {e}")
         raise
 
 
+# ===== МОДЕЛИ (обновлены) =====
 GROQ_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "gemma2-9b-it",
+    "openai/gpt-oss-120b",   # новая модель
+    # при необходимости можно добавить другие
 ]
+
 
 # ====================== RSS FEEDS ======================
 PRIMARY_SOURCES = {
@@ -134,7 +138,6 @@ RSS_FEEDS = [
     ("https://3dnews.ru/hardware-news/rss", "3DNews Hardware"),
     ("https://3dnews.ru/software-news/rss", "3DNews Software"),
 
-    # Остальные — резервные источники
     ("https://roskomsvoboda.org/feed/", "Роскомсвобода"),
     ("https://rkn.gov.ru/rss/news.xml", "РКН"),
     ("https://www.comnews.ru/rss/news", "ComNews"),
@@ -1202,7 +1205,7 @@ def is_valid_post_text(text: Optional[str], min_len: int) -> Tuple[bool, str]:
     return True, "OK"
 
 
-# ====================== ИСПРАВЛЕННАЯ build_final_post ======================
+# ====================== build_final_post ======================
 def build_final_post(article: Article, body_text: str, topic: str, skip_clean: bool = False) -> str:
     if skip_clean:
         text = body_text.strip()
@@ -1218,7 +1221,7 @@ def build_final_post(article: Article, body_text: str, topic: str, skip_clean: b
     return final.strip()
 
 
-# ====================== ГЕНЕРАЦИЯ ПОСТА (с исправленным вызовом build_final_post) ======================
+# ====================== ГЕНЕРАЦИЯ ПОСТА (асинхронно, с новой моделью) ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     text_for_topic = f"{article.title} {article.summary}"
@@ -1288,8 +1291,8 @@ async def generate_summary(article: Article) -> Optional[str]:
 
                 temp = 0.8 if attempt == 1 else 0.7
 
-                resp = await asyncio.to_thread(
-                    groq_client.chat.completions.create,
+                # Асинхронный вызов напрямую
+                resp = await openai_client.chat.completions.create(
                     model=model,
                     temperature=temp,
                     max_tokens=1500,
@@ -1300,14 +1303,11 @@ async def generate_summary(article: Article) -> Optional[str]:
 
                 logger.info(f"  ℹ️ [{model}] raw_len={len(raw_text)}")
 
-                # Специальная очистка для llama-3.3
-                if model == "llama-3.3-70b-versatile":
-                    for pref in ["ПОСТ:", "НОВОСТЬ:", "Заголовок:", "Содержание:", "Источник:"]:
-                        if raw_text.upper().startswith(pref.upper()):
-                            raw_text = raw_text[len(pref):].strip()
-                    cleaned_text = raw_text
-                else:
-                    cleaned_text = strip_service_lines(raw_text)
+                # Специальная очистка: для новых моделей убираем лишние префиксы
+                for pref in ["ПОСТ:", "НОВОСТЬ:", "Заголовок:", "Содержание:", "Источник:"]:
+                    if raw_text.upper().startswith(pref.upper()):
+                        raw_text = raw_text[len(pref):].strip()
+                cleaned_text = strip_service_lines(raw_text)
 
                 logger.info(f"  ℹ️ [{model}] cleaned_len={len(cleaned_text)}")
 
@@ -1336,8 +1336,8 @@ async def generate_summary(article: Article) -> Optional[str]:
                     logger.warning("  ⚠️ Повторяющиеся предложения, следующая модель...")
                     continue
 
-                # 🔥 Передаём skip_clean=True для llama-3.3
-                skip_clean = (model == "llama-3.3-70b-versatile")
+                # Для новых моделей skip_clean=True, чтобы не удалять служебные строки (их уже нет)
+                skip_clean = True
                 final = build_final_post(article, cleaned_text, topic, skip_clean=skip_clean)
 
                 logger.info(
@@ -1558,7 +1558,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

@@ -94,7 +94,7 @@ class Config:
 config = Config()
 
 bot: Optional[Bot] = None
-openai_client: Optional[AsyncOpenAI] = None   # <--- заменили
+openai_client: Optional[AsyncOpenAI] = None
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
@@ -121,10 +121,11 @@ def init_clients():
         raise
 
 
-# ===== МОДЕЛИ (обновлены) =====
+# ===== МОДЕЛИ (исправлено: добавлены резервные) =====
 GROQ_MODELS = [
-    "openai/gpt-oss-120b",   # новая модель
-    # при необходимости можно добавить другие
+    "openai/gpt-oss-120b",      # основная
+    "llama-3.3-70b-versatile",  # резерв
+    "gemma2-9b-it",             # резерв
 ]
 
 
@@ -1221,7 +1222,7 @@ def build_final_post(article: Article, body_text: str, topic: str, skip_clean: b
     return final.strip()
 
 
-# ====================== ГЕНЕРАЦИЯ ПОСТА (асинхронно, с новой моделью) ======================
+# ====================== ГЕНЕРАЦИЯ ПОСТА (исправлено: проверка пустого ответа и резервные модели) ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     text_for_topic = f"{article.title} {article.summary}"
@@ -1291,7 +1292,6 @@ async def generate_summary(article: Article) -> Optional[str]:
 
                 temp = 0.8 if attempt == 1 else 0.7
 
-                # Асинхронный вызов напрямую
                 resp = await openai_client.chat.completions.create(
                     model=model,
                     temperature=temp,
@@ -1302,6 +1302,11 @@ async def generate_summary(article: Article) -> Optional[str]:
                 raw_text = raw_text.strip()
 
                 logger.info(f"  ℹ️ [{model}] raw_len={len(raw_text)}")
+
+                # ============ НОВАЯ ПРОВЕРКА: если ответ пустой → сразу следующая модель ============
+                if not raw_text or len(raw_text) == 0:
+                    logger.warning(f"  ⚠️ [{model}] вернул пустой ответ, пробуем следующую модель...")
+                    continue
 
                 # Специальная очистка: для новых моделей убираем лишние префиксы
                 for pref in ["ПОСТ:", "НОВОСТЬ:", "Заголовок:", "Содержание:", "Источник:"]:
@@ -1336,7 +1341,6 @@ async def generate_summary(article: Article) -> Optional[str]:
                     logger.warning("  ⚠️ Повторяющиеся предложения, следующая модель...")
                     continue
 
-                # Для новых моделей skip_clean=True, чтобы не удалять служебные строки (их уже нет)
                 skip_clean = True
                 final = build_final_post(article, cleaned_text, topic, skip_clean=skip_clean)
 
@@ -1344,7 +1348,6 @@ async def generate_summary(article: Article) -> Optional[str]:
                     f"  ℹ️ [{model}] final_len={len(final)} preview={final[:120].replace(chr(10), ' ')}"
                 )
 
-                # Проверяем только тело поста (без хештегов и ссылки)
                 body_part = final.split('\n\n🔗 <a href="', 1)[0].strip()
                 ok_final, reason_final = is_valid_post_text(body_part, config.min_post_length)
                 if not ok_final:
@@ -1366,6 +1369,7 @@ async def generate_summary(article: Article) -> Optional[str]:
     return None
 
 
+# ====================== ОСТАЛЬНОЙ КОД БЕЗ ИЗМЕНЕНИЙ (post_article, main и т.д.) ======================
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
     topic = Topic.detect(f"{article.title} {article.summary}")
     subject = topic
@@ -1558,7 +1562,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

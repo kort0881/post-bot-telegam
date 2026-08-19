@@ -25,7 +25,7 @@ import feedparser
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from openai import AsyncOpenAI   # <--- заменили
+from groq import Groq
 
 # ====================== ЛОГИ ======================
 logging.basicConfig(
@@ -94,13 +94,13 @@ class Config:
 config = Config()
 
 bot: Optional[Bot] = None
-openai_client: Optional[AsyncOpenAI] = None
+groq_client: Optional[Groq] = None
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
 
 def init_clients():
-    global bot, openai_client
+    global bot, groq_client
     try:
         bot = Bot(
             token=config.telegram_token,
@@ -111,21 +111,19 @@ def init_clients():
         logger.error(f"❌ Ошибка инициализации Telegram Bot: {e}")
         raise
     try:
-        openai_client = AsyncOpenAI(
-            api_key=config.groq_api_key,
-            base_url="https://api.groq.com/openai/v1"
-        )
-        logger.info("✅ OpenAI-совместимый клиент инициализирован")
+        groq_client = Groq(api_key=config.groq_api_key)
+        logger.info("✅ Groq client инициализирован")
     except Exception as e:
-        logger.error(f"❌ Ошибка инициализации клиента: {e}")
+        logger.error(f"❌ Ошибка инициализации Groq: {e}")
         raise
 
 
-# ===== МОДЕЛИ (исправлено: добавлены резервные) =====
+# ===== АКТУАЛЬНЫЕ МОДЕЛИ (из вашего списка) =====
 GROQ_MODELS = [
     "openai/gpt-oss-120b",      # основная
-    "llama-3.3-70b-versatile",  # резерв
-    "gemma2-9b-it",             # резерв
+    "openai/gpt-oss-20b",       # быстрая
+    "groq/compound",            # своя модель Groq
+    "qwen/qwen3.6-27b",         # опционально
 ]
 
 
@@ -1222,7 +1220,7 @@ def build_final_post(article: Article, body_text: str, topic: str, skip_clean: b
     return final.strip()
 
 
-# ====================== ГЕНЕРАЦИЯ ПОСТА (исправлено: проверка пустого ответа и резервные модели) ======================
+# ====================== ГЕНЕРАЦИЯ ПОСТА ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     text_for_topic = f"{article.title} {article.summary}"
@@ -1292,7 +1290,8 @@ async def generate_summary(article: Article) -> Optional[str]:
 
                 temp = 0.8 if attempt == 1 else 0.7
 
-                resp = await openai_client.chat.completions.create(
+                resp = await asyncio.to_thread(
+                    groq_client.chat.completions.create,
                     model=model,
                     temperature=temp,
                     max_tokens=1500,
@@ -1303,12 +1302,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 
                 logger.info(f"  ℹ️ [{model}] raw_len={len(raw_text)}")
 
-                # ============ НОВАЯ ПРОВЕРКА: если ответ пустой → сразу следующая модель ============
-                if not raw_text or len(raw_text) == 0:
-                    logger.warning(f"  ⚠️ [{model}] вернул пустой ответ, пробуем следующую модель...")
-                    continue
-
-                # Специальная очистка: для новых моделей убираем лишние префиксы
+                # Специальная очистка (для всех моделей)
                 for pref in ["ПОСТ:", "НОВОСТЬ:", "Заголовок:", "Содержание:", "Источник:"]:
                     if raw_text.upper().startswith(pref.upper()):
                         raw_text = raw_text[len(pref):].strip()
@@ -1369,7 +1363,7 @@ async def generate_summary(article: Article) -> Optional[str]:
     return None
 
 
-# ====================== ОСТАЛЬНОЙ КОД БЕЗ ИЗМЕНЕНИЙ (post_article, main и т.д.) ======================
+# ====================== ОСТАЛЬНОЙ КОД (без изменений) ======================
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
     topic = Topic.detect(f"{article.title} {article.summary}")
     subject = topic
@@ -1562,7 +1556,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

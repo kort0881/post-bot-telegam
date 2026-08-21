@@ -118,7 +118,7 @@ def init_clients():
         raise
 
 
-# ===== АКТУАЛЬНЫЕ МОДЕЛИ (из вашего списка) =====
+# ===== АКТУАЛЬНЫЕ МОДЕЛИ =====
 GROQ_MODELS = [
     "openai/gpt-oss-120b",      # основная
     "openai/gpt-oss-20b",       # быстрая
@@ -1143,14 +1143,19 @@ def count_sentences(text: str) -> int:
     return len([p for p in parts if p.strip()])
 
 
+# ====================== ИСПРАВЛЕННАЯ strip_service_lines ======================
 def strip_service_lines(text: str) -> str:
     lines = text.split('\n')
     cleaned_lines = []
 
     for line in lines:
         line_stripped = line.strip()
+        # Удаляем строки, начинающиеся с маркеров разделов (добавлены Вступление, Суть, Значение, Последствия)
         if re.match(
-            r'^(НОВОСТЬ|Заголовок|Содержание|Источник|ПОСТ|НОВОСТЬ\s*:|Заголовок\s*:|Содержание\s*:|Источник\s*:|ПОСТ\s*:)\s*',
+            r'^(НОВОСТЬ|Заголовок|Содержание|Источник|ПОСТ|'
+            r'Вступление|Суть|Значение|Последствия|'
+            r'НОВОСТЬ\s*:|Заголовок\s*:|Содержание\s*:|Источник\s*:|ПОСТ\s*:|'
+            r'Вступление\s*:|Суть\s*:|Значение\s*:|Последствия\s*:)\s*',
             line_stripped,
             re.IGNORECASE
         ):
@@ -1158,10 +1163,10 @@ def strip_service_lines(text: str) -> str:
         cleaned_lines.append(line)
 
     text = '\n'.join(cleaned_lines)
-    text = re.sub(r'\bЗаголовок\s*:\s*', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'\bСодержание\s*:\s*', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'\bИсточник\s*:\s*', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'\bНОВОСТЬ\s*:\s*', '', text, flags=re.IGNORECASE)
+
+    # Удаляем сами маркеры из текста (если они остались в середине)
+    text = re.sub(r'\b(Вступление|Суть|Значение|Последствия)\s*[:：]\s*', '', text, flags=re.IGNORECASE)
+
     return text.strip()
 
 
@@ -1204,12 +1209,15 @@ def is_valid_post_text(text: Optional[str], min_len: int) -> Tuple[bool, str]:
     return True, "OK"
 
 
-# ====================== build_final_post ======================
+# ====================== build_final_post (с дополнительной очисткой) ======================
 def build_final_post(article: Article, body_text: str, topic: str, skip_clean: bool = False) -> str:
     if skip_clean:
         text = body_text.strip()
     else:
         text = strip_service_lines(body_text)
+
+    # Дополнительно удаляем оставшиеся маркеры в начале строк
+    text = re.sub(r'^\s*(Вступление|Суть|Значение|Последствия)\s*[:：]\s*', '', text, flags=re.IGNORECASE | re.MULTILINE)
 
     if not text.endswith(('.', '!', '?')):
         text += '.'
@@ -1556,7 +1564,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

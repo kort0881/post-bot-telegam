@@ -447,7 +447,7 @@ def is_junk_content(text: str) -> bool:
     return any(kw in text_lower for kw in JUNK_KEYWORDS)
 
 
-# ====================== is_relevant ======================
+# ====================== is_relevant (без изменений, как в оригинале) ======================
 def is_relevant(article: Article) -> bool:
     text = f"{article.title} {article.summary}".lower()
 
@@ -964,7 +964,7 @@ def interleave_by_source(candidates: List[Article]) -> List[Article]:
     return result
 
 
-# ====================== filter_and_dedupe ======================
+# ====================== filter_and_dedupe (БЕЗ ИЗМЕНЕНИЙ, как в оригинале) ======================
 def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Article]:
     logger.info("🔍 Фильтрация...")
     logger.info(f"   Входящих статей: {len(articles)}")
@@ -1038,7 +1038,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         candidates.append(article)
         stats["passed"] += 1
 
-    # --- НОВАЯ ЛОГИКА ПРИОРИТЕТА 3DNews ---
+    # --- ПРИОРИТЕТ 3DNews (без изменений) ---
     primary_candidates = [
         article for article in candidates
         if article.source in PRIMARY_SOURCES
@@ -1067,7 +1067,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         )
         return interleave_by_source(primary_candidates)[:5]
 
-    # Резерв включается только при полном отсутствии кандидатов 3DNews
+    # Резерв
     fallback_candidates.sort(
         key=relevance_score,
         reverse=True
@@ -1143,14 +1143,12 @@ def count_sentences(text: str) -> int:
     return len([p for p in parts if p.strip()])
 
 
-# ====================== ИСПРАВЛЕННАЯ strip_service_lines ======================
 def strip_service_lines(text: str) -> str:
     lines = text.split('\n')
     cleaned_lines = []
 
     for line in lines:
         line_stripped = line.strip()
-        # Удаляем строки, начинающиеся с маркеров разделов (добавлены Вступление, Суть, Значение, Последствия)
         if re.match(
             r'^(НОВОСТЬ|Заголовок|Содержание|Источник|ПОСТ|'
             r'Вступление|Суть|Значение|Последствия|'
@@ -1163,8 +1161,6 @@ def strip_service_lines(text: str) -> str:
         cleaned_lines.append(line)
 
     text = '\n'.join(cleaned_lines)
-
-    # Удаляем сами маркеры из текста (если они остались в середине)
     text = re.sub(r'\b(Вступление|Суть|Значение|Последствия)\s*[:：]\s*', '', text, flags=re.IGNORECASE)
 
     return text.strip()
@@ -1209,31 +1205,46 @@ def is_valid_post_text(text: Optional[str], min_len: int) -> Tuple[bool, str]:
     return True, "OK"
 
 
-# ====================== build_final_post (с дополнительной очисткой) ======================
+# ====================== build_final_post (ИЗМЕНЕНО: добавлен заголовок и изменён формат ссылки) ======================
 def build_final_post(article: Article, body_text: str, topic: str, skip_clean: bool = False) -> str:
     if skip_clean:
         text = body_text.strip()
     else:
         text = strip_service_lines(body_text)
 
-    # Дополнительно удаляем оставшиеся маркеры в начале строк
+    # Удаляем маркеры в начале
     text = re.sub(r'^\s*(Вступление|Суть|Значение|Последствия)\s*[:：]\s*', '', text, flags=re.IGNORECASE | re.MULTILINE)
 
     if not text.endswith(('.', '!', '?')):
         text += '.'
 
+    # ---- ДОБАВЛЯЕМ ЗАГОЛОВОК (оригинальный заголовок новости) ----
+    headline = article.title.strip()
+    if len(headline) > 100:
+        headline = headline[:100] + '…'
+    headline_html = f"<b>{headline}</b>"
+
     hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
-    source_link = f'\n\n🔗 <a href="{article.link}">Источник</a>'
-    final = f"{text}\n\n{hashtags}{source_link}{DISCLAIMER}"
+
+    # ---- ИЗМЕНЁННЫЙ ФОРМАТ ИСТОЧНИКА - отдельная строка с голой ссылкой ----
+    source_link = f'\n\n<b>Источник</b>\n{article.link}'
+
+    final = f"{headline_html}\n\n{text}\n\n{hashtags}{source_link}{DISCLAIMER}"
     return final.strip()
 
 
-# ====================== ГЕНЕРАЦИЯ ПОСТА ======================
+# ====================== ГЕНЕРАЦИЯ ПОСТА (ИЗМЕНЁН ПРОМПТ: добавлено требование указывать разработчика) ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     text_for_topic = f"{article.title} {article.summary}"
     topic = Topic.detect(text_for_topic)
     is_block_topic = any(kw in text_for_topic.lower() for kw in BLOCK_KEYWORDS)
+
+    subject_instruction = (
+        "В первом предложении обязательно укажи, кто именно разработал, объявил или "
+        "инициировал событие (страна, университет, компания, ФИО учёных). "
+        "Если в новости это не указано – напиши «организация не указана»."
+    )
 
     if is_block_topic:
         prompt = f"""Ты — редактор Telegram-канала про блокировки и цифровые ограничения в РФ. Напиши краткий, но законченный пост по новости.
@@ -1244,7 +1255,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 Источник: {article.source}
 
 **Структура поста:**
-1. Вступление: кратко введи в тему (1 предложение, начни с «Новость:» или «В России произошло…»).
+1. Вступление: кратко введи в тему (1 предложение). Начни с «Новость:» или «В России произошло…».
 2. Суть: что именно произошло? (факты: кто, что, когда, как).
 3. Последствия: какие последствия для пользователей или индустрии?
 
@@ -1254,6 +1265,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 - Не задавай вопросов читателям.
 - Длина: строго 600–800 символов.
 - Пост должен быть связным и читаться как единое целое.
+- {subject_instruction}
 
 ПОСТ:"""
     else:
@@ -1276,6 +1288,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 - Избегай штампов: «стоит отметить», «важно понимать», «давайте разберёмся».
 - Длина: строго 700–1000 символов (не меньше 700, не больше 1000).
 - Пост должен быть связным, читаться как единое целое и не обрываться на полуслове.
+- {subject_instruction}
 
 ПОСТ:"""
 
@@ -1310,7 +1323,6 @@ async def generate_summary(article: Article) -> Optional[str]:
 
                 logger.info(f"  ℹ️ [{model}] raw_len={len(raw_text)}")
 
-                # Специальная очистка (для всех моделей)
                 for pref in ["ПОСТ:", "НОВОСТЬ:", "Заголовок:", "Содержание:", "Источник:"]:
                     if raw_text.upper().startswith(pref.upper()):
                         raw_text = raw_text[len(pref):].strip()
@@ -1350,7 +1362,7 @@ async def generate_summary(article: Article) -> Optional[str]:
                     f"  ℹ️ [{model}] final_len={len(final)} preview={final[:120].replace(chr(10), ' ')}"
                 )
 
-                body_part = final.split('\n\n🔗 <a href="', 1)[0].strip()
+                body_part = final.split('\n\n<b>Источник</b>', 1)[0].strip()
                 ok_final, reason_final = is_valid_post_text(body_part, config.min_post_length)
                 if not ok_final:
                     logger.warning(f"  ⚠️ [{model}] reject after final build: {reason_final}")
@@ -1375,7 +1387,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
     topic = Topic.detect(f"{article.title} {article.summary}")
     subject = topic
-    body_part = text.split('\n\n🔗 <a href="', 1)[0].strip()
+    body_part = text.split('\n\n<b>Источник</b>', 1)[0].strip()
     ok, reason = is_valid_post_text(body_part, config.min_post_length)
 
     if not ok:
@@ -1564,7 +1576,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
 
 
 

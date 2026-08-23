@@ -120,10 +120,10 @@ def init_clients():
 
 # ===== АКТУАЛЬНЫЕ МОДЕЛИ =====
 GROQ_MODELS = [
-    "openai/gpt-oss-120b",      # основная
-    "openai/gpt-oss-20b",       # быстрая
-    "groq/compound",            # своя модель Groq
-    "qwen/qwen3.6-27b",         # опционально
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "groq/compound",
+    "qwen/qwen3.6-27b",
 ]
 
 
@@ -136,7 +136,6 @@ PRIMARY_SOURCES = {
 RSS_FEEDS = [
     ("https://3dnews.ru/hardware-news/rss", "3DNews Hardware"),
     ("https://3dnews.ru/software-news/rss", "3DNews Software"),
-
     ("https://roskomsvoboda.org/feed/", "Роскомсвобода"),
     ("https://rkn.gov.ru/rss/news.xml", "РКН"),
     ("https://www.comnews.ru/rss/news", "ComNews"),
@@ -447,7 +446,7 @@ def is_junk_content(text: str) -> bool:
     return any(kw in text_lower for kw in JUNK_KEYWORDS)
 
 
-# ====================== is_relevant (без изменений, как в оригинале) ======================
+# ====================== is_relevant ======================
 def is_relevant(article: Article) -> bool:
     text = f"{article.title} {article.summary}".lower()
 
@@ -964,7 +963,7 @@ def interleave_by_source(candidates: List[Article]) -> List[Article]:
     return result
 
 
-# ====================== filter_and_dedupe (БЕЗ ИЗМЕНЕНИЙ, как в оригинале) ======================
+# ====================== filter_and_dedupe ======================
 def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Article]:
     logger.info("🔍 Фильтрация...")
     logger.info(f"   Входящих статей: {len(articles)}")
@@ -1038,7 +1037,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         candidates.append(article)
         stats["passed"] += 1
 
-    # --- ПРИОРИТЕТ 3DNews (без изменений) ---
+    # --- ЛОГИКА ПРИОРИТЕТА 3DNews ---
     primary_candidates = [
         article for article in candidates
         if article.source in PRIMARY_SOURCES
@@ -1055,7 +1054,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
             return 1000 + block_relevance_score(text)
         return ai_relevance_score(text)
 
-    # Сначала пробуем только два главных RSS 3DNews
     if primary_candidates:
         primary_candidates.sort(
             key=relevance_score,
@@ -1067,7 +1065,6 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
         )
         return interleave_by_source(primary_candidates)[:5]
 
-    # Резерв
     fallback_candidates.sort(
         key=relevance_score,
         reverse=True
@@ -1111,6 +1108,7 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
     return result if result else candidates[:1]
 
 
+# ====================== DISCLAIMER (ОРИГИНАЛ, НЕ ТРОГАЕМ) ======================
 DISCLAIMER = (
     "\n\n⚠️ Отдельные организации, упомянутые в данном материале, могут иметь статус "
     "«нежелательных» на территории РФ. Актуальный перечень размещён на официальном сайте "
@@ -1205,7 +1203,7 @@ def is_valid_post_text(text: Optional[str], min_len: int) -> Tuple[bool, str]:
     return True, "OK"
 
 
-# ====================== build_final_post (ИЗМЕНЕНО: добавлен заголовок и изменён формат ссылки) ======================
+# ====================== build_final_post (ИЗМЕНЁН ПОРЯДОК) ======================
 def build_final_post(article: Article, body_text: str, topic: str, skip_clean: bool = False) -> str:
     if skip_clean:
         text = body_text.strip()
@@ -1218,7 +1216,7 @@ def build_final_post(article: Article, body_text: str, topic: str, skip_clean: b
     if not text.endswith(('.', '!', '?')):
         text += '.'
 
-    # ---- ДОБАВЛЯЕМ ЗАГОЛОВОК (оригинальный заголовок новости) ----
+    # Заголовок (оригинальный)
     headline = article.title.strip()
     if len(headline) > 100:
         headline = headline[:100] + '…'
@@ -1226,14 +1224,18 @@ def build_final_post(article: Article, body_text: str, topic: str, skip_clean: b
 
     hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
 
-    # ---- ИЗМЕНЁННЫЙ ФОРМАТ ИСТОЧНИКА - отдельная строка с голой ссылкой ----
-    source_link = f'\n\n<b>Источник</b>\n{article.link}'
-
-    final = f"{headline_html}\n\n{text}\n\n{hashtags}{source_link}{DISCLAIMER}"
+    # Порядок: заголовок, источник (ссылка), текст, хештеги, дисклеймер
+    final = (
+        f"{headline_html}\n\n"
+        f"<b>Источник</b>\n{article.link}\n\n"   # <-- ссылка идёт первой
+        f"{text}\n\n"
+        f"{hashtags}"
+        f"{DISCLAIMER}"                         # дисклеймер без изменений
+    )
     return final.strip()
 
 
-# ====================== ГЕНЕРАЦИЯ ПОСТА (ИЗМЕНЁН ПРОМПТ: добавлено требование указывать разработчика) ======================
+# ====================== ГЕНЕРАЦИЯ ПОСТА ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     text_for_topic = f"{article.title} {article.summary}"
@@ -1383,7 +1385,7 @@ async def generate_summary(article: Article) -> Optional[str]:
     return None
 
 
-# ====================== ОСТАЛЬНОЙ КОД (без изменений) ======================
+# ====================== ОСТАЛЬНОЙ КОД ======================
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
     topic = Topic.detect(f"{article.title} {article.summary}")
     subject = topic

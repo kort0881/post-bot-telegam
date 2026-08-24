@@ -1108,7 +1108,7 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
     return result if result else candidates[:1]
 
 
-# ====================== DISCLAIMER (ОРИГИНАЛ, НЕ ТРОГАЕМ) ======================
+# ====================== DISCLAIMER (НЕ ТРОГАЕМ) ======================
 DISCLAIMER = (
     "\n\n⚠️ Отдельные организации, упомянутые в данном материале, могут иметь статус "
     "«нежелательных» на территории РФ. Актуальный перечень размещён на официальном сайте "
@@ -1203,8 +1203,11 @@ def is_valid_post_text(text: Optional[str], min_len: int) -> Tuple[bool, str]:
     return True, "OK"
 
 
-# ====================== build_final_post (ИЗМЕНЁН ПОРЯДОК) ======================
-def build_final_post(article: Article, body_text: str, topic: str, skip_clean: bool = False) -> str:
+# ====================== build_final_post (возвращает кортеж) ======================
+def build_final_post(article: Article, body_text: str, topic: str, skip_clean: bool = False) -> Tuple[str, str]:
+    """
+    Возвращает (final_text, body_text_for_validation)
+    """
     if skip_clean:
         text = body_text.strip()
     else:
@@ -1216,7 +1219,7 @@ def build_final_post(article: Article, body_text: str, topic: str, skip_clean: b
     if not text.endswith(('.', '!', '?')):
         text += '.'
 
-    # Заголовок (оригинальный)
+    # Заголовок
     headline = article.title.strip()
     if len(headline) > 100:
         headline = headline[:100] + '…'
@@ -1224,15 +1227,15 @@ def build_final_post(article: Article, body_text: str, topic: str, skip_clean: b
 
     hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
 
-    # Порядок: заголовок, источник (ссылка), текст, хештеги, дисклеймер
+    # Формируем финальный пост: заголовок, источник, текст, хештеги, дисклеймер
     final = (
         f"{headline_html}\n\n"
-        f"<b>Источник</b>\n{article.link}\n\n"   # <-- ссылка идёт первой
+        f"<b>Источник</b>\n{article.link}\n\n"
         f"{text}\n\n"
         f"{hashtags}"
-        f"{DISCLAIMER}"                         # дисклеймер без изменений
+        f"{DISCLAIMER}"
     )
-    return final.strip()
+    return final.strip(), text.strip()
 
 
 # ====================== ГЕНЕРАЦИЯ ПОСТА ======================
@@ -1336,6 +1339,7 @@ async def generate_summary(article: Article) -> Optional[str]:
                     logger.info("  ⏭️ SKIP (не подходит)")
                     return None
 
+                # Проверяем сгенерированный текст (без заголовка и ссылки)
                 ok, reason = is_valid_post_text(cleaned_text, config.min_post_length)
                 if not ok:
                     logger.warning(f"  ⚠️ [{model}] reject before final build: {reason}")
@@ -1357,20 +1361,16 @@ async def generate_summary(article: Article) -> Optional[str]:
                     logger.warning("  ⚠️ Повторяющиеся предложения, следующая модель...")
                     continue
 
-                skip_clean = True
-                final = build_final_post(article, cleaned_text, topic, skip_clean=skip_clean)
+                # Собираем финальный пост, получаем (final, body)
+                final, body_for_check = build_final_post(article, cleaned_text, topic, skip_clean=True)
 
-                logger.info(
-                    f"  ℹ️ [{model}] final_len={len(final)} preview={final[:120].replace(chr(10), ' ')}"
-                )
-
-                body_part = final.split('\n\n<b>Источник</b>', 1)[0].strip()
-                ok_final, reason_final = is_valid_post_text(body_part, config.min_post_length)
+                # Проверяем финальный текст (ещё раз, но теперь по body, которое вернула функция)
+                ok_final, reason_final = is_valid_post_text(body_for_check, config.min_post_length)
                 if not ok_final:
                     logger.warning(f"  ⚠️ [{model}] reject after final build: {reason_final}")
                     continue
 
-                logger.info(f"  ✅ [{model}]: body={len(cleaned_text)} symb, final={len(final)} symb")
+                logger.info(f"  ✅ [{model}]: body={len(body_for_check)} symb, final={len(final)} symb")
                 return final
 
             except Exception as e:
@@ -1389,9 +1389,22 @@ async def generate_summary(article: Article) -> Optional[str]:
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
     topic = Topic.detect(f"{article.title} {article.summary}")
     subject = topic
-    body_part = text.split('\n\n<b>Источник</b>', 1)[0].strip()
-    ok, reason = is_valid_post_text(body_part, config.min_post_length)
+    # Извлекаем тело для проверки (отделяем заголовок и ссылку)
+    # Просто берём всё, что после двойного перевода строки после ссылки
+    # Но поскольку у нас теперь build_final_post возвращает кортеж, мы можем передавать отдельно.
+    # Однако в post_article приходит готовый final, поэтому мы извлекаем тело вручную.
+    # Самый простой способ: ищем текст между ссылкой и хештегами.
+    # Используем тот же разделитель, что и в build_final_post – после ссылки идёт \n\n, затем текст.
+    # Найдём позицию после третьего \n\n (заголовок, ссылка, затем текст).
+    parts = text.split('\n\n', 2)
+    if len(parts) >= 3:
+        body_part = parts[2].strip()
+        # обрезаем хештеги и дисклеймер
+        body_part = re.split(r'\n\n#', body_part, maxsplit=1)[0].strip()
+    else:
+        body_part = text
 
+    ok, reason = is_valid_post_text(body_part, config.min_post_length)
     if not ok:
         logger.error(
             f"❌ POST_REJECTED_BEFORE_SEND: {reason} | "
@@ -1578,247 +1591,3 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"❌ Фатальная ошибка: {e}", exc_info=True)
         sys.exit(1)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

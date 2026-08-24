@@ -1108,13 +1108,11 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
     return result if result else candidates[:1]
 
 
-# ====================== DISCLAIMER (оставляем без изменений) ======================
+# ====================== DISCLAIMER (БЕЗ ГИПЕРССЫЛКИ) ======================
 DISCLAIMER = (
     "\n\n⚠️ Отдельные организации, упомянутые в данном материале, могут иметь статус "
     "«нежелательных» на территории РФ. Актуальный перечень размещён на официальном сайте "
-    'Минюста РФ: <a href="https://minjust.gov.ru/ru/pages/perechen-inostrannyh-i-'
-    'mezhdunarodnyh-organizacij-deyatelnost-kotoryh-priznana-nezhelatelnoj-na-territorii-'
-    'rossiyskoy-federacii/">minjust.gov.ru</a>'
+    "Минюста РФ: minjust.gov.ru"
 )
 
 
@@ -1203,7 +1201,7 @@ def is_valid_post_text(text: Optional[str], min_len: int) -> Tuple[bool, str]:
     return True, "OK"
 
 
-# ====================== build_final_post (изменён порядок) ======================
+# ====================== build_final_post (ссылка первая) ======================
 def build_final_post(article: Article, body_text: str, topic: str, skip_clean: bool = False) -> str:
     if skip_clean:
         text = body_text.strip()
@@ -1213,30 +1211,33 @@ def build_final_post(article: Article, body_text: str, topic: str, skip_clean: b
     if not text.endswith(('.', '!', '?')):
         text += '.'
 
-    # Жирный заголовок (оригинальный заголовок) – не трогаем, но он не решает проблему субъекта
-    # Добавляем его для ясности, но основное – в тексте.
+    # Жирный заголовок (оригинальный)
+    headline = article.title.strip()
+    if len(headline) > 100:
+        headline = headline[:100] + '…'
+    headline_html = f"<b>{headline}</b>"
 
     hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
 
-    # Ссылка на источник – первая, чтобы было превью
-    source_link = f"\n\n<b>Источник</b>\n{article.link}"
+    # Ссылка на источник – первая в сообщении
+    source_link = f"<b>Источник</b>\n{article.link}\n\n"
 
-    final = f"{text}{source_link}\n\n{hashtags}{DISCLAIMER}"
+    # Собираем: сначала ссылка, потом заголовок, потом текст, потом хештеги и дисклеймер
+    final = source_link + headline_html + "\n\n" + text + "\n\n" + hashtags + DISCLAIMER
     return final.strip()
 
 
-# ====================== ГЕНЕРАЦИЯ ПОСТА (с усиленной инструкцией по субъекту) ======================
+# ====================== ГЕНЕРАЦИЯ ПОСТА ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     text_for_topic = f"{article.title} {article.summary}"
     topic = Topic.detect(text_for_topic)
     is_block_topic = any(kw in text_for_topic.lower() for kw in BLOCK_KEYWORDS)
 
-    # ОБЯЗАТЕЛЬНАЯ ИНСТРУКЦИЯ – всегда указывать субъект
     subject_instruction = (
         "В ПЕРВОМ ПРЕДЛОЖЕНИИ обязательно назови КОНКРЕТНОГО СУБЪЕКТА новости: "
         "компанию, страну, университет, ФИО учёных, организацию. "
-        "Если в новости субъект не указан явно, напиши «организация не указана» или «авторы не установлены». "
+        "Если в новости субъект не указан явно, напиши «организация не указана». "
         "Не пиши просто «исследователи» или «аналитики» — нужна конкретика."
     )
 
@@ -1356,8 +1357,16 @@ async def generate_summary(article: Article) -> Optional[str]:
                     f"  ℹ️ [{model}] final_len={len(final)} preview={final[:120].replace(chr(10), ' ')}"
                 )
 
-                # Извлекаем тело для проверки (без ссылки)
-                body_part = final.split('\n\n<b>Источник</b>', 1)[0].strip()
+                # Извлекаем тело для проверки (без ссылки и заголовка)
+                # Ищем после третьего переноса (ссылка + заголовок)
+                parts = final.split('\n\n', 2)
+                if len(parts) >= 3:
+                    body_part = parts[2].strip()
+                    # удаляем хештеги и дисклеймер
+                    body_part = re.split(r'\n\n#', body_part, maxsplit=1)[0].strip()
+                else:
+                    body_part = final
+
                 ok_final, reason_final = is_valid_post_text(body_part, config.min_post_length)
                 if not ok_final:
                     logger.warning(f"  ⚠️ [{model}] reject after final build: {reason_final}")
@@ -1382,9 +1391,15 @@ async def generate_summary(article: Article) -> Optional[str]:
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
     topic = Topic.detect(f"{article.title} {article.summary}")
     subject = topic
-    body_part = text.split('\n\n<b>Источник</b>', 1)[0].strip()
-    ok, reason = is_valid_post_text(body_part, config.min_post_length)
+    # Извлекаем тело для проверки
+    parts = text.split('\n\n', 2)
+    if len(parts) >= 3:
+        body_part = parts[2].strip()
+        body_part = re.split(r'\n\n#', body_part, maxsplit=1)[0].strip()
+    else:
+        body_part = text
 
+    ok, reason = is_valid_post_text(body_part, config.min_post_length)
     if not ok:
         logger.error(
             f"❌ POST_REJECTED_BEFORE_SEND: {reason} | "

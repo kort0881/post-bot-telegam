@@ -60,7 +60,7 @@ class Config:
 
         self.alternation_enabled = True
 
-        self.min_post_length = 700
+        self.min_post_length = 600  # <-- изменено с 700 на 600
         self.max_article_age_hours = 720
         self.min_ai_score = 1
         self.max_repeat_sentences = 2
@@ -77,7 +77,7 @@ class Config:
         self.batch_subject_limit = 10
 
         self.groq_retries_per_model = 2
-        self.groq_base_delay = 2.0
+        self.groq_base_delay = 3.0  # <-- увеличено с 2.0
         self.telegram_timeout = 30
         self.http_timeout = 60
 
@@ -1291,7 +1291,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 - Не задавай вопросов читателям.
 - Не используй слова «власть», «правительство», «путин» и т.п.
 - Избегай штампов: «стоит отметить», «важно понимать», «давайте разберёмся».
-- Длина: строго 700–1000 символов (не меньше 700, не больше 1000).
+- Длина: строго 600–1000 символов.
 - Пост должен быть связным, читаться как единое целое и не обрываться на полуслове.
 - {subject_instruction}
 
@@ -1345,9 +1345,10 @@ async def generate_summary(article: Article) -> Optional[str]:
                     logger.warning(f"  ⚠️ [{model}] reject before final build: {reason}")
                     continue
 
-                if cleaned_text and not cleaned_text[0].isupper():
-                    logger.warning("  ⚠️ Текст не начинается с заглавной буквы, перегенерация...")
-                    continue
+                # === УБРАНА ПРОВЕРКА НА ЗАГЛАВНУЮ БУКВУ ===
+                # if cleaned_text and not cleaned_text[0].isupper():
+                #     logger.warning("  ⚠️ Текст не начинается с заглавной буквы, перегенерация...")
+                #     continue
 
                 water_count = sum(1 for phrase in water_phrases if phrase in cleaned_text.lower())
                 if water_count >= 3:
@@ -1389,17 +1390,10 @@ async def generate_summary(article: Article) -> Optional[str]:
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
     topic = Topic.detect(f"{article.title} {article.summary}")
     subject = topic
-    # Извлекаем тело для проверки (отделяем заголовок и ссылку)
-    # Просто берём всё, что после двойного перевода строки после ссылки
-    # Но поскольку у нас теперь build_final_post возвращает кортеж, мы можем передавать отдельно.
-    # Однако в post_article приходит готовый final, поэтому мы извлекаем тело вручную.
-    # Самый простой способ: ищем текст между ссылкой и хештегами.
-    # Используем тот же разделитель, что и в build_final_post – после ссылки идёт \n\n, затем текст.
-    # Найдём позицию после третьего \n\n (заголовок, ссылка, затем текст).
+    # Извлекаем тело для проверки
     parts = text.split('\n\n', 2)
     if len(parts) >= 3:
         body_part = parts[2].strip()
-        # обрезаем хештеги и дисклеймер
         body_part = re.split(r'\n\n#', body_part, maxsplit=1)[0].strip()
     else:
         body_part = text

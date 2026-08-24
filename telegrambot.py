@@ -60,7 +60,7 @@ class Config:
 
         self.alternation_enabled = True
 
-        self.min_post_length = 600  # <-- изменено с 700 на 600
+        self.min_post_length = 700
         self.max_article_age_hours = 720
         self.min_ai_score = 1
         self.max_repeat_sentences = 2
@@ -77,7 +77,7 @@ class Config:
         self.batch_subject_limit = 10
 
         self.groq_retries_per_model = 2
-        self.groq_base_delay = 3.0  # <-- увеличено с 2.0
+        self.groq_base_delay = 2.0
         self.telegram_timeout = 30
         self.http_timeout = 60
 
@@ -1108,7 +1108,7 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
     return result if result else candidates[:1]
 
 
-# ====================== DISCLAIMER (НЕ ТРОГАЕМ) ======================
+# ====================== DISCLAIMER (оставляем без изменений) ======================
 DISCLAIMER = (
     "\n\n⚠️ Отдельные организации, упомянутые в данном материале, могут иметь статус "
     "«нежелательных» на территории РФ. Актуальный перечень размещён на официальном сайте "
@@ -1149,9 +1149,7 @@ def strip_service_lines(text: str) -> str:
         line_stripped = line.strip()
         if re.match(
             r'^(НОВОСТЬ|Заголовок|Содержание|Источник|ПОСТ|'
-            r'Вступление|Суть|Значение|Последствия|'
-            r'НОВОСТЬ\s*:|Заголовок\s*:|Содержание\s*:|Источник\s*:|ПОСТ\s*:|'
-            r'Вступление\s*:|Суть\s*:|Значение\s*:|Последствия\s*:)\s*',
+            r'НОВОСТЬ\s*:|Заголовок\s*:|Содержание\s*:|Источник\s*:|ПОСТ\s*:)\s*',
             line_stripped,
             re.IGNORECASE
         ):
@@ -1159,8 +1157,10 @@ def strip_service_lines(text: str) -> str:
         cleaned_lines.append(line)
 
     text = '\n'.join(cleaned_lines)
-    text = re.sub(r'\b(Вступление|Суть|Значение|Последствия)\s*[:：]\s*', '', text, flags=re.IGNORECASE)
-
+    text = re.sub(r'\bЗаголовок\s*:\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bСодержание\s*:\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bИсточник\s*:\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bНОВОСТЬ\s*:\s*', '', text, flags=re.IGNORECASE)
     return text.strip()
 
 
@@ -1203,52 +1203,41 @@ def is_valid_post_text(text: Optional[str], min_len: int) -> Tuple[bool, str]:
     return True, "OK"
 
 
-# ====================== build_final_post (возвращает кортеж) ======================
-def build_final_post(article: Article, body_text: str, topic: str, skip_clean: bool = False) -> Tuple[str, str]:
-    """
-    Возвращает (final_text, body_text_for_validation)
-    """
+# ====================== build_final_post (изменён порядок) ======================
+def build_final_post(article: Article, body_text: str, topic: str, skip_clean: bool = False) -> str:
     if skip_clean:
         text = body_text.strip()
     else:
         text = strip_service_lines(body_text)
 
-    # Удаляем маркеры в начале
-    text = re.sub(r'^\s*(Вступление|Суть|Значение|Последствия)\s*[:：]\s*', '', text, flags=re.IGNORECASE | re.MULTILINE)
-
     if not text.endswith(('.', '!', '?')):
         text += '.'
 
-    # Заголовок
-    headline = article.title.strip()
-    if len(headline) > 100:
-        headline = headline[:100] + '…'
-    headline_html = f"<b>{headline}</b>"
+    # Жирный заголовок (оригинальный заголовок) – не трогаем, но он не решает проблему субъекта
+    # Добавляем его для ясности, но основное – в тексте.
 
     hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
 
-    # Формируем финальный пост: заголовок, источник, текст, хештеги, дисклеймер
-    final = (
-        f"{headline_html}\n\n"
-        f"<b>Источник</b>\n{article.link}\n\n"
-        f"{text}\n\n"
-        f"{hashtags}"
-        f"{DISCLAIMER}"
-    )
-    return final.strip(), text.strip()
+    # Ссылка на источник – первая, чтобы было превью
+    source_link = f"\n\n<b>Источник</b>\n{article.link}"
+
+    final = f"{text}{source_link}\n\n{hashtags}{DISCLAIMER}"
+    return final.strip()
 
 
-# ====================== ГЕНЕРАЦИЯ ПОСТА ======================
+# ====================== ГЕНЕРАЦИЯ ПОСТА (с усиленной инструкцией по субъекту) ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     text_for_topic = f"{article.title} {article.summary}"
     topic = Topic.detect(text_for_topic)
     is_block_topic = any(kw in text_for_topic.lower() for kw in BLOCK_KEYWORDS)
 
+    # ОБЯЗАТЕЛЬНАЯ ИНСТРУКЦИЯ – всегда указывать субъект
     subject_instruction = (
-        "В первом предложении обязательно укажи, кто именно разработал, объявил или "
-        "инициировал событие (страна, университет, компания, ФИО учёных). "
-        "Если в новости это не указано – напиши «организация не указана»."
+        "В ПЕРВОМ ПРЕДЛОЖЕНИИ обязательно назови КОНКРЕТНОГО СУБЪЕКТА новости: "
+        "компанию, страну, университет, ФИО учёных, организацию. "
+        "Если в новости субъект не указан явно, напиши «организация не указана» или «авторы не установлены». "
+        "Не пиши просто «исследователи» или «аналитики» — нужна конкретика."
     )
 
     if is_block_topic:
@@ -1291,7 +1280,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 - Не задавай вопросов читателям.
 - Не используй слова «власть», «правительство», «путин» и т.п.
 - Избегай штампов: «стоит отметить», «важно понимать», «давайте разберёмся».
-- Длина: строго 600–1000 символов.
+- Длина: строго 700–1000 символов (не меньше 700, не больше 1000).
 - Пост должен быть связным, читаться как единое целое и не обрываться на полуслове.
 - {subject_instruction}
 
@@ -1339,16 +1328,14 @@ async def generate_summary(article: Article) -> Optional[str]:
                     logger.info("  ⏭️ SKIP (не подходит)")
                     return None
 
-                # Проверяем сгенерированный текст (без заголовка и ссылки)
                 ok, reason = is_valid_post_text(cleaned_text, config.min_post_length)
                 if not ok:
                     logger.warning(f"  ⚠️ [{model}] reject before final build: {reason}")
                     continue
 
-                # === УБРАНА ПРОВЕРКА НА ЗАГЛАВНУЮ БУКВУ ===
-                # if cleaned_text and not cleaned_text[0].isupper():
-                #     logger.warning("  ⚠️ Текст не начинается с заглавной буквы, перегенерация...")
-                #     continue
+                if cleaned_text and not cleaned_text[0].isupper():
+                    logger.warning("  ⚠️ Текст не начинается с заглавной буквы, перегенерация...")
+                    continue
 
                 water_count = sum(1 for phrase in water_phrases if phrase in cleaned_text.lower())
                 if water_count >= 3:
@@ -1362,16 +1349,21 @@ async def generate_summary(article: Article) -> Optional[str]:
                     logger.warning("  ⚠️ Повторяющиеся предложения, следующая модель...")
                     continue
 
-                # Собираем финальный пост, получаем (final, body)
-                final, body_for_check = build_final_post(article, cleaned_text, topic, skip_clean=True)
+                skip_clean = True
+                final = build_final_post(article, cleaned_text, topic, skip_clean=skip_clean)
 
-                # Проверяем финальный текст (ещё раз, но теперь по body, которое вернула функция)
-                ok_final, reason_final = is_valid_post_text(body_for_check, config.min_post_length)
+                logger.info(
+                    f"  ℹ️ [{model}] final_len={len(final)} preview={final[:120].replace(chr(10), ' ')}"
+                )
+
+                # Извлекаем тело для проверки (без ссылки)
+                body_part = final.split('\n\n<b>Источник</b>', 1)[0].strip()
+                ok_final, reason_final = is_valid_post_text(body_part, config.min_post_length)
                 if not ok_final:
                     logger.warning(f"  ⚠️ [{model}] reject after final build: {reason_final}")
                     continue
 
-                logger.info(f"  ✅ [{model}]: body={len(body_for_check)} symb, final={len(final)} symb")
+                logger.info(f"  ✅ [{model}]: body={len(body_part)} symb, final={len(final)} symb")
                 return final
 
             except Exception as e:
@@ -1390,15 +1382,9 @@ async def generate_summary(article: Article) -> Optional[str]:
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
     topic = Topic.detect(f"{article.title} {article.summary}")
     subject = topic
-    # Извлекаем тело для проверки
-    parts = text.split('\n\n', 2)
-    if len(parts) >= 3:
-        body_part = parts[2].strip()
-        body_part = re.split(r'\n\n#', body_part, maxsplit=1)[0].strip()
-    else:
-        body_part = text
-
+    body_part = text.split('\n\n<b>Источник</b>', 1)[0].strip()
     ok, reason = is_valid_post_text(body_part, config.min_post_length)
+
     if not ok:
         logger.error(
             f"❌ POST_REJECTED_BEFORE_SEND: {reason} | "

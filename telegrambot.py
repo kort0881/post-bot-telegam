@@ -25,6 +25,7 @@ import feedparser
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import LinkPreviewOptions
 from groq import Groq
 
 # ====================== ЛОГИ ======================
@@ -125,7 +126,6 @@ GROQ_MODELS = [
     "groq/compound",
     "qwen/qwen3.6-27b",
 ]
-
 
 # ====================== RSS FEEDS ======================
 PRIMARY_SOURCES = {
@@ -1148,7 +1148,7 @@ def strip_service_lines(text: str) -> str:
     for line in lines:
         line_stripped = line.strip()
         if re.match(
-            r'^(НОВОСТЬ|Заголовок|Содержание|Источник|ПОСТ|НОВОСТЬ\s*:|Заголовок\s*:|Содержание\s*:|Источник\s*:|ПОСТ\s*:)\s*',
+            r'^(НОВОСТЬ|Заголовок|Содержание|Источник|ПОСТ|Суть|Значение|Вступление|Последствия|Новость дня)\s*:?\s*',
             line_stripped,
             re.IGNORECASE
         ):
@@ -1160,6 +1160,11 @@ def strip_service_lines(text: str) -> str:
     text = re.sub(r'\bСодержание\s*:\s*', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\bИсточник\s*:\s*', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\bНОВОСТЬ\s*:\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bСуть\s*:\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bЗначение\s*:\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bВступление\s*:\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bПоследствия\s*:\s*', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\bНовость дня\s*:\s*', '', text, flags=re.IGNORECASE)
     return text.strip()
 
 
@@ -1221,7 +1226,7 @@ def build_final_post(article: Article, body_text: str, topic: str, skip_clean: b
     return final.strip()
 
 
-# ====================== ГЕНЕРАЦИЯ ПОСТА (добавлена инструкция по субъекту) ======================
+# ====================== ГЕНЕРАЦИЯ ПОСТА ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     text_for_topic = f"{article.title} {article.summary}"
@@ -1236,6 +1241,14 @@ async def generate_summary(article: Article) -> Optional[str]:
         "Не пиши просто «исследователи» или «аналитики» — нужна конкретика."
     )
 
+    # НОВОЕ: запрет на служебные подписи разделов вроде "Суть:"
+    no_labels_instruction = (
+        "ВАЖНО: пиши сплошным связным текстом БЕЗ заголовков и служебных слов-меток в начале "
+        "предложений или абзацев — никаких «Суть:», «Значение:», «Вступление:», «Последствия:», "
+        "«Новость:», «Новость дня:», «Заголовок:», «Содержание:». Читатель сам поймёт структуру "
+        "по смыслу текста, разделы подписывать не нужно."
+    )
+
     if is_block_topic:
         prompt = f"""Ты — редактор Telegram-канала про блокировки и цифровые ограничения в РФ. Напиши краткий, но законченный пост по новости.
 
@@ -1244,10 +1257,10 @@ async def generate_summary(article: Article) -> Optional[str]:
 Содержание: {article.summary[:2000]}
 Источник: {article.source}
 
-**Структура поста:**
-1. Вступление: кратко введи в тему (1 предложение). Начни с «Новость:» или «В России произошло…».
-2. Суть: что именно произошло? (факты: кто, что, когда, как).
-3. Последствия: какие последствия для пользователей или индустрии?
+**О чём должен рассказать пост (связным текстом, БЕЗ подписанных разделов):**
+1. Кратко введи в тему одним предложением.
+2. Что именно произошло: факты — кто, что, когда, как.
+3. Какие последствия для пользователей или индустрии.
 
 **Требования:**
 - Нейтральный, информативный тон, без оценок.
@@ -1255,6 +1268,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 - Не задавай вопросов читателям.
 - Длина: строго 600–800 символов.
 - Пост должен быть связным и читаться как единое целое.
+- {no_labels_instruction}
 - {subject_instruction}
 
 ПОСТ:"""
@@ -1266,10 +1280,10 @@ async def generate_summary(article: Article) -> Optional[str]:
 Содержание: {article.summary[:2000]}
 Источник: {article.source}
 
-**Структура поста (строго соблюдай):**
-1. Вступление: кратко введи в тему (1 предложение). Начни с фразы «Новость дня:» или «Компания X объявила о…».
-2. Суть: что именно произошло? (факты: кто, что, где, когда). Перескажи своими словами, но сохрани все ключевые факты.
-3. Значение: почему это важно для индустрии, пользователей или общества? (1–2 предложения).
+**О чём должен рассказать пост (связным текстом, БЕЗ подписанных разделов):**
+1. Кратко введи в тему одним предложением.
+2. Что именно произошло: факты — кто, что, где, когда. Перескажи своими словами, но сохрани все ключевые факты.
+3. Почему это важно для индустрии, пользователей или общества (1–2 предложения).
 
 **Требования:**
 - Пиши нейтрально, без оценок и лишних эмоций.
@@ -1278,6 +1292,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 - Избегай штампов: «стоит отметить», «важно понимать», «давайте разберёмся».
 - Длина: строго 700–1000 символов (не меньше 700, не больше 1000).
 - Пост должен быть связным, читаться как единое целое и не обрываться на полуслове.
+- {no_labels_instruction}
 - {subject_instruction}
 
 ПОСТ:"""
@@ -1313,7 +1328,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 
                 logger.info(f"  ℹ️ [{model}] raw_len={len(raw_text)}")
 
-                for pref in ["ПОСТ:", "НОВОСТЬ:", "Заголовок:", "Содержание:", "Источник:"]:
+                for pref in ["ПОСТ:", "НОВОСТЬ:", "Заголовок:", "Содержание:", "Источник:", "Новость дня:", "Суть:"]:
                     if raw_text.upper().startswith(pref.upper()):
                         raw_text = raw_text[len(pref):].strip()
                 cleaned_text = strip_service_lines(raw_text)
@@ -1373,7 +1388,7 @@ async def generate_summary(article: Article) -> Optional[str]:
     return None
 
 
-# ====================== ОСТАЛЬНОЙ КОД (без изменений) ======================
+# ====================== ОСТАЛЬНОЙ КОД ======================
 async def post_article(article: Article, text: str, posted: PostedManager) -> bool:
     topic = Topic.detect(f"{article.title} {article.summary}")
     subject = topic
@@ -1393,7 +1408,19 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
             f"  📤 Отправка поста... body_len={len(body_part)} "
             f"final_len={len(text)} preview={body_part[:120].replace(chr(10), ' ')}"
         )
-        await bot.send_message(config.channel_id, text, disable_web_page_preview=False)
+        # ИСПРАВЛЕНО: disable_web_page_preview устарел с Bot API 7.0.
+        # Явно задаём link_preview_options с URL статьи, чтобы превью
+        # гарантированно строилось именно по ссылке на источник.
+        await bot.send_message(
+            config.channel_id,
+            text,
+            link_preview_options=LinkPreviewOptions(
+                is_disabled=False,
+                url=article.link,
+                prefer_large_media=True,
+                show_above_text=False,
+            ),
+        )
         logger.info(f"✅ ОПУБЛИКОВАНО [{topic}][{article.source}]: {article.title[:50]}")
     except Exception as e:
         logger.error(f"❌ Telegram ошибка отправки: {e}")

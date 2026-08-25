@@ -1108,7 +1108,7 @@ def rotate_candidates(candidates: List[Article], posted: PostedManager) -> List[
     return result if result else candidates[:1]
 
 
-# ====================== DISCLAIMER (ОСТАВЛЯЕМ КАК БЫЛО) ======================
+# ====================== DISCLAIMER ======================
 DISCLAIMER = (
     "\n\n⚠️ Отдельные организации, упомянутые в данном материале, могут иметь статус "
     "«нежелательных» на территории РФ. Актуальный перечень размещён на официальном сайте "
@@ -1207,7 +1207,7 @@ def is_valid_post_text(text: Optional[str], min_len: int) -> Tuple[bool, str]:
     return True, "OK"
 
 
-# ====================== build_final_post (как в старом коде) ======================
+# ====================== build_final_post ======================
 def build_final_post(article: Article, body_text: str, topic: str, skip_clean: bool = False) -> str:
     if skip_clean:
         text = body_text.strip()
@@ -1219,19 +1219,30 @@ def build_final_post(article: Article, body_text: str, topic: str, skip_clean: b
 
     hashtags = Topic.HASHTAGS.get(topic, Topic.HASHTAGS[Topic.GENERAL])
 
-    # Ссылка на статью через <a>, как в старом коде – ПЕРВАЯ в сообщении
     source_link = f'\n\n🔗 <a href="{article.link}">Источник</a>'
 
     final = f"{text}\n\n{hashtags}{source_link}{DISCLAIMER}"
     return final.strip()
 
 
-# ====================== ГЕНЕРАЦИЯ ПОСТА ======================
+# ====================== ГЕНЕРАЦИЯ ПОСТА (ИСПРАВЛЕННАЯ) ======================
 async def generate_summary(article: Article) -> Optional[str]:
     logger.info(f"📝 Генерация: {article.title[:55]}...")
     text_for_topic = f"{article.title} {article.summary}"
     topic = Topic.detect(text_for_topic)
     is_block_topic = any(kw in text_for_topic.lower() for kw in BLOCK_KEYWORDS)
+
+    # Получаем текущий год для подсказки модели
+    current_year = datetime.now(timezone.utc).year
+
+    # Инструкция по дате – универсальная для обоих промптов
+    date_instruction = (
+        f"ВАЖНО: Если в новости явно не указан год, НЕ пиши никакой год вообще. "
+        f"Если год упоминается в новости, используй ТОЛЬКО его. Ни в коем случае не используй "
+        f"2024 или другие годы, если они не присутствуют в тексте новости. "
+        f"Если нужно указать год, используй только тот, что есть в новости, или текущий {current_year} год, "
+        f"но только если он логически вытекает из контекста. Не добавляй год искусственно."
+    )
 
     # ИНСТРУКЦИЯ ДЛЯ СУБЪЕКТА
     subject_instruction = (
@@ -1241,7 +1252,6 @@ async def generate_summary(article: Article) -> Optional[str]:
         "Не пиши просто «исследователи» или «аналитики» — нужна конкретика."
     )
 
-    # НОВОЕ: запрет на служебные подписи разделов вроде "Суть:"
     no_labels_instruction = (
         "ВАЖНО: пиши сплошным связным текстом БЕЗ заголовков и служебных слов-меток в начале "
         "предложений или абзацев — никаких «Суть:», «Значение:», «Вступление:», «Последствия:», "
@@ -1270,6 +1280,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 - Пост должен быть связным и читаться как единое целое.
 - {no_labels_instruction}
 - {subject_instruction}
+- {date_instruction}
 
 ПОСТ:"""
     else:
@@ -1294,6 +1305,7 @@ async def generate_summary(article: Article) -> Optional[str]:
 - Пост должен быть связным, читаться как единое целое и не обрываться на полуслове.
 - {no_labels_instruction}
 - {subject_instruction}
+- {date_instruction}
 
 ПОСТ:"""
 
@@ -1408,9 +1420,6 @@ async def post_article(article: Article, text: str, posted: PostedManager) -> bo
             f"  📤 Отправка поста... body_len={len(body_part)} "
             f"final_len={len(text)} preview={body_part[:120].replace(chr(10), ' ')}"
         )
-        # ИСПРАВЛЕНО: disable_web_page_preview устарел с Bot API 7.0.
-        # Явно задаём link_preview_options с URL статьи, чтобы превью
-        # гарантированно строилось именно по ссылке на источник.
         await bot.send_message(
             config.channel_id,
             text,

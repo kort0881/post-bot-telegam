@@ -1,0 +1,26 @@
+name: Mirror to GitHub
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mirror to GitHub
+        env:
+          GH_MIRROR_TOKEN: ${{ secrets.GH_MIRROR_TOKEN }}
+          GH_MIRROR_ACTOR: ${{ secrets.GH_MIRROR_ACTOR }}
+          GH_MIRROR_REPO: ${{ secrets.GH_MIRROR_REPO }}
+        run: |
+          git remote add github https://${GH_MIRROR_ACTOR}:${GH_MIRROR_TOKEN}@github.com/${GH_MIRROR_REPO}.git
+          git push --mirror github

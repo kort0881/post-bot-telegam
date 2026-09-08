@@ -1,9 +1,8 @@
-# Test: 18:00 MSK daily
 name: Telegram AI Tech Bot
 
 on:
   schedule:
-    - cron: '0 15 * * *'   # 18:00 MSK
+    - cron: '0 6,9,12,15,18,21 * * *'   # ровные часы
   workflow_dispatch:
 
 permissions:
@@ -13,21 +12,17 @@ jobs:
   post_news:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Install deps
         run: pip install -r requirements.txt
-
       - name: Debug - before
         run: |
           echo "📂 До запуска:"
@@ -35,14 +30,12 @@ jobs:
           if [ -f posted_articles.db ]; then
             sqlite3 posted_articles.db "SELECT COUNT(*) || ' записей в БД' FROM posted_articles;" 2>/dev/null || echo "Таблица пуста"
           fi
-
       - name: Run bot
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
         run: python telegrambot.py
-
       - name: Debug - after
         run: |
           echo "📂 После запуска:"
@@ -53,7 +46,6 @@ jobs:
             echo "=== Всего записей ==="
             sqlite3 posted_articles.db "SELECT COUNT(*) FROM posted_articles;"
           fi
-
       - name: Commit state
         run: |
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

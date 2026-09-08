@@ -1,10 +1,9 @@
+# Test: 18:00 MSK daily
 name: Telegram AI Tech Bot
 
 on:
   schedule:
-    # Московское время (UTC+3): 09:47, 12:47, 15:47, 18:47, 21:47, 00:47 (след. дня)
-    # Соответствующие UTC часы: 6:47, 9:47, 12:47, 15:47, 18:47, 21:47
-    - cron: '47 6,9,12,15,18,21 * * *'
+    - cron: '0 15 * * *'   # 18:00 MSK
   workflow_dispatch:
 
 permissions:

@@ -11,6 +11,7 @@ import feedparser
 
 from .config import HEADERS, RSS_FEEDS, config
 from .models import Article
+from .textutils import clean_html
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +56,19 @@ async def fetch_feed(url: str, source: str, retries: int = 2) -> List[Article]:
             continue
         pub_date = entry.get('published_parsed') or entry.get('updated_parsed')
         published = datetime(*pub_date[:6], tzinfo=timezone.utc) if pub_date else datetime.now(timezone.utc)
+
+        # RSS full content (content:encoded) — если он есть, это лучший источник текста
+        full_text = None
+        for block in (entry.get('content') or []):
+            candidate = clean_html(block.get('value') or "")
+            if len(candidate) >= config.min_fulltext_chars:
+                full_text = candidate[: config.max_fulltext_chars]
+                break
+        if full_text is None and len(summary) >= config.min_fulltext_chars:
+            full_text = summary[: config.max_fulltext_chars]
+
         articles.append(Article(title=title, summary=summary, link=link,
-                                source=source, published=published))
+                                source=source, published=published, full_text=full_text))
     logger.info(f"  ✅ {source}: {len(articles)}")
     return articles
 

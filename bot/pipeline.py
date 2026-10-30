@@ -1,4 +1,4 @@
-"""Пайплайн прогона: сбор, фильтрация, единый рейтинг, публикация."""
+"""Пайплайн прогона: сбор, фильтрация, рейтинг, оценка, генерация, публикация."""
 import asyncio
 import logging
 import os
@@ -11,13 +11,15 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import LinkPreviewOptions
 
+from .assessment import Assessment, assess_article, heuristic_assessment
 from .config import RSS_FEEDS, config
 from .db import PostedManager
+from .editorial import build_post_text, choose_format, generate_post, validate_post
+from .extract import enrich_with_full_text
 from .feeds import load_all_feeds
 from .filters import evaluate_relevance
-from .generation import body_of, generate_summary
 from .llm import GroqLLM
-from .models import Article, Topic
+from .models import Article, PostFormat, Topic
 from .rating import (
     RankedCandidate,
     diversify,
@@ -27,7 +29,6 @@ from .rating import (
 from .textutils import (
     get_content_hash,
     get_sorted_word_signature,
-    is_valid_post_text,
     normalize_title,
 )
 
@@ -169,22 +170,8 @@ def select_candidates(candidates: List[Article], posted: PostedManager) -> List[
 
 
 # ====================== ПУБЛИКАЦИЯ ======================
-async def post_article(article: Article, text: str, posted: PostedManager,
-                       bot: Optional[Bot] = None,
-                       post_format: Optional[str] = None,
-                       score: Optional[int] = None) -> bool:
-    topic = Topic.detect(article.text)
-    body_part = body_of(text)
-    ok, reason = is_valid_post_text(body_part, config.min_post_length)
-
-    if not ok:
-        logger.error(f"❌ POST_REJECTED_BEFORE_SEND: {reason} | body_len={len(body_part)} "
-                     f"| final_len={len(text)} | title={article.title[:80]}")
-        return False
-
-    if bot is None:
-        raise RuntimeError("bot не инициализирован")
-
+async def send_post(article: Article, text: str, posted: PostedManager, bot: Bot,
+                    topic: str, post_format: str, score: int) -> bool:
     message_id = None
     for attempt in range(2):
         try:
@@ -207,9 +194,9 @@ async def post_article(article: Article, text: str, posted: PostedManager,
             else:
                 return False
 
-    logger.info(f"✅ ОПУБЛИКОВАНО [{topic}][{article.source}]: {article.title[:50]}")
-    saved = posted.add(article, topic, topic, post_format=post_format, score=score,
-                       message_id=message_id)
+    logger.info(f"✅ ОПУБЛИКОВАНО [{post_format}/{topic}][{article.source}]: {article.title[:50]}")
+    saved = posted.add(article, topic, topic, post_format=post_format,
+                       score=score, message_id=message_id)
     if not saved:
         logger.warning(f"⚠️ Пост отправлен, но не сохранён в БД (возможно дубль): {article.title[:50]}")
     return True
@@ -230,11 +217,25 @@ async def check_telegram_connection(bot: Bot) -> bool:
         return False
 
 
+async def _evaluate_candidate(article: Article, llm: GroqLLM, extracted: int):
+    """Полный текст (пока есть квота на скачивание) + оценка материала."""
+    if extracted < config.max_extractions and not article.full_text:
+        await enrich_with_full_text(article)
+        extracted += 1
+    assessment = await assess_article(article, llm)
+    return assessment, extracted
+
+
+def _topic_in_row_blocks(topic: str, recent_topics: List[str]) -> bool:
+    tail = recent_topics[: config.max_same_topic_in_row]
+    return bool(tail) and len(tail) >= config.max_same_topic_in_row and all(t == topic for t in tail)
+
+
 async def run_cycle(runtime: Runtime, posted: PostedManager,
                     shutdown_event: Optional[asyncio.Event] = None) -> dict:
-    """Один прогон: собрать, отфильтровать, выбрать, опубликовать один материал."""
+    """Один прогон: собрать, отфильтровать, оценить, сгенерировать, опубликовать материал."""
     shutdown_event = shutdown_event or asyncio.Event()
-    result = {"published": False, "candidates": 0, "reason": ""}
+    result: dict = {"published": False, "candidates": 0, "reason": ""}
 
     raw = await load_all_feeds()
     result["raw"] = len(raw)
@@ -257,25 +258,38 @@ async def run_cycle(runtime: Runtime, posted: PostedManager,
         return result
 
     ranked = select_candidates(candidates, posted)
+    recent = posted.get_recent_posts(config.rotation_history_size)
+    recent_formats = [p.get('format') or "" for p in recent]
+    recent_topics = [p.get('topic') or "" for p in recent]
 
-    for item in ranked[:config.max_generation_attempts]:
+    extracted = 0
+    for item in ranked[: config.max_generation_attempts]:
         if shutdown_event.is_set():
             logger.info("🛑 Прерывание в цикле публикации")
             result["reason"] = "shutdown"
             break
 
         article = item.article
-        score = item.score.total
-        band = priority_band(score)
+        topic = Topic.detect(article.text)
 
-        if band == "reject":
-            posted.log_rejected(article, f"LOW_SCORE ({score})")
+        if _topic_in_row_blocks(topic, recent_topics):
+            posted.log_rejected(article, f"TOPIC_IN_ROW ({topic})")
             continue
 
-        if band == "queue":
-            # 50–64: на дополнительную проверку в очередь, не в публикацию
-            posted.log_rejected(article, f"QUEUED_LOW_SCORE ({score})")
-            logger.info(f"  🕓 В очередь (score={score}): {article.title[:50]}")
+        assessment, extracted = await _evaluate_candidate(article, runtime.llm, extracted)
+        score = assessment.total
+        band = priority_band(score)
+        logger.info(
+            f"  🧮 ОЦЕНКА [{assessment.source}] {score}/100 ({band}), формат={assessment.post_format}, "
+            f"триггер={assessment.trigger}: {article.title[:55]}"
+        )
+
+        if not assessment.worth_publishing:
+            posted.log_rejected(article, f"NOT_WORTH_PUBLISHING ({assessment.reason or 'модель'})")
+            continue
+
+        if band in ("reject", "queue"):
+            posted.log_rejected(article, f"LOW_SCORE ({score}/{band})")
             continue
 
         dup_result = posted.is_duplicate(article.link, article.title, article.summary)
@@ -283,20 +297,32 @@ async def run_cycle(runtime: Runtime, posted: PostedManager,
             posted.log_rejected(article, f"FINAL_DUP: {'; '.join(dup_result.reasons[:2])}")
             continue
 
-        summary = await generate_summary(article, runtime.llm)
-        if not summary:
+        post_format = choose_format(assessment, recent_formats)
+        generated = await generate_post(article, assessment, post_format, runtime.llm)
+        if not generated:
             posted.log_rejected(article, "GENERATION_FAILED")
             continue
 
-        ok = await post_article(article, summary, posted, bot=runtime.bot, score=score)
-        if ok:
-            result["published"] = True
-            result["title"] = article.title
-            result["score"] = score
+        text = build_post_text(article, generated.body, post_format, topic)
+        ok, reason = validate_post(generated.body, post_format)
+        if not ok:
+            posted.log_rejected(article, f"FINAL_VALIDATION ({reason})")
+            continue
+
+        published = await send_post(article, text, posted, runtime.bot, topic, post_format, score)
+        if published:
+            result.update({
+                "published": True,
+                "title": article.title,
+                "score": score,
+                "format": post_format,
+                "trigger": assessment.trigger,
+                "quality": generated.quality.as_dict(),
+            })
             logger.info("🏁 Готово!")
             break
 
-        posted.log_rejected(article, "POST_VALIDATION_OR_SEND_FAILED")
+        posted.log_rejected(article, "SEND_FAILED")
         await asyncio.sleep(2)
 
     if not result["published"]:
@@ -352,7 +378,7 @@ async def main() -> int:
         return 1
 
     logger.info("=" * 60)
-    logger.info("🚀 БЛОКИРОВКИ + AI (редакционная система)")
+    logger.info("🚀 БЛОКИРОВКИ + AI (редакционная система, этап 2)")
     logger.info("=" * 60)
 
     runtime = Runtime()
@@ -379,7 +405,8 @@ async def main() -> int:
         if recent:
             logger.info(f"📋 Последние {len(recent)} постов:")
             for p in recent:
-                logger.info(f"   • [{p['topic']}][{p.get('source', '?')}] {p['title'][:50]}...")
+                logger.info(f"   • [{p['topic']}][{p.get('format') or '—'}][{p.get('source', '?')}] "
+                            f"{p['title'][:50]}...")
 
         result = await run_cycle(runtime, posted, shutdown_event)
         logger.info(f"📈 Итог прогона: {result}")
@@ -397,3 +424,10 @@ async def main() -> int:
         await runtime.close()
         _release_lock()
         logger.info("👋 Завершение работы")
+
+
+__all__ = [
+    "main", "run_cycle", "Runtime", "filter_and_dedupe", "select_candidates",
+    "send_post", "check_telegram_connection", "PostFormat", "Assessment",
+    "heuristic_assessment",
+]

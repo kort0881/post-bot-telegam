@@ -197,6 +197,45 @@ def compile_terms(terms: Iterable[str], stem: bool = True, name: str = "") -> Te
     return TermMatcher(terms, stem=stem, name=name)
 
 
+# ===== ТЕРПИМЫЙ РАЗБОР JSON ОТ МОДЕЛИ =====
+def parse_json_object(text: str) -> Optional[dict]:
+    """Разобрать JSON-объект из ответа модели, включая обрезанный по лимиту токенов.
+
+    Модель часто не закрывает JSON: ответ обрывается на середине строки. Тогда
+    отрезаем неполный хвост по запятым/закрывающим скобкам и закрываем структуру —
+    оценка не теряется целиком из-за одного оборванного поля.
+    """
+    if not text:
+        return None
+    start = text.find('{')
+    if start < 0:
+        return None
+    candidate = text[start:]
+
+    try:
+        data = json.loads(candidate)
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    cut_points = [i for i, ch in enumerate(candidate) if ch in ',}']
+    for cut in reversed(cut_points):
+        chunk = candidate[:cut].rstrip().rstrip(',')
+        if not chunk.endswith('}') and not chunk.endswith('"'):
+            chunk = chunk.rstrip(',').rstrip()
+        if chunk.count('"') % 2 == 1:
+            chunk += '"'
+        opens = chunk.count('{') - chunk.count('}')
+        chunk += '}' * max(opens, 0)
+        try:
+            data = json.loads(chunk)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and data:
+            return data
+    return None
+
+
 # ===== ВАЛИДАЦИЯ ТЕКСТА ПОСТА =====
 def count_sentences(text: str) -> int:
     parts = re.split(r'[.!?]+(?:\s+|$)', text.strip())

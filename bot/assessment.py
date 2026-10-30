@@ -7,9 +7,7 @@
 Если модель недоступна или вернула мусор — остаётся эвристическая оценка:
 бот не падает и не блокирует выпуск, но в лог пишется, что оценка эвристическая.
 """
-import json
 import logging
-import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -22,7 +20,7 @@ from .rating import (
     _reliability_score,
     score_article,
 )
-from .textutils import TermMatcher
+from .textutils import TermMatcher, parse_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +43,11 @@ ASSESS_PROMPT = """Ты — технический редактор Telegram-к�
   "worth_publishing": true|false,   // false — проходная новость без конфликта, неожиданности, последствий и пользы
   "reason": "короткое объяснение решения",
   "main_point": "главный подтверждённый факт одной фразой",
-  "facts": ["3-6 фактов строго из текста, без домыслов"]
+  "facts": ["до 4 фактов строго из текста, без домыслов"]
 }}
+
+Отвечай компактно: reason — до 120 символов, main_point — одна фраза, факты короткие.
+JSON обязан быть закрытым: не обрывай его на середине.
 
 Форматы:
 - howto — практическое решение: проблема, причина, что делать, ограничения;
@@ -124,16 +125,8 @@ def _clamp(value, low=0, high=10):
 
 def parse_assessment(raw: str) -> Optional[Dict]:
     """Разобрать JSON модели, терпимо к обёрткам и тексту вокруг."""
-    if not raw:
-        return None
-    match = re.search(r"\{.*\}", raw, re.DOTALL)
-    if not match:
-        return None
-    try:
-        data = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(data, dict):
+    data = parse_json_object(raw)
+    if not data:
         return None
 
     fmt = str(data.get("format", "")).strip().lower()
@@ -211,7 +204,7 @@ async def assess_article(article: Article, llm: Optional[GroqLLM] = None) -> Ass
         text=text[: config.max_fulltext_chars],
     )
     try:
-        raw = await llm.complete(prompt, max_tokens=700, temperature=0.2, json_mode=True)
+        raw = await llm.complete(prompt, max_tokens=1200, temperature=0.2, json_mode=True)
     except LLMError as e:
         logger.warning(f"  ⚠️ Оценка LLM недоступна ({e}), считаю эвристикой")
         return heuristic_assessment(article, "LLM недоступна")

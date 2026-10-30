@@ -97,6 +97,38 @@ def test_parse_assessment_clamps_out_of_range():
     assert data["usefulness"] == 0
 
 
+TRUNCATED = ('{\n  "topic_relevance": 6,\n  "usefulness": 4,\n  "novelty": 7,\n'
+             '  "discussion": 6,\n  "format": "tool",\n  "trigger": "выгода",\n'
+             '  "worth_publishing": true,\n  "reason": "Новость о стартапе с $17 млн'
+             ' инвестиций, разрабатывающем AI-модель для автоматизированного проектирования,'
+             ' интересна аудитории, с')
+
+
+def test_truncated_json_is_repaired_not_dropped():
+    """Живой ответ модели обрывается по max_tokens — оценка не должна теряться."""
+    data = parse_assessment(TRUNCATED)
+    assert data is not None
+    assert data["topic_relevance"] == 6
+    assert data["format"] == "tool"
+    assert data["trigger"] == "выгода"
+    assert data["worth_publishing"] is True
+
+
+@pytest.mark.asyncio
+async def test_truncated_json_keeps_llm_scores():
+    llm = FakeLLM(TRUNCATED)
+    result = await assess_article(article(), llm)
+    assert result.source == "llm"
+    assert result.breakdown.topic == 15  # 6 * 2.5
+
+
+def test_json_with_missing_format_falls_back_to_heuristics():
+    partial = '{"topic_relevance": 8, "usefulness": 7, "novelty": 6, "discussion": 5'
+    data = parse_assessment(partial)
+    assert data is not None
+    assert data["format"] == ""
+
+
 def test_build_breakdown_keeps_weights():
     breakdown = build_breakdown(article(), {
         "topic_relevance": 10, "usefulness": 10, "novelty": 10, "discussion": 10,

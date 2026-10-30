@@ -7,7 +7,6 @@
 - универсальный дисклеймер убран, хештегов 1–3, ссылка на первоисточник остаётся.
 """
 import logging
-import re
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
@@ -19,6 +18,7 @@ from .textutils import (
     count_sentences,
     has_repeated_sentences,
     is_valid_post_text,
+    parse_json_object,
     strip_service_lines,
 )
 
@@ -220,18 +220,8 @@ def validate_post(text: str, fmt: str) -> Tuple[bool, str]:
 
 
 def parse_quality(raw: str) -> Optional[QualityReport]:
-    import json
-
-    if not raw:
-        return None
-    match = re.search(r"\{.*\}", raw, re.DOTALL)
-    if not match:
-        return None
-    try:
-        data = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(data, dict):
+    data = parse_json_object(raw)
+    if not data:
         return None
 
     def num(key):

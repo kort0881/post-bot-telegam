@@ -4,7 +4,7 @@ import types
 
 import pytest
 
-from bot.llm import DailyQuotaExhausted, GroqLLM
+from bot.llm import DailyQuotaExhausted, GroqLLM, LLMError
 
 TPD_ERROR = (
     "Error code: 429 - {'error': {'message': 'Rate limit reached for model "
@@ -66,7 +66,7 @@ async def _slow_guard(llm):
     delay = config.groq_base_delay
     config.groq_base_delay = 0.0  # не спать в тестах
     try:
-        with pytest.raises(Exception):
+        with pytest.raises(LLMError):
             await llm.complete("hi")
     finally:
         config.groq_base_delay = delay

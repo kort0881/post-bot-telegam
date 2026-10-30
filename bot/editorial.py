@@ -313,13 +313,26 @@ async def generate_post(
         ok, reason = validate_post(body, fmt)
         if not ok:
             logger.warning(f"  ⚠️ [{fmt}] отклонено по форме: {reason}")
-            reasons.append(reason)
+            if reason.startswith("TEXT_TOO_LONG"):
+                low, high = POST_LENGTH_LIMITS.get(fmt, POST_LENGTH_LIMITS["consequence"])
+                reasons.append(f"текст {len(body)} символов, лимит {high} — сократи до {low}–{high}")
+            elif reason.startswith("TEXT_TOO_SHORT"):
+                low, high = POST_LENGTH_LIMITS.get(fmt, POST_LENGTH_LIMITS["consequence"])
+                reasons.append(f"текст {len(body)} символов, нужно {low}–{high} — добавь фактов из источника")
+            else:
+                reasons.append(reason)
             continue
 
         quality = await rate_post(body, llm)
         logger.info(f"  📊 самопроверка [{fmt}]: {quality.as_dict()}")
         if not quality.passed:
-            reasons.extend(quality.problems or ["низкая сила первой строки/интриги"])
+            if quality.problems:
+                reasons.extend(quality.problems)
+            else:
+                reasons.append(
+                    f"слабый вход: первая строка {quality.first_line}/10, "
+                    f"интрига {quality.intrigue}/10 — перепиши подачу"
+                )
             logger.warning(f"  ⚠️ [{fmt}] не прошло самопроверку: {quality.problems}")
             continue
 

@@ -173,7 +173,7 @@ POST_LENGTH_LIMITS = {
     "howto": (700, 1500),
     "experiment": (350, 2500),
     "analysis": (1200, 2500),
-    "consequence": (500, 1200),
+    "consequence": (500, 1500),
     "tool": (400, 1200),
 }
 

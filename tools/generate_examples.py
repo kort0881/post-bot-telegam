@@ -39,9 +39,8 @@ async def build_examples(out_dir: Path) -> dict:
         stats["candidates"] = len(candidates)
         ranked = select_candidates(candidates, posted)
 
+        considered = []
         for item in ranked[:MAX_CANDIDATES]:
-            if len(done) == len(PostFormat.ALL):
-                break
             article = item.article
             await enrich_with_full_text(article)
             assessment = await assess_article(article, llm)
@@ -50,12 +49,9 @@ async def build_examples(out_dir: Path) -> dict:
                 stats["rejected"] += 1
                 print(f"  ⛔ не стоит публикации: {article.title[:60]} — {assessment.reason}")
                 continue
-            fmt = assessment.post_format
-            if fmt in done:
-                continue
-            generated = await generate_post(article, assessment, fmt, llm)
-            if not generated:
-                continue
+            considered.append((article, assessment))
+
+        def store(article, assessment, fmt, generated):
             topic = Topic.detect(article.text)
             text = build_post_text(article, generated.body, fmt, topic)
             done[fmt] = {
@@ -73,6 +69,31 @@ async def build_examples(out_dir: Path) -> dict:
             }
             stats["generated"] += 1
             print(f"  ✅ {fmt}: {article.title[:60]}")
+
+        # проход 1: формат выбирает оценка материала
+        for article, assessment in considered:
+            if len(done) == len(PostFormat.ALL):
+                break
+            fmt = assessment.post_format
+            if fmt in done:
+                continue
+            generated = await generate_post(article, assessment, fmt, llm)
+            if generated:
+                store(article, assessment, fmt, generated)
+
+        # проход 2: добираем форматы, которых не оказалось среди естественных оценок,
+        # на оставшихся материалах (только для демонстрации, в боте так не делается)
+        for article, assessment in considered:
+            missing = [f for f in PostFormat.ALL if f not in done]
+            if not missing:
+                break
+            if any(d["link"] == article.link for d in done.values()):
+                continue
+            fmt = missing[0]
+            print(f"  ↪️ принудительный формат {fmt} для: {article.title[:55]}")
+            generated = await generate_post(article, assessment, fmt, llm)
+            if generated:
+                store(article, assessment, fmt, generated)
     finally:
         posted.close()
     return {"stats": stats, "examples": done}

@@ -19,7 +19,7 @@ from bot.db import PostedManager  # noqa: E402
 from bot.editorial import build_post_text, generate_post  # noqa: E402
 from bot.extract import enrich_with_full_text  # noqa: E402
 from bot.feeds import load_all_feeds  # noqa: E402
-from bot.llm import GroqLLM  # noqa: E402
+from bot.llm import DailyQuotaExhausted, GroqLLM  # noqa: E402
 from bot.logging_setup import setup_logging  # noqa: E402
 from bot.models import PostFormat, Topic  # noqa: E402
 from bot.pipeline import filter_and_dedupe, select_candidates  # noqa: E402
@@ -96,6 +96,8 @@ async def build_examples(out_dir: Path) -> dict:
                 store(article, assessment, fmt, generated)
     finally:
         posted.close()
+    if llm.quota_exhausted:
+        raise DailyQuotaExhausted(llm._quota_error or "дневной лимит Groq исчерпан")
     return {"stats": stats, "examples": done}
 
 
@@ -125,7 +127,13 @@ async def main() -> int:
     setup_logging()
     out_dir = Path("docs/examples")
     out_dir.mkdir(parents=True, exist_ok=True)
-    payload = await build_examples(out_dir)
+    try:
+        payload = await build_examples(out_dir)
+    except DailyQuotaExhausted as exc:
+        print("⛔ Дневной лимит Groq (TPD) исчерпан — прогон прерван без повторов.")
+        print(f"   Ответ API: {exc}")
+        print("   Повторить после сброса суточной квоты или с другим GROQ_API_KEY.")
+        return 3
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H%M")
     (out_dir / f"examples-{stamp}.md").write_text(render_markdown(payload), encoding="utf-8")
     (out_dir / f"examples-{stamp}.json").write_text(

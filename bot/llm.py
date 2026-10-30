@@ -8,10 +8,16 @@ from .config import GROQ_FALLBACK_MODELS, GROQ_MODELS, config
 logger = logging.getLogger(__name__)
 
 MODEL_DEAD_MARKERS = ("decommissioned", "deprecated", "does not exist", "not found")
+# Дневной лимит аккаунта Groq (TPD) — не лечится ни повтором, ни сменой модели.
+DAILY_QUOTA_MARKERS = ("tokens per day", "requests per day", "tpd limit", "rpd limit")
 
 
 class LLMError(Exception):
     pass
+
+
+class DailyQuotaExhausted(LLMError):
+    """Дневной лимит Groq исчерпан: повторять бессмысленно до сброса квоты."""
 
 
 class GroqLLM:
@@ -19,6 +25,12 @@ class GroqLLM:
         self._api_key = api_key or config.groq_api_key
         self._models = models or (GROQ_MODELS + GROQ_FALLBACK_MODELS)
         self._client = None
+        self._quota_error: Optional[str] = None
+
+    @property
+    def quota_exhausted(self) -> bool:
+        """Дневной лимит уже упёрся: дальнейшие вызовы падают мгновенно, без сети."""
+        return self._quota_error is not None
 
     @property
     def client(self):
@@ -39,6 +51,8 @@ class GroqLLM:
         json_mode: bool = False,
     ) -> str:
         """Вернуть текст ответа. Бросает LLMError, если все модели отказали."""
+        if self._quota_error is not None:
+            raise DailyQuotaExhausted(self._quota_error)
         last_error = None
         for model in self._models:
             for attempt in range(config.groq_retries_per_model):
@@ -60,6 +74,11 @@ class GroqLLM:
                 except Exception as e:
                     last_error = e
                     msg = str(e).lower()
+                    if any(m in msg for m in DAILY_QUOTA_MARKERS):
+                        self._quota_error = str(e)
+                        logger.error(
+                            "  ⛔ дневной лимит Groq исчерпан (%s) — прерываю без повторов", model)
+                        raise DailyQuotaExhausted(str(e)) from e
                     if any(m in msg for m in MODEL_DEAD_MARKERS):
                         logger.warning(f"  ⚠️ модель {model} недоступна, следующая")
                         break

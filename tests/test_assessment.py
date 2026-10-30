@@ -74,9 +74,16 @@ async def test_invalid_json_falls_back():
     assert result.source == "heuristic"
 
 
-def test_parse_assessment_rejects_unknown_format():
-    bad = dict(GOOD, format="memes")
-    assert parse_assessment(json.dumps(bad, ensure_ascii=False)) is None
+def test_parse_assessment_accepts_russian_format_names():
+    data = parse_assessment(json.dumps(dict(GOOD, format="Практическое решение"), ensure_ascii=False))
+    assert data["format"] == "howto"
+
+
+def test_parse_assessment_unknown_format_keeps_scores():
+    data = parse_assessment(json.dumps(dict(GOOD, format="memes"), ensure_ascii=False))
+    assert data is not None
+    assert data["format"] == ""      # формат доберём эвристикой
+    assert data["topic_relevance"] == 9
 
 
 def test_parse_assessment_tolerates_code_fence():

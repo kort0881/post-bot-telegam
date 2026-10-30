@@ -129,6 +129,29 @@ def test_json_with_missing_format_falls_back_to_heuristics():
     assert data["format"] == ""
 
 
+@pytest.mark.asyncio
+async def test_offtopic_material_is_not_worth_publishing():
+    """Nvidia/шпионаж вне профиля канала не должен публиковаться даже при интересе."""
+    off = Article(
+        title="Китайские шпионы следили за главой Nvidia, утверждает NYT",
+        summary="Расследование о поставках чипов",
+        link="https://example.com/nvidia",
+        source="The Decoder",
+    )
+    payload = dict(GOOD, topic_relevance=7, worth_publishing=True, format="consequence")
+    llm = FakeLLM(json.dumps(payload, ensure_ascii=False))
+    result = await assess_article(off, llm)
+    assert result.worth_publishing is False
+
+
+@pytest.mark.asyncio
+async def test_profile_material_with_same_score_is_worth_publishing():
+    payload = dict(GOOD, topic_relevance=7, worth_publishing=True, format="consequence")
+    llm = FakeLLM(json.dumps(payload, ensure_ascii=False))
+    result = await assess_article(article(), llm)
+    assert result.worth_publishing is True
+
+
 def test_build_breakdown_keeps_weights():
     breakdown = build_breakdown(article(), {
         "topic_relevance": 10, "usefulness": 10, "novelty": 10, "discussion": 10,

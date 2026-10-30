@@ -9,7 +9,9 @@ from bot.editorial import (
     check_style,
     choose_format,
     generate_post,
+    normalize_formatting,
     parse_quality,
+    strip_meta_leaks,
     validate_post,
 )
 from bot.models import Article, PostFormat, Topic
@@ -106,6 +108,39 @@ def test_validate_post_rejects_short_text_for_format():
     ok, reason = validate_post("Короткий пост про DPI. Ещё одно предложение.", PostFormat.ANALYSIS)
     assert not ok
     assert reason.startswith("TEXT_TOO_SHORT")
+
+
+def test_normalize_formatting_converts_markdown_bold():
+    raw = "**Что делать**\n\n1. Скачайте клиент\n2. Запустите"
+    out = normalize_formatting(raw)
+    assert "**" not in out
+    assert "<b>Что делать</b>" in out
+
+
+def test_strip_meta_leaks_removes_editor_notes():
+    raw = ("Текст про обход блокировок, вполне осмысленный. "
+           "Ссылка на источник будет добавлена системой. "
+           "Ещё одно предложение по существу.")
+    out = strip_meta_leaks(raw)
+    assert "будет добавлена системой" not in out.lower()
+    assert "обход блокировок" in out
+
+
+def test_validate_post_rejects_fake_test_claim():
+    bad = GOOD_BODY.replace("Проверить, блокируется ли", "Мы проверили, блокируется ли")
+    ok, reason = validate_post(bad, PostFormat.HOWTO)
+    assert not ok
+    assert reason.startswith("FAKE_TEST_CLAIM")
+
+
+def test_quality_gate_requires_value_and_read_to_end():
+    from bot.editorial import QualityReport
+
+    empty = QualityReport(first_line=8, intrigue=8, read_to_end=0, value=0, share_potential=0)
+    assert empty.passed is False
+
+    good = QualityReport(first_line=8, intrigue=8, read_to_end=7, value=8, share_potential=7)
+    assert good.passed is True
 
 
 def test_check_style_flags_question_ending():

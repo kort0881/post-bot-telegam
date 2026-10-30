@@ -110,6 +110,10 @@ QUALITY_PROMPT = """Оцени готовую публикацию для Telegr
 {{"first_line": 0-10, "intrigue": 0-10, "read_to_end": 0-10, "value": 0-10, "share_potential": 0-10, "problems": ["..."], "clicbait": true|false}}
 
 Оценивай честно: если материал слабый — низкие баллы, а не вежливые восьмёрки.
+Проверь грамотность: орфография, согласование, падежи, транслит вроде «tunels» вместо
+«туннели». Каждую такую ошибку впиши в problems — текст с ними не публикуется.
+Проверь, что все утверждения есть в исходнике: додуманные детали (цифры, имена,
+«по данным разведки») — тоже в problems.
 
 ПУБЛИКАЦИЯ:
 {text}"""
@@ -133,7 +137,10 @@ class QualityReport:
                 and self.first_line >= config.quality_hook_min
                 and self.intrigue >= config.quality_hook_min
                 and self.value >= 6.0
-                and self.read_to_end >= 6.0)
+                and self.read_to_end >= 6.0
+                # баллы выше порога не спасают текст, у которого модель нашла
+                # несколько содержательных замечаний (мало конкретики, нет фактов)
+                and len(self.problems) <= config.quality_max_problems)
 
     def as_dict(self) -> dict:
         return {

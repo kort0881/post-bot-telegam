@@ -244,6 +244,8 @@ class Config:
         # Порог самопроверки текста: первая строка и интрига (ТЗ §5.1)
         self.quality_hook_min = _float_env("QUALITY_HOOK_MIN", 7.0)
         self.quality_attempts = _int_env("QUALITY_ATTEMPTS", 2)
+        # сколько замечаний самопроверки допустимо: больше — текст уходит на переписывание
+        self.quality_max_problems = _int_env("QUALITY_MAX_PROBLEMS", 1)
         # Не более N публикаций подряд одного формата (ТЗ §12)
         self.max_same_format_in_row = _int_env("MAX_SAME_FORMAT_IN_ROW", 2)
         self.max_same_topic_in_row = _int_env("MAX_SAME_TOPIC_IN_ROW", 2)

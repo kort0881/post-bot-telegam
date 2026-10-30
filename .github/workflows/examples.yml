@@ -9,7 +9,7 @@ permissions:
 jobs:
   examples:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -28,8 +28,8 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-          MAX_GENERATION_ATTEMPTS: "20"
-          MAX_EXTRACTIONS: "12"
+          MAX_GENERATION_ATTEMPTS: "12"
+          MAX_EXTRACTIONS: "6"
         run: python tools/generate_examples.py
 
       - name: Upload examples

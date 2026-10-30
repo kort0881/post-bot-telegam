@@ -143,6 +143,24 @@ def test_quality_gate_requires_value_and_read_to_end():
     assert good.passed is True
 
 
+def test_quality_gate_rejects_text_with_several_problems():
+    from bot.editorial import QualityReport
+
+    # живой случай из examples-прогона 2026-10-30: баллы выше порога,
+    # но пять содержательных замечаний — такой текст не публикуется
+    weak = QualityReport(
+        first_line=7, intrigue=8, read_to_end=6, value=7, share_potential=7,
+        problems=["Недостаточно конкретики", "Нет ссылок на документы"],
+    )
+    assert weak.passed is False
+
+    ok = QualityReport(
+        first_line=7, intrigue=8, read_to_end=6, value=7, share_potential=7,
+        problems=["Отсутствие визуальных элементов"],
+    )
+    assert ok.passed is True
+
+
 def test_check_style_flags_question_ending():
     ok, reason = check_style("Текст про блокировки. Работает ли это у вас?")
     assert not ok

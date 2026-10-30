@@ -32,6 +32,24 @@ def test_extract_keeps_content_drops_nav_and_ads():
     assert "Поделиться" not in text
 
 
+def test_extract_survives_nested_removed_blocks():
+    """Регрессия: на живой странице обход дерева падал после decompose()."""
+    html = """
+    <html><body>
+      <div class="sidebar"><div><p>Рекламный блок про VPN со скидкой и промокодом</p></div></div>
+      <div class="advert"><section><p>Ещё одна реклама, длинная и бесполезная, с призывом купить</p></section></div>
+      <article><p>Провайдеры включили фильтрацию DPI, часть VLESS-подключений перестала
+      работать, пользователи ищут обход и проверяют настройки клиента после обновления.</p>
+      <p>Роскомсвобода опубликовала инструкцию, как проверить, блокируется ли конкретный
+      сервер или протокол целиком, и какие параметры стоит изменить после обновления.</p></article>
+    </body></html>
+    """
+    text = extract_from_html(html, min_chars=100)
+    assert text
+    assert "DPI" in text
+    assert "промокод" not in text.lower()
+
+
 def test_extract_returns_none_for_thin_page():
     assert extract_from_html("<html><body><p>коротко</p></body></html>", min_chars=400) is None
 

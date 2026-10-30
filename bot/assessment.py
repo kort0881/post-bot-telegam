@@ -58,6 +58,25 @@ ASSESS_PROMPT = """Ты — технический редактор Telegram-к�
 Не выдумывай факты: если данных нет — не добавляй. Никаких оценок без опоры на текст."""
 
 VALID_FORMATS = set(PostFormat.ALL)
+
+# Модели иногда отвечают по-русски или в другом регистре — принимаем синонимы
+FORMAT_ALIASES = {
+    "практическое решение": PostFormat.HOWTO,
+    "инструкция": PostFormat.HOWTO,
+    "how-to": PostFormat.HOWTO,
+    "эксперимент": PostFormat.EXPERIMENT,
+    "проверка": PostFormat.EXPERIMENT,
+    "эксперимент и проверка": PostFormat.EXPERIMENT,
+    "последствия": PostFormat.CONSEQUENCE,
+    "последствия новости": PostFormat.CONSEQUENCE,
+    "news": PostFormat.CONSEQUENCE,
+    "разбор": PostFormat.ANALYSIS,
+    "расследование": PostFormat.ANALYSIS,
+    "разбор и расследование": PostFormat.ANALYSIS,
+    "инструменты": PostFormat.TOOL,
+    "tool": PostFormat.TOOL,
+    "инструменты и находки": PostFormat.TOOL,
+}
 VALID_TRIGGERS = {
     "угроза", "неожиданность", "конфликт", "любопытство", "выгода",
     "срочность", "разоблачение", "сравнение", "последствия",
@@ -118,18 +137,21 @@ def parse_assessment(raw: str) -> Optional[Dict]:
         return None
 
     fmt = str(data.get("format", "")).strip().lower()
+    fmt = FORMAT_ALIASES.get(fmt, fmt)
     if fmt not in VALID_FORMATS:
-        return None
+        # нераспознанный формат — не повод терять всю оценку, формат доберём эвристикой
+        logger.warning(f"  ⚠️ неизвестный формат от модели: {fmt[:40]!r}")
+        fmt = ""
     trigger = str(data.get("trigger", "")).strip().lower()
     facts = data.get("facts") or []
     if not isinstance(facts, list):
         facts = []
     return {
+        "format": fmt,
         "topic_relevance": _clamp(data.get("topic_relevance", 0)),
         "usefulness": _clamp(data.get("usefulness", 0)),
         "novelty": _clamp(data.get("novelty", 0)),
         "discussion": _clamp(data.get("discussion", 0)),
-        "format": fmt,
         "trigger": trigger if trigger in VALID_TRIGGERS else "последствия",
         "worth_publishing": bool(data.get("worth_publishing", True)),
         "reason": str(data.get("reason", ""))[:300],
@@ -196,13 +218,16 @@ async def assess_article(article: Article, llm: Optional[GroqLLM] = None) -> Ass
 
     data = parse_assessment(raw)
     if not data:
-        logger.warning("  ⚠️ Оценка LLM не разобрана, считаю эвристикой")
+        logger.warning(f"  ⚠️ Оценка LLM не разобрана, считаю эвристикой; ответ модели: {raw[:300]!r}")
         return heuristic_assessment(article, "некорректный JSON модели")
 
     worth = data["worth_publishing"] and data["topic_relevance"] >= config.llm_min_worth
+    post_format = data["format"] or heuristic_format(article)
+    if not data["format"]:
+        logger.info(f"  ℹ️ формат выбран эвристикой: {post_format}")
     return Assessment(
         breakdown=build_breakdown(article, data),
-        post_format=data["format"],
+        post_format=post_format,
         trigger=data["trigger"],
         worth_publishing=worth,
         reason=data["reason"],

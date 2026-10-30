@@ -42,11 +42,18 @@ MIN_PARAGRAPH_CHARS = 70
 
 
 def _clean_soup(soup: BeautifulSoup) -> BeautifulSoup:
-    for tag in soup(DROP_TAGS):
+    for tag in list(soup.find_all(DROP_TAGS)):
         tag.decompose()
-    for tag in soup.find_all(True):
-        classes = " ".join(tag.get("class") or [])
-        ident = tag.get("id") or ""
+    # Снимок списка обязателен: decompose() обнуляет потомков, и обход живого дерева
+    # падает на реальных страницах ('NoneType' object has no attribute 'get')
+    for tag in list(soup.find_all(True)):
+        try:
+            if tag.decomposed or tag.attrs is None:
+                continue
+            classes = " ".join(tag.get("class") or [])
+            ident = tag.get("id") or ""
+        except (AttributeError, TypeError):
+            continue
         if DROP_CLASS_PATTERNS.search(classes) or DROP_CLASS_PATTERNS.search(ident):
             tag.decompose()
     return soup

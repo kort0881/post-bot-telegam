@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from .config import PRIMARY_SOURCES, config
+from .filters import is_profile_topic
 from .llm import GroqLLM, LLMError
 from .models import Article, PostFormat, Topic
 from .rating import (
@@ -214,7 +215,19 @@ async def assess_article(article: Article, llm: Optional[GroqLLM] = None) -> Ass
         logger.warning(f"  ⚠️ Оценка LLM не разобрана, считаю эвристикой; ответ модели: {raw[:300]!r}")
         return heuristic_assessment(article, "некорректный JSON модели")
 
-    worth = data["worth_publishing"] and data["topic_relevance"] >= config.llm_min_worth
+    # Тема канала узкая: материал не по профилю (блокировки/VPN/сети/безопасность)
+    # не должен проходить только за счёт «интересности» — нужна очень высокая оценка.
+    profile = is_profile_topic(article.text)
+    worth = (
+        data["worth_publishing"]
+        and data["topic_relevance"] >= config.llm_min_worth
+        and (profile or data["topic_relevance"] >= 9)
+    )
+    if data["worth_publishing"] and not worth:
+        logger.info(
+            f"  ⛔ вне профиля канала (тематика {data['topic_relevance']}/10, "
+            f"профильных слов нет): {article.title[:50]}"
+        )
     post_format = data["format"] or heuristic_format(article)
     if not data["format"]:
         logger.info(f"  ℹ️ формат выбран эвристикой: {post_format}")

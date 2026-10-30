@@ -7,6 +7,7 @@
 - универсальный дисклеймер убран, хештегов 1–3, ссылка на первоисточник остаётся.
 """
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
@@ -91,6 +92,13 @@ BANNED_CLICKBAIT = [
     "просто шок",
 ]
 
+# Нельзя утверждать, что проверку проводила редакция (ТЗ §5, формат 2)
+BANNED_TEST_CLAIMS = [
+    "мы проверили", "мы протестировали", "мы протестировали", "мы измерили",
+    "в ходе нашего теста", "наши тесты", "редакция проверила", "редакция протестировала",
+    "мы сравнили", "по нашим наблюдениям",
+]
+
 BANNED_ENDINGS = [
     "а что вы думаете", "как думаете", "пишите в комментариях", "делитесь мнением",
     "ставьте лайк", "подписывайтесь",
@@ -120,9 +128,12 @@ class QualityReport:
 
     @property
     def passed(self) -> bool:
+        # одной цепкой первой строки мало: пустой по сути текст не публикуем
         return (not self.clicbait
                 and self.first_line >= config.quality_hook_min
-                and self.intrigue >= config.quality_hook_min)
+                and self.intrigue >= config.quality_hook_min
+                and self.value >= 6.0
+                and self.read_to_end >= 6.0)
 
     def as_dict(self) -> dict:
         return {
@@ -190,6 +201,41 @@ def build_prompt(article: Article, assessment: Assessment, fmt: str) -> str:
 ПУБЛИКАЦИЯ:"""
 
 
+META_LEAKS = (
+    "ссылка на источник будет добавлена системой",
+    "ссылка будет добавлена",
+    "ссылки будут добавлены системой",
+    "хештеги добавит система",
+    "хештеги добавит система",
+    "ссылка на источник добавлена системой",
+    "здесь могла быть ваша ссылка",
+)
+
+BOLD_HEADING = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+
+
+def normalize_formatting(text: str) -> str:
+    """Привести разметку модели к тому, что Telegram показывает как разметку.
+
+    Модель любит markdown (**жирный**), а канал отправляется с parse_mode=HTML:
+    звёздочки иначе видны в тексте.
+    """
+    cleaned = BOLD_HEADING.sub(lambda m: f"<b>{m.group(1).strip()}</b>", text)
+    cleaned = re.sub(r"__(.+?)__", lambda m: f"<b>{m.group(1).strip()}</b>", cleaned, flags=re.DOTALL)
+    cleaned = re.sub(r"(?m)^#{1,6}\s*", "", cleaned)          # markdown-заголовки
+    cleaned = re.sub(r"(?m)^\s*[-*]\s+", "• ", cleaned)       # маркеры списков
+    cleaned = re.sub(r"<b>\s*</b>", "", cleaned)
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+
+def strip_meta_leaks(text: str) -> str:
+    """Убрать служебные фразы, которые модель пишет для редактора, а не для читателя."""
+    result = text
+    for phrase in META_LEAKS:
+        result = re.sub(rf"(?i)[^\n.!?]*{re.escape(phrase)}[^\n.!?]*[.!?]?", " ", result)
+    return re.sub(r"\n{3,}", "\n\n", re.sub(r"[ \t]{2,}", " ", result)).strip()
+
+
 def check_style(text: str) -> Tuple[bool, str]:
     lowered = text.lower().strip()
     for phrase in BANNED_OPENINGS:
@@ -198,6 +244,9 @@ def check_style(text: str) -> Tuple[bool, str]:
     for phrase in BANNED_CLICKBAIT:
         if phrase in lowered:
             return False, f"CLICKBAIT ({phrase})"
+    for phrase in BANNED_TEST_CLAIMS:
+        if phrase in lowered:
+            return False, f"FAKE_TEST_CLAIM ({phrase})"
     tail = lowered[-160:]
     for phrase in BANNED_ENDINGS:
         if phrase in tail:
@@ -309,7 +358,7 @@ async def generate_post(
             logger.error(f"  ❌ Генерация не удалась: {e}")
             return None
 
-        body = strip_service_lines(raw).strip()
+        body = normalize_formatting(strip_meta_leaks(strip_service_lines(raw)))
         ok, reason = validate_post(body, fmt)
         if not ok:
             logger.warning(f"  ⚠️ [{fmt}] отклонено по форме: {reason}")

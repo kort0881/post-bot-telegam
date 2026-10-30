@@ -173,7 +173,7 @@ POST_LENGTH_LIMITS = {
     "howto": (700, 1500),
     "experiment": (350, 2500),
     "analysis": (1200, 2500),
-    "consequence": (500, 1200),
+    "consequence": (500, 1500),
     "tool": (400, 1200),
 }
 
@@ -216,16 +216,14 @@ class Config:
 
         self.batch_subject_limit = _int_env("BATCH_SUBJECT_LIMIT", 10)
 
-        # Ограничения на серию публикаций подряд (ТЗ §12)
-        self.max_same_format_in_row = _int_env("MAX_SAME_FORMAT_IN_ROW", 2)
-        self.max_same_topic_in_row = _int_env("MAX_SAME_TOPIC_IN_ROW", 2)
-
         # Рейтинг: минимальный балл для публикации (ТЗ §3)
         self.publish_min_score = _int_env("PUBLISH_MIN_SCORE", 65)
         self.queue_min_score = _int_env("QUEUE_MIN_SCORE", 50)
 
         # Сколько кандидатов максимум проверять генерацией за прогон
         self.max_generation_attempts = _int_env("MAX_GENERATION_ATTEMPTS", 25)
+        # Сколько статей за прогон скачивать целиком (полный текст, этап 2)
+        self.max_extractions = _int_env("MAX_EXTRACTIONS", 6)
 
         self.groq_retries_per_model = _int_env("GROQ_RETRIES_PER_MODEL", 2)
         self.groq_base_delay = _float_env("GROQ_BASE_DELAY", 2.0)
@@ -234,6 +232,23 @@ class Config:
 
         # Режим работы: auto | approval | collect (ТЗ §11)
         self.posting_mode = os.getenv("POSTING_MODE") or "auto"
+
+        # ===== Этап 2: полный текст, LLM-оценка, форматы =====
+        # Сколько символов статьи отдавать модели (полный текст обрезается)
+        self.max_fulltext_chars = _int_env("MAX_FULLTEXT_CHARS", 6000)
+        # Минимальная длина извлечённого текста: короче — считаем, что не достали
+        self.min_fulltext_chars = _int_env("MIN_FULLTEXT_CHARS", 400)
+        self.extract_timeout = _int_env("EXTRACT_TIMEOUT", 25)
+        # Порог оценки материала моделью (0–10 по каждому критерию)
+        self.llm_min_worth = _float_env("LLM_MIN_WORTH", 6.0)
+        # Порог самопроверки текста: первая строка и интрига (ТЗ §5.1)
+        self.quality_hook_min = _float_env("QUALITY_HOOK_MIN", 7.0)
+        self.quality_attempts = _int_env("QUALITY_ATTEMPTS", 2)
+        # сколько замечаний самопроверки допустимо: больше — текст уходит на переписывание
+        self.quality_max_problems = _int_env("QUALITY_MAX_PROBLEMS", 1)
+        # Не более N публикаций подряд одного формата (ТЗ §12)
+        self.max_same_format_in_row = _int_env("MAX_SAME_FORMAT_IN_ROW", 2)
+        self.max_same_topic_in_row = _int_env("MAX_SAME_TOPIC_IN_ROW", 2)
 
     def missing_env(self):
         missing = []

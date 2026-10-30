@@ -1,0 +1,21 @@
+# Конфигурация инструментов разработки (сам бот запускается как `python telegrambot.py`).
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = [".venv", "posted_articles.db"]
+
+[tool.ruff.lint]
+# Осознанно узкий набор: стилевые правила не должны шуметь в рабочем коде
+select = ["E", "F", "W", "I", "B"]
+ignore = [
+    "E501",   # длину строк контролирует line-length
+    "B008",   # Depends()/query в дефолтах — не наш случай, но правило шумное
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore::DeprecationWarning"]

@@ -1,0 +1,28 @@
+name: Check admin bot
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: stage3-5-engagement
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Состояние
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          TARGET_DIR: /opt/post-bot
+        run: |
+          pip install --quiet paramiko
+          python tools/remote_check.py

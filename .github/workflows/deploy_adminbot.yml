@@ -1,0 +1,77 @@
+name: Deploy admin bot
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: ветка с кодом
+        required: false
+        default: stage3-5-engagement
+      target_dir:
+        description: каталог на сервере
+        required: false
+        default: /opt/post-bot
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Бот и канал
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+          CHANNEL_USERNAME: ${{ secrets.CHANNEL_USERNAME }}
+        run: python tools/verify_bot.py
+
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Установка на сервер
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+          ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+          TARGET_DIR: ${{ inputs.target_dir }}
+          REPO_URL: https://github.com/${{ github.repository }}.git
+          REPO_BRANCH: ${{ inputs.branch }}
+        run: |
+          pip install --quiet paramiko
+          python tools/remote_deploy.py
+
+  healthcheck:
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Состояние сервиса
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          TARGET_DIR: ${{ inputs.target_dir }}
+        run: |
+          pip install --quiet paramiko
+          python tools/remote_check.py

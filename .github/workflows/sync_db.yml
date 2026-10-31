@@ -1,0 +1,46 @@
+name: Sync database
+
+on:
+  schedule:
+    - cron: '7 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: db-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Слияние баз сервер ↔ репозиторий
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          TARGET_DIR: /opt/post-bot
+        run: |
+          pip install --quiet paramiko
+          python tools/remote_sync.py
+      - name: Коммит изменений базы
+        run: |
+          if [[ -n "$(git status --porcelain posted_articles.db)" ]]; then
+            git config user.name "post-bot"
+            git config user.email "post-bot@users.noreply.github.com"
+            git add posted_articles.db
+            git commit -m "🗂 Sync database from server [skip ci]"
+            git pull --rebase --quiet origin main || true
+            git push
+          else
+            echo "база не изменилась"
+          fi

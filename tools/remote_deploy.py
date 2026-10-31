@@ -70,11 +70,22 @@ def main() -> int:
         sftp.close()
         print(f".env записан на сервере ({len(env_body.splitlines()) - 1} переменных)")
 
-        run(client, f"cd {target} && chmod +x deploy/install_adminbot.sh && "
-                    f"REPO_URL={repo} bash deploy/install_adminbot.sh {target}", timeout=900)
-        code, _ = run(client, "systemctl is-active post-bot-admin")
+        # дальнейшие шаги — явно, без промежуточного скрипта: меньше мест, где тихо падает
+        run(client, f"cd {target} && git fetch -q origin {branch} && "
+                    f"git reset --hard -q origin/{branch} && git clean -qfd -e .env -e .venv")
+        run(client, f"cd {target} && python3 -m venv --clear .venv", timeout=300)
+        code, _ = run(client, f"cd {target} && ./.venv/bin/pip install -q --upgrade pip && "
+                              f"./.venv/bin/pip install -q -r requirements.txt", timeout=900)
+        if code != 0:
+            print("pip install не удался")
+            return 1
+        run(client, f"install -m 644 {target}/deploy/post-bot-admin.service "
+                    f"/etc/systemd/system/post-bot-admin.service")
+        run(client, "systemctl daemon-reload && systemctl enable --now post-bot-admin")
+        code, out = run(client, "systemctl is-active post-bot-admin")
         run(client, "systemctl --no-pager status post-bot-admin | head -12")
-        return 0 if "active" in _ else 1
+        run(client, "sleep 6; tail -n 20 /var/log/post-bot-admin.log 2>/dev/null || true")
+        return 0 if "active" in out else 1
     finally:
         client.close()
 

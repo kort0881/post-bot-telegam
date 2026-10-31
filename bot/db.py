@@ -28,6 +28,10 @@ from .textutils import (
 
 logger = logging.getLogger(__name__)
 
+# Режимы публикации (ТЗ §11) и статусы очереди
+POSTING_MODES = ("auto", "approval", "collect")
+QUEUE_STATUSES = ("pending", "published", "skipped", "expired")
+
 
 class DuplicateCheckResult:
     def __init__(self):
@@ -92,6 +96,57 @@ class PostedManager:
                     rejected_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            # Статистика публикаций (ТЗ §10). NULL = метрика неизвестна, а не ноль.
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS post_stats (
+                    message_id INTEGER PRIMARY KEY,
+                    url TEXT,
+                    norm_url TEXT,
+                    title TEXT NOT NULL,
+                    source TEXT,
+                    topic TEXT,
+                    post_format TEXT,
+                    rubric TEXT,
+                    score INTEGER,
+                    published_at TEXT NOT NULL,
+                    views_1h INTEGER,
+                    views_6h INTEGER,
+                    views_24h INTEGER,
+                    forwards_24h INTEGER,
+                    reactions_24h INTEGER,
+                    comments_24h INTEGER,
+                    subscribers INTEGER,
+                    views_source TEXT,
+                    updated_at TEXT
+                )
+            ''')
+            # Редакционная очередь (ТЗ §11)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS editorial_queue (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    norm_url TEXT NOT NULL UNIQUE,
+                    url TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    source TEXT,
+                    topic TEXT,
+                    post_format TEXT,
+                    rubric TEXT,
+                    score INTEGER,
+                    payload TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    reason TEXT,
+                    created_at TEXT NOT NULL,
+                    decided_at TEXT,
+                    message_id INTEGER
+                )
+            ''')
+            # Настройки, которые меняются командами админа (режим публикации)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            ''')
             # Миграции: колонки добавляются по одной, отсутствие = норма
             for ddl in (
                 "ALTER TABLE posted_articles ADD COLUMN subject TEXT DEFAULT 'other'",
@@ -99,6 +154,7 @@ class PostedManager:
                 "ALTER TABLE posted_articles ADD COLUMN score INTEGER",
                 "ALTER TABLE posted_articles ADD COLUMN message_id INTEGER",
                 "ALTER TABLE rejected_urls ADD COLUMN source TEXT",
+                "ALTER TABLE posted_articles ADD COLUMN rubric TEXT",
             ):
                 try:
                     cursor.execute(ddl)
@@ -115,6 +171,9 @@ class PostedManager:
                 ('idx_subject', 'posted_articles', 'subject'),
                 ('idx_post_format', 'posted_articles', 'post_format'),
                 ('idx_rejected_at', 'rejected_urls', 'rejected_at'),
+                ('idx_stats_published', 'post_stats', 'published_at'),
+                ('idx_stats_topic', 'post_stats', 'topic'),
+                ('idx_queue_status', 'editorial_queue', 'status'),
             ]
             for idx_name, table, column in indices:
                 try:
@@ -342,6 +401,7 @@ class PostedManager:
         post_format: Optional[str] = None,
         score: Optional[int] = None,
         message_id: Optional[int] = None,
+        rubric: Optional[str] = None,
     ) -> bool:
         with self._lock:
             conn = self._get_conn()
@@ -357,13 +417,13 @@ class PostedManager:
                     INSERT INTO posted_articles
                     (url, norm_url, domain, title, title_normalized, title_words,
                      title_word_signature, summary, content_hash, entities, topic, subject,
-                     source, post_format, score, message_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     source, post_format, score, message_id, rubric)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     article.link, norm_url, domain_val, article.title, title_normalized,
                     json.dumps(title_words), word_signature, (article.summary or "")[:1000],
                     content_hash, json.dumps([]), topic, subject, article.source,
-                    post_format, score, message_id,
+                    post_format, score, message_id, rubric,
                 ))
                 conn.commit()
                 logger.info(f"💾 Сохранено (topic={topic}, format={post_format}): {article.title[:50]}...")
@@ -379,7 +439,7 @@ class PostedManager:
         with self._lock:
             cursor = self._get_conn().cursor()
             cursor.execute('''
-                SELECT title, topic, source, posted_date, subject, post_format
+                SELECT title, topic, source, posted_date, subject, post_format, rubric
                 FROM posted_articles
                 ORDER BY posted_date DESC
                 LIMIT ?
@@ -387,6 +447,7 @@ class PostedManager:
             return [{
                 'title': r[0], 'topic': r[1], 'source': r[2],
                 'date': r[3], 'subject': r[4] or 'other', 'format': r[5],
+                'rubric': r[6] or '',
             } for r in cursor.fetchall()]
 
     def get_last_topic(self) -> Optional[str]:
@@ -428,6 +489,269 @@ class PostedManager:
                 return cursor.fetchone()[0] == 'ok'
             except Exception:
                 return False
+
+    # ===== настройки (ТЗ §11) =====
+    def get_setting(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
+            row = cursor.fetchone()
+            return row[0] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute(
+                'INSERT INTO settings (key, value) VALUES (?, ?) '
+                'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+                (key, str(value)))
+            conn.commit()
+
+    def get_posting_mode(self) -> str:
+        """Режим публикации: настройка из БД главнее окружения (ТЗ §11)."""
+        raw = (self.get_setting("posting_mode") or config.posting_mode or "auto").strip().lower()
+        return raw if raw in POSTING_MODES else "auto"
+
+    def set_posting_mode(self, mode: str) -> bool:
+        mode = (mode or "").strip().lower()
+        if mode not in POSTING_MODES:
+            return False
+        self.set_setting("posting_mode", mode)
+        logger.info(f"⚙️ Режим публикации переключён: {mode}")
+        return True
+
+    # ===== опросы: предохранители (ТЗ §6.4) =====
+    def poll_state(self) -> dict:
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        stored_day = self.get_setting("poll_day") or ""
+        count_today = int(self.get_setting("poll_count_today") or 0) if stored_day == today else 0
+        last_at = self.get_setting("poll_last_at")
+        posts_since = 10 ** 6
+        if last_at:
+            with self._lock:
+                cursor = self._get_conn().cursor()
+                cursor.execute(
+                    'SELECT COUNT(*) FROM posted_articles WHERE posted_date > ?', (last_at,))
+                posts_since = cursor.fetchone()[0]
+        return {
+            "polls_today": count_today,
+            "posts_since_last_poll": posts_since,
+            "last_poll_at": last_at,
+        }
+
+    def note_poll_sent(self) -> None:
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        stored_day = self.get_setting("poll_day") or ""
+        count = int(self.get_setting("poll_count_today") or 0) if stored_day == today else 0
+        self.set_setting("poll_day", today)
+        self.set_setting("poll_count_today", str(count + 1))
+        self.set_setting("poll_last_at",
+                         datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+
+    # ===== редакционная очередь (ТЗ §11) =====
+    def enqueue_item(self, article: Article, topic: str, post_format: str,
+                     score: Optional[int], rubric: str = "") -> Optional[int]:
+        """Положить материал в очередь. Возвращает id (новый или существующий pending)."""
+        payload = json.dumps({
+            "title": article.title,
+            "summary": article.summary or "",
+            "link": article.link,
+            "source": article.source,
+            "published": article.published.isoformat() if article.published else "",
+        }, ensure_ascii=False)
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    'INSERT INTO editorial_queue '
+                    '(norm_url, url, title, source, topic, post_format, rubric, score, '
+                    ' payload, status, created_at) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    (normalize_url(article.link), article.link, article.title[:300],
+                     article.source, topic, post_format, rubric, score, payload,
+                     "pending", now))
+                conn.commit()
+                item_id = cursor.lastrowid
+            except sqlite3.IntegrityError:
+                cursor.execute('SELECT id, status FROM editorial_queue WHERE norm_url = ?',
+                               (normalize_url(article.link),))
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                if row[1] == "pending":
+                    return row[0]
+                # тема уже была в очереди — возвращаем её как новый материал
+                cursor.execute(
+                    'UPDATE editorial_queue SET status = ?, reason = NULL, score = ?, '
+                    'post_format = ?, rubric = ?, payload = ?, created_at = ? WHERE id = ?',
+                    ("pending", score, post_format, rubric, payload, now, row[0]))
+                conn.commit()
+                item_id = row[0]
+
+            cursor.execute(
+                "DELETE FROM editorial_queue WHERE status = 'pending' AND id NOT IN "
+                "(SELECT id FROM editorial_queue WHERE status = 'pending' "
+                " ORDER BY score DESC, id DESC LIMIT ?)",
+                (config.queue_max_items,))
+            conn.commit()
+            return item_id
+
+    def queue_items(self, status: str = "pending", limit: int = 10) -> List[dict]:
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute(
+                'SELECT id, url, title, source, topic, post_format, rubric, score, payload, '
+                'status, reason, created_at, message_id FROM editorial_queue '
+                'WHERE status = ? ORDER BY score DESC, id DESC LIMIT ?', (status, limit))
+            return [self._queue_row(r) for r in cursor.fetchall()]
+
+    def queue_item(self, item_id: int) -> Optional[dict]:
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute(
+                'SELECT id, url, title, source, topic, post_format, rubric, score, payload, '
+                'status, reason, created_at, message_id FROM editorial_queue WHERE id = ?',
+                (item_id,))
+            row = cursor.fetchone()
+            return self._queue_row(row) if row else None
+
+    def queue_best(self) -> Optional[dict]:
+        items = self.queue_items(limit=1)
+        return items[0] if items else None
+
+    def queue_count(self, status: str = "pending") -> int:
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute('SELECT COUNT(*) FROM editorial_queue WHERE status = ?', (status,))
+            return cursor.fetchone()[0]
+
+    def decide_queue_item(self, item_id: int, status: str, reason: str = "",
+                          message_id: Optional[int] = None) -> bool:
+        if status not in QUEUE_STATUSES:
+            return False
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute(
+                'UPDATE editorial_queue SET status = ?, reason = ?, decided_at = ?, '
+                'message_id = COALESCE(?, message_id) WHERE id = ?',
+                (status, reason[:300], datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
+                 message_id, item_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def cleanup_queue(self, ttl_days: Optional[int] = None) -> int:
+        days = ttl_days or config.queue_ttl_days
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE editorial_queue SET status = 'expired', decided_at = ? "
+                "WHERE status = 'pending' AND created_at < datetime('now', ?)",
+                (datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'), f'-{days} days'))
+            changed = cursor.rowcount
+            conn.commit()
+            return changed
+
+    @staticmethod
+    def _queue_row(row) -> dict:
+        payload = safe_json_loads(row[8], {}) or {}
+        return {
+            "id": row[0], "url": row[1], "title": row[2], "source": row[3],
+            "topic": row[4], "format": row[5], "rubric": row[6] or "",
+            "score": row[7], "payload": payload, "status": row[9],
+            "reason": row[10] or "", "created_at": row[11], "message_id": row[12],
+        }
+
+    # ===== статистика публикаций (ТЗ §10) =====
+    def start_post_stats(self, article: Article, topic: str, post_format: str,
+                         score: Optional[int] = None, rubric: str = "",
+                         message_id: Optional[int] = None) -> Optional[int]:
+        """Завести запись статистики. Без message_id метрики собрать нечем — не заводим."""
+        if message_id is None:
+            return None
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    'INSERT OR REPLACE INTO post_stats '
+                    '(message_id, url, norm_url, title, source, topic, post_format, rubric, '
+                    ' score, published_at, updated_at) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    (int(message_id), article.link, normalize_url(article.link),
+                     article.title[:300], article.source, topic, post_format, rubric,
+                     score, now, now))
+                conn.commit()
+                return int(message_id)
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось завести статистику: {e}")
+                return None
+
+    def stats_pending_metrics(self, limit: int = 60) -> List[dict]:
+        """Посты, у которых ещё не заполнены окна 1ч/6ч/24ч."""
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute(
+                'SELECT message_id, title, topic, post_format, source, published_at, '
+                'views_1h, views_6h, views_24h FROM post_stats '
+                'WHERE views_24h IS NULL ORDER BY published_at DESC LIMIT ?', (limit,))
+            return [{
+                "message_id": r[0], "title": r[1], "topic": r[2], "post_format": r[3],
+                "source": r[4], "published_at": r[5],
+                "views_1h": r[6], "views_6h": r[7], "views_24h": r[8],
+            } for r in cursor.fetchall()]
+
+    def save_window_metric(self, message_id: int, column: str, views: Optional[int],
+                           source: str = "") -> None:
+        if column not in {"views_1h", "views_6h", "views_24h"}:
+            raise ValueError(f"неизвестное окно метрики: {column}")
+        if views is None:
+            return
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute(
+                f'UPDATE post_stats SET {column} = ?, views_source = ?, updated_at = ? '
+                'WHERE message_id = ?',
+                (int(views), source or "t.me",
+                 datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'), int(message_id)))
+            conn.commit()
+
+    def save_engagement_metrics(self, message_id: int, forwards: Optional[int] = None,
+                                reactions: Optional[int] = None,
+                                comments: Optional[int] = None) -> None:
+        """Недоступные метрики не пишем нулём: остаётся NULL (ТЗ §10)."""
+        fields, values = [], []
+        for column, value in (("forwards_24h", forwards), ("reactions_24h", reactions),
+                              ("comments_24h", comments)):
+            if value is None:
+                continue
+            fields.append(f"{column} = ?")
+            values.append(int(value))
+        if not fields:
+            return
+        values.extend([datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
+                       int(message_id)])
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute(f'UPDATE post_stats SET {", ".join(fields)}, updated_at = ? '
+                         'WHERE message_id = ?', tuple(values))
+            conn.commit()
+
+    def stats_rows(self, days: int = 7) -> List[dict]:
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute(
+                'SELECT message_id, title, source, topic, post_format, rubric, score, '
+                'published_at, views_1h, views_6h, views_24h, forwards_24h, reactions_24h, '
+                'comments_24h FROM post_stats WHERE published_at > datetime("now", ?) '
+                'ORDER BY published_at DESC', (f'-{days} days',))
+            keys = ("message_id", "title", "source", "topic", "post_format", "rubric", "score",
+                    "published_at", "views_1h", "views_6h", "views_24h", "forwards_24h",
+                    "reactions_24h", "comments_24h")
+            return [dict(zip(keys, r, strict=True)) for r in cursor.fetchall()]
 
     def close(self):
         with self._lock:

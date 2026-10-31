@@ -39,10 +39,8 @@ def main() -> int:
 
     try:
         run(client, "command -v git >/dev/null || (apt-get update -qq && apt-get install -y -qq git)")
-        # ensurepip нужен для venv: без python3-venv pip внутри окружения не создаётся
-        run(client, "python3 -c 'import ensurepip' 2>/dev/null || "
-                    "(apt-get update -qq && apt-get install -y -qq python3 python3-pip "
-                    "python3-venv)")
+        run(client, "python3 -c 'import venv' 2>/dev/null || "
+                    "(apt-get update -qq && apt-get install -y -qq python3 python3-venv)")
 
         code, _ = run(client, f"test -d {target}/.git && echo yes || echo no")
         if "yes" in _:

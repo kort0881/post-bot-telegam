@@ -24,9 +24,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Бот и канал
+      - name: Бот и канал (публикующий)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+          CHANNEL_USERNAME: ${{ secrets.CHANNEL_USERNAME }}
+        run: python tools/verify_bot.py
+      - name: Бот из файла владельца (1)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_POST_BOT_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+          CHANNEL_USERNAME: ${{ secrets.CHANNEL_USERNAME }}
+        run: python tools/verify_bot.py
+      - name: Бот из файла владельца (2)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_POST_BOT_TOKEN_2 }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
           CHANNEL_USERNAME: ${{ secrets.CHANNEL_USERNAME }}
         run: python tools/verify_bot.py
@@ -47,6 +59,7 @@ jobs:
           SSH_USER: ${{ secrets.DEPLOY_USER }}
           SSH_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ADMIN_BOT_TOKEN: ${{ secrets.TELEGRAM_POST_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
           ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}

@@ -54,7 +54,7 @@ def main() -> int:
             run(client, f"mkdir -p {target} && git clone -q -b {branch} {repo} {target}")
 
         env_body = "\n".join([
-            f"TELEGRAM_BOT_TOKEN={env('TELEGRAM_BOT_TOKEN')}",
+            f"TELEGRAM_BOT_TOKEN={env('ADMIN_BOT_TOKEN') or env('TELEGRAM_BOT_TOKEN')}",
             # без ключа Groq админ-бот не стартует: config.validate() падает
             f"GROQ_API_KEY={env('GROQ_API_KEY')}",
             f"CHANNEL_ID={env('CHANNEL_ID')}",

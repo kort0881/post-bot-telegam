@@ -59,6 +59,7 @@ jobs:
           SSH_USER: ${{ secrets.DEPLOY_USER }}
           SSH_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ADMIN_BOT_TOKEN: ${{ secrets.TELEGRAM_POST_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
           ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}

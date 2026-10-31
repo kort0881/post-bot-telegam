@@ -4,6 +4,7 @@
 Константы ключевых слов и источников — часть редакционной стратегии, а не окружения.
 """
 import os
+from typing import Optional, Set
 
 
 def _int_env(name: str, default: int) -> int:
@@ -24,6 +25,20 @@ def _float_env(name: str, default: float) -> float:
         return float(raw)
     except ValueError:
         return default
+
+
+def _parse_ids(raw: Optional[str]) -> Set[int]:
+    """«123, 456» → {123, 456}. Мусор игнорируется, пустое — пустой набор."""
+    ids: Set[int] = set()
+    for chunk in (raw or "").replace(";", ",").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            ids.add(int(chunk))
+        except ValueError:
+            continue
+    return ids
 
 
 # ===== МОДЕЛИ GROQ =====
@@ -249,6 +264,37 @@ class Config:
         # Не более N публикаций подряд одного формата (ТЗ §12)
         self.max_same_format_in_row = _int_env("MAX_SAME_FORMAT_IN_ROW", 2)
         self.max_same_topic_in_row = _int_env("MAX_SAME_TOPIC_IN_ROW", 2)
+
+        # ===== Этап 3: рубрики, вовлечение, опросы (ТЗ §6) =====
+        # Серийная рубрика не выходит чаще, чем раз в N дней
+        self.rubric_cooldown_days = _int_env("RUBRIC_COOLDOWN_DAYS", 3)
+        self.polls_enabled = os.getenv("POLLS_ENABLED", "1").strip().lower() not in ("0", "false", "no")
+        # Опрос не чаще, чем раз в N публикаций, и не больше N в сутки
+        self.poll_min_posts_between = _int_env("POLL_MIN_POSTS_BETWEEN", 6)
+        self.poll_daily_limit = _int_env("POLL_DAILY_LIMIT", 2)
+
+        # ===== Этап 4: аналитика (ТЗ §10) =====
+        # Публичный адрес канала для сбора просмотров (t.me/<username>). Пусто → из CHANNEL_ID.
+        self.channel_username = (os.getenv("CHANNEL_USERNAME") or "").lstrip("@").strip()
+        self.stats_timeout = _int_env("STATS_TIMEOUT", 20)
+        # Часовой пояс для отчёта по часам активности (МСК = +3)
+        self.report_tz_offset = _int_env("REPORT_TZ_OFFSET", 3)
+        self.report_days = _int_env("REPORT_DAYS", 7)
+        # Минимум публикаций, чтобы делать вывод о формате/теме (ТЗ §10: не по одной)
+        self.report_min_posts = _int_env("REPORT_MIN_POSTS", 3)
+
+        # ===== Этап 5: очередь, админ-команды (ТЗ §11) =====
+        # Telegram user_id админов через запятую: кому доступны команды управления
+        self.admin_ids = _parse_ids(os.getenv("ADMIN_IDS"))
+        # Чат для уведомлений о материалах, ждущих подтверждения
+        self.admin_chat_id = os.getenv("ADMIN_CHAT_ID") or ""
+        self.queue_max_items = _int_env("QUEUE_MAX_ITEMS", 60)
+        self.queue_ttl_days = _int_env("QUEUE_TTL_DAYS", 14)
+
+    @property
+    def mode(self) -> str:
+        """Режим публикации из окружения; переопределяется настройкой в БД (/mode)."""
+        return self.posting_mode
 
     def missing_env(self):
         missing = []

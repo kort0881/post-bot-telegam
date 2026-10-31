@@ -11,10 +11,18 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import LinkPreviewOptions
 
+from .analytics import popular_topics
 from .assessment import Assessment, assess_article, heuristic_assessment
 from .config import RSS_FEEDS, config
 from .db import PostedManager
 from .editorial import build_post_text, choose_format, generate_post, validate_post
+from .engagement import (
+    PollSpec,
+    apply_engagement,
+    build_poll,
+    choose_rubric,
+    engagement_request,
+)
 from .extract import enrich_with_full_text
 from .feeds import load_all_feeds
 from .filters import evaluate_relevance
@@ -171,8 +179,13 @@ def select_candidates(candidates: List[Article], posted: PostedManager) -> List[
 
 # ====================== ПУБЛИКАЦИЯ ======================
 async def send_post(article: Article, text: str, posted: PostedManager, bot: Bot,
-                    topic: str, post_format: str, score: int) -> bool:
-    message_id = None
+                    topic: str, post_format: str, score: int,
+                    rubric: str = "") -> Optional[int]:
+    """Отправить пост и завести статистику. Возвращает message_id или None.
+
+    Повторной отправки после сбоя нет: дубль в канале хуже пропуска (ТЗ §13).
+    """
+    message = None
     for attempt in range(2):
         try:
             message = await bot.send_message(
@@ -185,21 +198,59 @@ async def send_post(article: Article, text: str, posted: PostedManager, bot: Bot
                     show_above_text=False,
                 ),
             )
-            message_id = getattr(message, "message_id", None)
             break
         except TelegramAPIError as e:
             logger.error(f"❌ Telegram ошибка отправки (попытка {attempt + 1}): {e}")
             if attempt == 0:
                 await asyncio.sleep(3)
             else:
-                return False
+                return None
 
+    message_id = getattr(message, "message_id", None)
     logger.info(f"✅ ОПУБЛИКОВАНО [{post_format}/{topic}][{article.source}]: {article.title[:50]}")
     saved = posted.add(article, topic, topic, post_format=post_format,
-                       score=score, message_id=message_id)
+                       score=score, message_id=message_id, rubric=rubric or None)
     if not saved:
         logger.warning(f"⚠️ Пост отправлен, но не сохранён в БД (возможно дубль): {article.title[:50]}")
+    posted.start_post_stats(article, topic, post_format, score, rubric, message_id)
+    return message_id
+
+
+async def send_poll(spec: PollSpec, bot: Bot, posted: PostedManager) -> bool:
+    """Тематический опрос после публикации (ТЗ §6.4). Сбой опроса не ломает прогон."""
+    try:
+        await bot.send_poll(
+            config.channel_id,
+            spec.question,
+            list(spec.options),
+            is_anonymous=spec.anonymous,
+            allows_multiple_answers=spec.multiple,
+        )
+    except TelegramAPIError as e:
+        logger.warning(f"⚠️ Опрос не отправлен: {e}")
+        return False
+    posted.note_poll_sent()
+    logger.info(f"📊 Опрос отправлен: {spec.question}")
     return True
+
+
+async def notify_approval(bot: Bot, item_id: Optional[int], article: Article,
+                          score: int, post_format: str) -> None:
+    """Сообщить админу, что материал ждёт подтверждения (ТЗ §11, режим approval)."""
+    if not config.admin_chat_id or item_id is None:
+        return
+    text = (
+        f"🗂️ В очереди #{item_id}: {score}/100, формат {post_format}\n"
+        f"{article.title}\n{article.link}\n\n"
+        f"/publish {item_id} — опубликовать, /skip {item_id} — отклонить"
+    )
+    try:
+        await bot.send_message(
+            config.admin_chat_id, text,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+        )
+    except TelegramAPIError as e:
+        logger.warning(f"⚠️ Уведомление админу не отправлено: {e}")
 
 
 # ====================== ПРОГОН ======================
@@ -235,7 +286,9 @@ async def run_cycle(runtime: Runtime, posted: PostedManager,
                     shutdown_event: Optional[asyncio.Event] = None) -> dict:
     """Один прогон: собрать, отфильтровать, оценить, сгенерировать, опубликовать материал."""
     shutdown_event = shutdown_event or asyncio.Event()
-    result: dict = {"published": False, "candidates": 0, "reason": ""}
+    mode = posted.get_posting_mode()
+    result: dict = {"published": False, "candidates": 0, "reason": "", "mode": mode}
+    logger.info(f"⚙️ Режим публикации: {mode}")
 
     raw = await load_all_feeds()
     result["raw"] = len(raw)
@@ -261,6 +314,24 @@ async def run_cycle(runtime: Runtime, posted: PostedManager,
     recent = posted.get_recent_posts(config.rotation_history_size)
     recent_formats = [p.get('format') or "" for p in recent]
     recent_topics = [p.get('topic') or "" for p in recent]
+
+    if mode == "collect":
+        stored = 0
+        for item in ranked[: config.max_generation_attempts]:
+            article = item.article
+            topic = Topic.detect(article.text)
+            if posted.enqueue_item(article, topic, "", item.score.total, "") is not None:
+                stored += 1
+        posted.cleanup_queue()
+        result.update({"reason": "collected", "queued": stored})
+        logger.info(f"🗂️ Режим collect: в очередь положено {stored}")
+        return result
+
+    try:
+        popular = popular_topics(posted.stats_rows(config.report_days))
+    except Exception as e:
+        logger.warning(f"⚠️ Популярные темы недоступны: {e}")
+        popular = []
 
     extracted = 0
     for item in ranked[: config.max_generation_attempts]:
@@ -298,27 +369,54 @@ async def run_cycle(runtime: Runtime, posted: PostedManager,
             continue
 
         post_format = choose_format(assessment, recent_formats)
-        generated = await generate_post(article, assessment, post_format, runtime.llm)
+        rubric_plan = choose_rubric(post_format, recent)
+        engagement = engagement_request(article, post_format, popular)
+        generated = await generate_post(
+            article, assessment, post_format, runtime.llm,
+            extra_guidance=engagement.instruction if engagement else None)
         if not generated:
             posted.log_rejected(article, "GENERATION_FAILED")
             continue
 
-        text = build_post_text(article, generated.body, post_format, topic)
-        ok, reason = validate_post(generated.body, post_format)
+        body = apply_engagement(generated.body, engagement)
+        rubric_name = rubric_plan.name if rubric_plan else ""
+        text = build_post_text(article, body, post_format, topic,
+                               rubric_header=rubric_plan.header if rubric_plan else "")
+        ok, reason = validate_post(body, post_format)
         if not ok:
             posted.log_rejected(article, f"FINAL_VALIDATION ({reason})")
             continue
 
-        published = await send_post(article, text, posted, runtime.bot, topic, post_format, score)
-        if published:
+        if mode == "approval":
+            queue_id = posted.enqueue_item(article, topic, post_format, score, rubric_name)
+            await notify_approval(runtime.bot, queue_id, article, score, post_format)
+            result.update({
+                "reason": "waiting_approval",
+                "queue_id": queue_id,
+                "title": article.title,
+                "score": score,
+                "format": post_format,
+                "trigger": assessment.trigger,
+                "prepared_text": text,
+            })
+            logger.info(f"🗂️ Ждёт подтверждения #{queue_id}: {article.title[:50]}")
+            break
+
+        message_id = await send_post(article, text, posted, runtime.bot, topic,
+                                     post_format, score, rubric=rubric_name)
+        if message_id:
             result.update({
                 "published": True,
+                "message_id": message_id,
                 "title": article.title,
                 "score": score,
                 "format": post_format,
                 "trigger": assessment.trigger,
                 "quality": generated.quality.as_dict(),
             })
+            poll = build_poll(article, post_format, posted.poll_state())
+            if poll:
+                await send_poll(poll, runtime.bot, posted)
             logger.info("🏁 Готово!")
             break
 
@@ -378,7 +476,7 @@ async def main() -> int:
         return 1
 
     logger.info("=" * 60)
-    logger.info("🚀 БЛОКИРОВКИ + AI (редакционная система, этап 2)")
+    logger.info("🚀 БЛОКИРОВКИ + AI (этапы 1-5: фильтры, форматы, вовлечение, аналитика, очередь)")
     logger.info("=" * 60)
 
     runtime = Runtime()
@@ -410,7 +508,8 @@ async def main() -> int:
 
         result = await run_cycle(runtime, posted, shutdown_event)
         logger.info(f"📈 Итог прогона: {result}")
-        return 0 if result.get("published") or result.get("reason") in ("no_candidates", "shutdown") else 1
+        ok_reasons = ("no_candidates", "shutdown", "collected", "waiting_approval")
+        return 0 if result.get("published") or result.get("reason") in ok_reasons else 1
 
     except asyncio.CancelledError:
         logger.info("🛑 Операция отменена")

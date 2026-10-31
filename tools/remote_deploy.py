@@ -55,6 +55,8 @@ def main() -> int:
 
         env_body = "\n".join([
             f"TELEGRAM_BOT_TOKEN={env('TELEGRAM_BOT_TOKEN')}",
+            # без ключа Groq админ-бот не стартует: config.validate() падает
+            f"GROQ_API_KEY={env('GROQ_API_KEY')}",
             f"CHANNEL_ID={env('CHANNEL_ID')}",
             f"CHANNEL_USERNAME={env('CHANNEL_USERNAME')}",
             f"ADMIN_IDS={env('ADMIN_IDS')}",

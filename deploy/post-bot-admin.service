@@ -1,0 +1,17 @@
+[Unit]
+Description=post-bot admin bot (команды канала)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/post-bot
+EnvironmentFile=/opt/post-bot/.env
+ExecStart=/opt/post-bot/.venv/bin/python /opt/post-bot/adminbot.py
+Restart=always
+RestartSec=15
+StandardOutput=append:/var/log/post-bot-admin.log
+StandardError=append:/var/log/post-bot-admin.log
+
+[Install]
+WantedBy=multi-user.target

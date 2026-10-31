@@ -24,6 +24,10 @@ def main() -> int:
             "systemctl is-enabled post-bot-admin",
             f"tail -n 15 /var/log/post-bot-admin.log 2>/dev/null || journalctl -u post-bot-admin -n 15 --no-pager",
             f"cd {target} && set -a && . ./.env && set +a && ./.venv/bin/python tools/verify_bot.py",
+            f"cd {target} && ./.venv/bin/python -V && ./.venv/bin/pip list 2>/dev/null | grep -iE 'aiogram|aiohttp|groq' || echo 'пакетов нет'",
+            f"cd {target} && ./.venv/bin/pip install -r requirements.txt 2>&1 | tail -5",
+            f"systemctl restart post-bot-admin && sleep 5 && systemctl is-active post-bot-admin",
+            f"tail -n 8 /var/log/post-bot-admin.log",
         ):
             stdin, stdout, stderr = client.exec_command(command, timeout=120)
             out = stdout.read().decode(errors="replace").strip()

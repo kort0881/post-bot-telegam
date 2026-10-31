@@ -1,0 +1,42 @@
+name: Weekly report
+
+on:
+  schedule:
+    - cron: '5 6 * * 1'   # понедельник, 09:05 МСК
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Build report
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+        run: python tools/weekly_report.py
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-report
+          path: docs/reports/*.txt
+          retention-days: 60
+      - name: Commit report
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add docs/reports 2>/dev/null || true
+          git add posted_articles.db 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "📊 Weekly report [skip ci]"
+          git push || (git pull --rebase && git push)

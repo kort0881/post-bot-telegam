@@ -32,6 +32,13 @@ def main() -> int:
             info = api(token, "getChat", chat_id=chat)["result"]
             print(f"channel: id={info.get('id')} @{info.get('username')} "
                   f"title={info.get('title')!r} type={info.get('type')}")
+            try:
+                member = api(token, "getChatMember", chat_id=chat,
+                             user_id=me["id"])["result"]
+                print(f"rights: статус бота в канале = {member.get('status')}, "
+                      f"can_post={member.get('can_post_messages')}")
+            except Exception as e:
+                print(f"права бота в канале неизвестны (не участник или нет прав): {e}")
         except Exception as e:
             print(f"getChat({chat}) не прошёл: {e}")
     else:

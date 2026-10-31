@@ -168,7 +168,8 @@ def choose_format(assessment: Assessment, recent_formats: Optional[List[str]] = 
     return proposed
 
 
-def build_prompt(article: Article, assessment: Assessment, fmt: str) -> str:
+def build_prompt(article: Article, assessment: Assessment, fmt: str,
+                 extra_guidance: Optional[str] = None) -> str:
     low, high = POST_LENGTH_LIMITS.get(fmt, POST_LENGTH_LIMITS["consequence"])
     content = article.full_text or article.summary or ""
     facts = "\n".join(f"- {f}" for f in assessment.facts) or "- (модель не выделила отдельные факты)"
@@ -176,8 +177,14 @@ def build_prompt(article: Article, assessment: Assessment, fmt: str) -> str:
 
     partial_note = (
         "ВНИМАНИЕ: полный текст статьи недоступен, есть только заголовок и краткое описание. "
-        "Не додумывай детали, которых нет в этих данных."
+        "Не додумывай деталей, которых нет в этих данных."
         if not article.full_text else ""
+    )
+
+    engagement_block = (
+        "\nВСТРОЕННОЕ ВОВЛЕЧЕНИЕ (одна механика, не шаблонный вопрос в конце):\n"
+        f"{extra_guidance}\n"
+        if extra_guidance else ""
     )
 
     return f"""Ты — технический редактор Telegram-канала «Доступ к интернету»: блокировки, обход DPI, VPN, сети, безопасность, ИИ.
@@ -198,6 +205,7 @@ def build_prompt(article: Article, assessment: Assessment, fmt: str) -> str:
 Источник: {article.source}
 Текст: {content[: config.max_fulltext_chars]}
 {partial_note}
+{engagement_block}
 
 {STYLE_RULES}
 
@@ -347,10 +355,11 @@ async def generate_post(
     assessment: Assessment,
     fmt: str,
     llm: Optional[GroqLLM] = None,
+    extra_guidance: Optional[str] = None,
 ) -> Optional[GeneratedPost]:
     """Сгенерировать текст формата с приёмкой и самопроверкой (§5.1 п.6)."""
     llm = llm or GroqLLM()
-    prompt = build_prompt(article, assessment, fmt)
+    prompt = build_prompt(article, assessment, fmt, extra_guidance)
     reasons: List[str] = []
 
     for attempt in range(1, config.quality_attempts + 1):
@@ -399,14 +408,16 @@ async def generate_post(
 
 
 def build_post_text(article: Article, body: str, fmt: str, topic: str,
-                    include_rubric: bool = False) -> str:
-    """Собрать публикацию: текст + 1–3 хештега + ссылка. Без дисклеймера (§8)."""
+                    include_rubric: bool = False, rubric_header: str = "") -> str:
+    """Собрать публикацию: рубрика + текст + 1–3 хештега + ссылка. Без дисклеймера (§8)."""
     text = body.strip()
+    if rubric_header:
+        text = f"{rubric_header}\n\n{text}"
     if not text.endswith(('.', '!', '?')):
         text += '.'
 
     hashtags = Topic.hashtags(topic)
-    if include_rubric:
+    if include_rubric or rubric_header:
         rubric = f"#{PostFormat.RUBRIC.get(fmt, '').replace(' ', '').lower()}"
         if rubric != "#":
             hashtags = f"{hashtags} {rubric}"

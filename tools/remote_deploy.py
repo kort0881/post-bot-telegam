@@ -39,8 +39,12 @@ def main() -> int:
 
     try:
         run(client, "command -v git >/dev/null || (apt-get update -qq && apt-get install -y -qq git)")
-        run(client, "python3 -c 'import venv' 2>/dev/null || "
-                    "(apt-get update -qq && apt-get install -y -qq python3 python3-venv)")
+        # venv без ensurepip получается пустым (нет pip внутри) — ставим пакеты системы
+        run(client, "export DEBIAN_FRONTEND=noninteractive; "
+                    "python3 -c 'import ensurepip' 2>/dev/null || "
+                    "(apt-get update -qq && apt-get install -y -qq python3-pip python3-venv 2>&1 | tail -2)")
+        # битое окружение от прошлой попытки не переиспользуем
+        run(client, f"test -x {target}/.venv/bin/pip || rm -rf {target}/.venv")
 
         code, _ = run(client, f"test -d {target}/.git && echo yes || echo no")
         if "yes" in _:

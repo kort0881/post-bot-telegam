@@ -73,6 +73,15 @@ def merge_table(target: sqlite3.Connection, source: sqlite3.Connection, table: s
 def merge_settings(target: sqlite3.Connection, source: sqlite3.Connection) -> tuple:
     if not has_table(source, "settings"):
         return 0, 0
+    if not has_table(target, "settings"):
+        # у репозитория таблицы может не быть вовсе — создаём по DDL сервера,
+        # иначе настройки теряются при заливке базы обратно
+        ddl = source.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='settings'"
+        ).fetchone()
+        if not ddl or not ddl[0]:
+            return 0, 0
+        target.execute(ddl[0])
     added = updated = 0
     for key, value in source.execute("SELECT key, value FROM settings").fetchall():
         row = target.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
@@ -85,17 +94,43 @@ def merge_settings(target: sqlite3.Connection, source: sqlite3.Connection) -> tu
     return added, updated
 
 
+def quick_check(conn) -> str:
+    """'ok' или текст ошибки. Принимает соединение или путь к файлу базы."""
+    if isinstance(conn, sqlite3.Connection):
+        return conn.execute("PRAGMA quick_check").fetchone()[0]
+    probe = sqlite3.connect(f"file:{conn}?mode=ro", uri=True)
+    try:
+        return probe.execute("PRAGMA quick_check").fetchone()[0]
+    finally:
+        probe.close()
+
+
 def merge(target_path: str, source_path: str) -> dict:
+    source = sqlite3.connect(f"file:{source_path}?mode=ro", uri=True)
+    try:
+        state = quick_check(source)
+        if state != "ok":
+            # рваная копия живой базы: сливать нечего, половина строк не читается
+            raise sqlite3.DatabaseError(
+                f"источник повреждён (quick_check={state}): {source_path}"
+            )
+    finally:
+        source.close()
+
     target = sqlite3.connect(target_path)
     source = sqlite3.connect(f"file:{source_path}?mode=ro", uri=True)
     report = {}
     try:
+        target.execute("BEGIN IMMEDIATE")
         for table in KEYS:
             if not (has_table(target, table) and has_table(source, table)):
                 continue
             report[table] = merge_table(target, source, table)
         report["settings"] = merge_settings(target, source)
         target.commit()
+    except BaseException:
+        target.rollback()
+        raise
     finally:
         source.close()
         target.close()

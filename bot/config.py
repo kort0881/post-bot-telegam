@@ -42,16 +42,15 @@ def _parse_ids(raw: Optional[str]) -> Set[int]:
 
 
 # ===== МОДЕЛИ GROQ =====
+# 01-11-26: сверено с /openai/v1/models живого аккаунта Groq.
+# groq/compound, qwen3.6-27b и llama-3.3-70b-versatile из аккаунта убраны — не тратим попытки.
 GROQ_MODELS = [
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
-    "groq/compound",
-    "qwen/qwen3.6-27b",
+    "qwen/qwen3.8-27b",
 ]
 
-GROQ_FALLBACK_MODELS = [
-    "llama-3.3-70b-versatile",
-]
+GROQ_FALLBACK_MODELS = []
 
 # ===== RSS =====
 # PRIMARY_SOURCES больше не даёт абсолютного приоритета: используется только

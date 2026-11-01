@@ -123,6 +123,9 @@ BLOCK_KEYWORDS = [
 # Материал с такими словами проходит профильную проверку даже при наличии
 # «обзор», «тест», «review» и т.п.
 PROFILE_KEYWORDS = BLOCK_KEYWORDS + [
+    "блокиру", "блокиров", "впн", "vpn-", "ограничен доступ",
+    "нейросет", "ии-", "ai-", "искусственный интеллект", "claude",
+    "chatgpt", "gpt-", "openai", "llm", "дата-центр", "grok", "neuralink", "нейроинтерфейс",
     "vpn", "прокси-сервер", "proxy", "shadowsocks", "trojan", "reality",
     "xhttp", "hysteria", "sing-box", "clash", "karing", "v2rayn", "happ",
     "протокол", "шифрование", "tls", "sni", "dns", "doh", "dot",
@@ -231,7 +234,7 @@ class Config:
         self.batch_subject_limit = _int_env("BATCH_SUBJECT_LIMIT", 10)
 
         # Рейтинг: минимальный балл для публикации (ТЗ §3)
-        self.publish_min_score = _int_env("PUBLISH_MIN_SCORE", 65)
+        self.publish_min_score = _int_env("PUBLISH_MIN_SCORE", 55)
         self.queue_min_score = _int_env("QUEUE_MIN_SCORE", 50)
 
         # Сколько кандидатов максимум проверять генерацией за прогон

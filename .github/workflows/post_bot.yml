@@ -2,7 +2,8 @@ name: Telegram AI Tech Bot
 
 on:
   schedule:
-    - cron: '0 5,12,18,22 * * *'   # 08:00, 15:00, 21:00, 01:00 по Москве
+    # UTC: 06:00, 10:00, 14:00, 18:00 → МСК: 09:00, 13:00, 17:00, 21:00
+    - cron: '0 6,10,14,18 * * *'
   workflow_dispatch:
 
 permissions:

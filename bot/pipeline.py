@@ -508,7 +508,11 @@ async def main() -> int:
 
         result = await run_cycle(runtime, posted, shutdown_event)
         logger.info(f"📈 Итог прогона: {result}")
-        ok_reasons = ("no_candidates", "shutdown", "collected", "waiting_approval")
+        # 07-11-26: "nothing_published" — штатный исход (все кандидаты отклонены
+        # фильтром). Раньше он давал exit 1 и красил джоб «Telegram AI Tech Bot»
+        # в красный, хотя прогон прошёл нормально.
+        ok_reasons = ("no_candidates", "nothing_published", "shutdown", "collected",
+                      "waiting_approval")
         return 0 if result.get("published") or result.get("reason") in ok_reasons else 1
 
     except asyncio.CancelledError:

@@ -104,7 +104,10 @@ class ScoreBreakdown:
 def priority_band(total: int) -> str:
     if total >= 80:
         return "priority"
-    if total >= 65:
+    # 07-11-26: порог публикации 65 -> 58. На прогонах без постов топ-кандидат
+    # упирался в 53-64 и слот оставался пустым: за 06-07.11 канал получал 1-2
+    # поста в день вместо 4. Полоса 50-57 (queue) по-прежнему не публикуется.
+    if total >= 58:
         return "publish"
     if total >= 50:
         return "queue"

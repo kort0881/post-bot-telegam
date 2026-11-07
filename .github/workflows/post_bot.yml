@@ -1,15 +1,15 @@
 name: Telegram AI Tech Bot
 
 on:
-  schedule:
-    # 07-11-26: раньше было '0 6,10,14,18 * * *'. GitHub на круглых минутах
-    # задерживает и ВЫБРАСЫВАЕТ запуски: 07.11 не было ни одного прогона за сутки,
-    # 06.11 — два из четырёх, 05.11 — два. Канал оставался без постов.
-    # Теперь тик каждый час на нечётной минуте, а сколько постов за день —
-    # решает гейт по слотам 06/10/14/18 UTC (МСК 09/13/17/21): пропущенный
-    # слот закрывается следующим тиком, лишних постов не будет.
-    - cron: '7 * * * *'
+  # 07-11-26: GitHub-расписание убрано совсем — после правки cron плановые тики
+  # (11:07 и 12:07 UTC) не запустились ни разу, а раньше запуски терялись пачками.
+  # Внешний cron на DE дёргает этот workflow каждый час в :07 с mode=tick.
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "tick = плановый запуск (гейт слотов), manual = публиковать сразу"
+        required: false
+        default: "manual"
 
 permissions:
   contents: write
@@ -32,6 +32,7 @@ jobs:
         id: gate
         env:
           EVENT_NAME: ${{ github.event_name }}
+          INPUT_MODE: ${{ github.event.inputs.mode }}
         run: |
           python3 - <<'PY'
           import datetime, os, sqlite3
@@ -45,7 +46,9 @@ jobs:
                   "select count(*) from posted_articles where date(posted_date) = ?",
                   (now.strftime("%Y-%m-%d"),),
               ).fetchone()[0]
-          manual = os.environ.get("EVENT_NAME") == "workflow_dispatch"
+          # ручной запуск публикует сразу, плановый тик (mode=tick) проходит гейт
+          manual = (os.environ.get("EVENT_NAME") == "workflow_dispatch"
+                    and os.environ.get("INPUT_MODE", "manual") != "tick")
           run = 1 if (manual or have < due) else 0
           print(f"UTC {now:%Y-%m-%d %H:%M} | слотов прошло {due}/4 | "
                 f"постов за сегодня {have} | ручной запуск {manual} | запускать {run}")

@@ -2,32 +2,69 @@ name: Telegram AI Tech Bot
 
 on:
   schedule:
-    # UTC: 06:00, 10:00, 14:00, 18:00 → МСК: 09:00, 13:00, 17:00, 21:00
-    - cron: '0 6,10,14,18 * * *'
+    # 07-11-26: раньше было '0 6,10,14,18 * * *'. GitHub на круглых минутах
+    # задерживает и ВЫБРАСЫВАЕТ запуски: 07.11 не было ни одного прогона за сутки,
+    # 06.11 — два из четырёх, 05.11 — два. Канал оставался без постов.
+    # Теперь тик каждый час на нечётной минуте, а сколько постов за день —
+    # решает гейт по слотам 06/10/14/18 UTC (МСК 09/13/17/21): пропущенный
+    # слот закрывается следующим тиком, лишних постов не будет.
+    - cron: '7 * * * *'
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: post-bot
+  cancel-in-progress: false
+
 jobs:
   post_news:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Гейт расписания
+        id: gate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python3 - <<'PY'
+          import datetime, os, sqlite3
+          SLOTS = [6, 10, 14, 18]          # UTC, как в прежнем cron
+          now = datetime.datetime.now(datetime.timezone.utc)
+          due = sum(1 for h in SLOTS if now.hour >= h)
+          have = 0
+          if os.path.exists("posted_articles.db"):
+              c = sqlite3.connect("posted_articles.db")
+              have = c.execute(
+                  "select count(*) from posted_articles where date(posted_date) = ?",
+                  (now.strftime("%Y-%m-%d"),),
+              ).fetchone()[0]
+          manual = os.environ.get("EVENT_NAME") == "workflow_dispatch"
+          run = 1 if (manual or have < due) else 0
+          print(f"UTC {now:%Y-%m-%d %H:%M} | слотов прошло {due}/4 | "
+                f"постов за сегодня {have} | ручной запуск {manual} | запускать {run}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"run={run}\n")
+          PY
+
       - name: Setup Python
+        if: steps.gate.outputs.run == '1'
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
       - name: Install deps
+        if: steps.gate.outputs.run == '1'
         run: pip install -r requirements.txt
 
       - name: Debug - before
+        if: steps.gate.outputs.run == '1'
         run: |
           echo "📂 До запуска:"
           ls -la *.db 2>/dev/null || echo "БД не существует"
@@ -36,6 +73,7 @@ jobs:
           fi
 
       - name: Run bot
+        if: steps.gate.outputs.run == '1'
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GROQ_API_KEY_2: ${{ secrets.GROQ_API_KEY_2 }}
@@ -48,6 +86,7 @@ jobs:
         run: python telegrambot.py
 
       - name: Debug - after
+        if: steps.gate.outputs.run == '1'
         run: |
           echo "📂 После запуска:"
           ls -la *.db 2>/dev/null || echo "БД не существует"
@@ -59,6 +98,7 @@ jobs:
           fi
 
       - name: Commit state
+        if: steps.gate.outputs.run == '1'
         run: |
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"

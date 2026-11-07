@@ -43,6 +43,8 @@ def test_score_bounds_and_bands():
 
     assert priority_band(85) == "priority"
     assert priority_band(70) == "publish"
+    assert priority_band(58) == "publish"   # новый порог публикации
+    assert priority_band(57) == "queue"
     assert priority_band(55) == "queue"
     assert priority_band(20) == "reject"
 

@@ -20,6 +20,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+          # нужен полный history, чтобы rebase/pull работали предсказуемо
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -34,13 +36,24 @@ jobs:
           python tools/remote_sync.py
       - name: Коммит изменений базы
         run: |
-          if [[ -n "$(git status --porcelain posted_articles.db)" ]]; then
-            git config user.name "post-bot"
-            git config user.email "post-bot@users.noreply.github.com"
-            git add posted_articles.db
-            git commit -m "🗂 Sync database from server [skip ci]"
-            git pull --rebase --quiet origin main || true
-            git push
-          else
+          if [[ -z "$(git status --porcelain posted_articles.db)" ]]; then
             echo "база не изменилась"
+            exit 0
           fi
+
+          git config user.name "post-bot"
+          git config user.email "post-bot@users.noreply.github.com"
+          git add posted_articles.db
+          git commit -m "🗂 Sync database from server [skip ci]"
+
+          # Пытаемся подтянуть main; если случился конфликт бинарника —
+          # берём нашу свежую версию БД (с сервера) и корректно завершаем rebase
+          if ! git pull --rebase --quiet origin main; then
+            echo "::warning::Конфликт при rebase, берём версию БД с сервера"
+            git checkout --theirs posted_articles.db || true
+            git add posted_articles.db
+            GIT_EDITOR=true git rebase --continue || git rebase --skip
+          fi
+
+          # HEAD:main спасает от detached HEAD после rebase
+          git push origin HEAD:main

@@ -4,13 +4,4 @@ beautifulsoup4>=4.12
 feedparser>=6.0
 lxml>=6.0
 groq>=0.15.0
-
-
-
-
-
-
-
-
-
-
+paramiko>=3.4

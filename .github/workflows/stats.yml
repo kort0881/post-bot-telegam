@@ -6,12 +6,17 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+# Общая очередь с постером и бэкапом: база на сервере не терпит двух писателей.
+concurrency:
+  group: post-bot-db
+  cancel-in-progress: false
 
 jobs:
   metrics:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,16 +24,29 @@ jobs:
           python-version: '3.12'
       - name: Install deps
         run: pip install -r requirements.txt
+
+      - name: "База: снапшот с сервера"
+        id: dbpull
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          TARGET_DIR: /opt/post-bot
+        run: python tools/db_sync.py pull
+
       - name: Collect metrics
+        if: steps.dbpull.outcome == 'success'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
           CHANNEL_USERNAME: ${{ secrets.CHANNEL_USERNAME }}
         run: python tools/collect_stats.py
-      - name: Commit state
-        run: |
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
-          git add posted_articles.db 2>/dev/null || true
-          git diff --staged --quiet || git commit -m "📊 Update post metrics [skip ci]"
-          git push || (git pull --rebase && git push)
+
+      - name: "База: заливка на сервер"
+        if: always() && steps.dbpull.outcome == 'success'
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          TARGET_DIR: /opt/post-bot
+        run: python tools/db_sync.py push

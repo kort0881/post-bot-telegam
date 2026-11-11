@@ -27,6 +27,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      # Свежая база нужна ДО гейта: иначе гейт считает посты по устаревшему
+      # снапшоту в git (он обновляется раз в сутки бэкапом) и пропускает лишние тики.
+      - name: "База: снапшот с сервера"
+        id: dbpull
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          TARGET_DIR: /opt/post-bot
+        run: python tools/db_sync.py pull
+
       - name: Гейт расписания
         id: gate
         env:
@@ -35,47 +54,33 @@ jobs:
         run: |
           python3 - <<'PY'
           import datetime, os, sqlite3
-          SLOTS = [6, 10, 14, 18]          # UTC, как в прежнем cron
+          SLOTS = [6, 9, 12, 15, 18, 21]   # целевые часы UTC: до 6 постов в сутки
+          MAX_POSTS_PER_DAY = 6
+          MIN_GAP_HOURS = 2
           now = datetime.datetime.now(datetime.timezone.utc)
           due = sum(1 for h in SLOTS if now.hour >= h)
-          have = 0
+          have, last = 0, None
           if os.path.exists("posted_articles.db"):
               c = sqlite3.connect("posted_articles.db")
-              have = c.execute(
-                  "select count(*) from posted_articles where date(posted_date) = ?",
-                  (now.strftime("%Y-%m-%d"),),
-              ).fetchone()[0]
-          # ручной запуск публикует сразу, плановый тик (mode=tick) проходит гейт
+              today = now.strftime("%Y-%m-%d")
+              have = c.execute("select count(*) from posted_articles where date(posted_date) = ?", (today,)).fetchone()[0]
+              row = c.execute("select max(posted_date) from posted_articles where date(posted_date) = ?", (today,)).fetchone()
+              last = row[0] if row and row[0] else None
+          gap_ok = True
+          if last:
+              try:
+                  last_dt = datetime.datetime.strptime(str(last)[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=datetime.timezone.utc)
+                  gap_ok = (now - last_dt).total_seconds() >= MIN_GAP_HOURS * 3600
+              except ValueError:
+                  gap_ok = True
           manual = (os.environ.get("EVENT_NAME") == "workflow_dispatch"
                     and os.environ.get("INPUT_MODE", "manual") != "tick")
-          run = 1 if (manual or have < due) else 0
-          print(f"UTC {now:%Y-%m-%d %H:%M} | слотов прошло {due}/4 | "
-                f"постов за сегодня {have} | ручной запуск {manual} | запускать {run}")
+          target = min(due, MAX_POSTS_PER_DAY)
+          run = 1 if manual else int(have < target and gap_ok)
+          print(f"UTC {now:%Y-%m-%d %H:%M} | цель {target}/{MAX_POSTS_PER_DAY} | постов за сегодня {have} | последний {last or '-'} | пауза {MIN_GAP_HOURS}ч: {gap_ok} | ручной {manual} | запускать {run}")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
               f.write(f"run={run}\n")
           PY
-
-      - name: Setup Python
-        if: steps.gate.outputs.run == '1'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install deps
-        if: steps.gate.outputs.run == '1'
-        run: pip install -r requirements.txt
-
-      # База живёт на сервере и только там меняется. Раннер её не коммитит:
-      # конфликт бинарника в git и был причиной повторных публикаций.
-      - name: "База: снапшот с сервера"
-        id: dbpull
-        if: steps.gate.outputs.run == '1'
-        env:
-          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
-          SSH_USER: ${{ secrets.DEPLOY_USER }}
-          SSH_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
-          TARGET_DIR: /opt/post-bot
-        run: python tools/db_sync.py pull
 
       - name: Debug - before
         if: steps.gate.outputs.run == '1' && steps.dbpull.outcome == 'success'

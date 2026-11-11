@@ -54,8 +54,8 @@ jobs:
         run: |
           python3 - <<'PY'
           import datetime, os, sqlite3
-          SLOTS = [6, 9, 12, 15, 18, 21]   # целевые часы UTC: до 6 постов в сутки
-          MAX_POSTS_PER_DAY = 6
+          SLOTS = [6, 10, 14, 18]   # целевые часы UTC: 4 поста в сутки (опросы/викторины не считаются)
+          MAX_POSTS_PER_DAY = 4
           MIN_GAP_HOURS = 2
           now = datetime.datetime.now(datetime.timezone.utc)
           due = sum(1 for h in SLOTS if now.hour >= h)

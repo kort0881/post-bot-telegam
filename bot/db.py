@@ -537,16 +537,40 @@ class PostedManager:
             "polls_today": count_today,
             "posts_since_last_poll": posts_since,
             "last_poll_at": last_at,
+            "recent_keys": self._poll_recent_keys(),
+            "quiz_last_at": self.get_setting("quiz_last_at") or "",
         }
 
-    def note_poll_sent(self) -> None:
+    def _poll_recent_keys(self) -> Dict[str, str]:
+        """Когда какой вопрос опроса задавался: {ключ: 'ГГГГ-ММ-ДД ЧЧ:ММ:СС'}."""
+        raw = self.get_setting("poll_recent_keys")
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError):
+            return {}
+        if not isinstance(parsed, dict):
+            return {}
+        return {str(k): str(v) for k, v in parsed.items()}
+
+    def note_poll_sent(self, key: str = "", kind: str = "poll") -> None:
         today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         stored_day = self.get_setting("poll_day") or ""
         count = int(self.get_setting("poll_count_today") or 0) if stored_day == today else 0
         self.set_setting("poll_day", today)
         self.set_setting("poll_count_today", str(count + 1))
-        self.set_setting("poll_last_at",
-                         datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+        self.set_setting("poll_last_at", now)
+        self.set_setting("poll_last_kind", kind)
+        if kind == "quiz":
+            self.set_setting("quiz_last_at", now)
+        if key:
+            recent = self._poll_recent_keys()
+            recent[str(key)] = now
+            if len(recent) > 30:
+                recent = dict(sorted(recent.items(), key=lambda item: item[1])[-30:])
+            self.set_setting("poll_recent_keys", json.dumps(recent, ensure_ascii=False))
 
     # ===== редакционная очередь (ТЗ §11) =====
     def enqueue_item(self, article: Article, topic: str, post_format: str,

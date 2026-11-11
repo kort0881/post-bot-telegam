@@ -217,20 +217,32 @@ async def send_post(article: Article, text: str, posted: PostedManager, bot: Bot
 
 
 async def send_poll(spec: PollSpec, bot: Bot, posted: PostedManager) -> bool:
-    """Тематический опрос после публикации (ТЗ §6.4). Сбой опроса не ломает прогон."""
+    """Опрос или викторина после публикации (ТЗ §6.4). Сбой не ломает прогон."""
+    kwargs = {
+        "is_anonymous": spec.anonymous,
+        "allows_multiple_answers": spec.multiple,
+    }
+    if spec.kind == "quiz":
+        # Telegram: quiz всегда анонимный и с одним правильным ответом,
+        # позволяет_multiple_answers у викторины недопустим.
+        kwargs = {
+            "type": "quiz",
+            "correct_option_id": spec.correct_option_id,
+            "explanation": spec.explanation or None,
+        }
     try:
         await bot.send_poll(
             config.channel_id,
             spec.question,
             list(spec.options),
-            is_anonymous=spec.anonymous,
-            allows_multiple_answers=spec.multiple,
+            **kwargs,
         )
     except TelegramAPIError as e:
         logger.warning(f"⚠️ Опрос не отправлен: {e}")
         return False
-    posted.note_poll_sent()
-    logger.info(f"📊 Опрос отправлен: {spec.question}")
+    posted.note_poll_sent(spec.key, spec.kind)
+    kind = "Викторина" if spec.kind == "quiz" else "Опрос"
+    logger.info(f"📊 {kind} отправлен{'а' if spec.kind == 'quiz' else ''}: {spec.question}")
     return True
 
 

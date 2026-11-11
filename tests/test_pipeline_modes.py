@@ -41,6 +41,7 @@ class FakeBot:
     def __init__(self):
         self.messages = []
         self.polls = []
+        self.poll_calls = []
 
     async def send_message(self, chat_id, text, **kwargs):
         self.messages.append(text)
@@ -48,6 +49,11 @@ class FakeBot:
 
     async def send_poll(self, chat_id, question, options, **kwargs):
         self.polls.append((question, tuple(options)))
+        self.poll_calls.append({
+            "question": question,
+            "options": tuple(options),
+            "kwargs": dict(kwargs),
+        })
         return SimpleNamespace(message_id=902)
 
 
@@ -110,6 +116,7 @@ async def test_approval_mode_waits_for_admin(db_file, runtime, monkeypatch):
 async def test_auto_mode_publishes_with_rubric_poll_and_stats(db_file, runtime, monkeypatch):
     monkeypatch.setattr(config, "channel_id", "@test_channel")
     monkeypatch.setattr(config, "polls_enabled", True)
+    monkeypatch.setattr(config, "quizzes_enabled", False)
     posted = PostedManager(db_file)
     posted.set_posting_mode("auto")
 
@@ -124,12 +131,34 @@ async def test_auto_mode_publishes_with_rubric_poll_and_stats(db_file, runtime, 
     assert rows[0]["message_id"] == 901
     assert rows[0]["rubric"] == "Что делать"
 
-    # опрос привязан к теме материала: в тексте речь об обновлении,
-    # значит спрашиваем про восстановление соединения, а не про протокол
+    # опрос привязан к теме материала: пост про сбой VLESS, значит спрашиваем
+    # про работающее соединение, а не про обновление, которого канал не делал
     assert len(runtime.bot.polls) == 1
     question, options = runtime.bot.polls[0]
-    assert "восстановилось" in question.lower()
+    assert "соединение" in question.lower()
+    assert "обновлен" not in question.lower()
     assert len(options) == 4
+    assert posted.poll_state()["recent_keys"]
+
+
+async def test_auto_mode_sends_quiz_as_telegram_quiz(db_file, runtime, monkeypatch):
+    monkeypatch.setattr(config, "channel_id", "@test_channel")
+    monkeypatch.setattr(config, "polls_enabled", True)
+    monkeypatch.setattr(config, "quizzes_enabled", True)
+    monkeypatch.setattr(config, "quiz_every_days", 5)
+    posted = PostedManager(db_file)
+    posted.set_posting_mode("auto")
+
+    result = await pipeline.run_cycle(runtime, posted)
+    assert result["published"] is True
+    assert len(runtime.bot.poll_calls) == 1
+    call = runtime.bot.poll_calls[0]
+    assert call["kwargs"].get("type") == "quiz"
+    assert isinstance(call["kwargs"].get("correct_option_id"), int)
+    assert call["kwargs"].get("explanation")
+    assert "allows_multiple_answers" not in call["kwargs"]
+    assert posted.poll_state()["quiz_last_at"]
+
 
 
 async def test_engagement_guidance_reaches_generation(db_file, runtime, monkeypatch):

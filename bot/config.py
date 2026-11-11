@@ -274,6 +274,12 @@ class Config:
         # Опрос не чаще, чем раз в N публикаций, и не больше N в сутки
         self.poll_min_posts_between = _int_env("POLL_MIN_POSTS_BETWEEN", 6)
         self.poll_daily_limit = _int_env("POLL_DAILY_LIMIT", 2)
+        # Один и тот же вопрос не повторяется чаще, чем раз в N дней
+        self.poll_reuse_days = _int_env("POLL_REUSE_DAYS", 14)
+        # Викторины (Telegram type=quiz): реже опросов, каждый вопрос — со своим кулдауном
+        self.quizzes_enabled = os.getenv("QUIZZES_ENABLED", "1").strip().lower() not in ("0", "false", "no")
+        self.quiz_every_days = _int_env("QUIZ_EVERY_DAYS", 5)
+        self.quiz_reuse_days = _int_env("QUIZ_REUSE_DAYS", 30)
 
         # ===== Этап 4: аналитика (ТЗ §10) =====
         # Публичный адрес канала для сбора просмотров (t.me/<username>). Пусто → из CHANNEL_ID.

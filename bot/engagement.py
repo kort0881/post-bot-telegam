@@ -9,7 +9,7 @@
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 from .config import config
 from .models import Article, PostFormat, Topic
@@ -114,6 +114,11 @@ def _matches(text: str, terms: Sequence[str]) -> bool:
     return any(term in lowered for term in terms)
 
 
+def _match_score(text: str, terms: Sequence[str]) -> int:
+    lowered = text.lower()
+    return sum(1 for term in terms if term in lowered)
+
+
 def engagement_request(article: Article, post_format: str,
                        popular_topics: Optional[Sequence[str]] = None) -> Optional[EngagementRequest]:
     """Одна встроенная механика вовлечения или ничего.
@@ -180,36 +185,218 @@ def apply_engagement(body: str, request: Optional[EngagementRequest]) -> str:
 
 
 # ===== опросы (ТЗ §6.4) =====
+# Правило: опрос — продолжение материала, а не способ поднять активность.
+# Ключ выбирается по теме поста, и один и тот же вопрос не повторяется раньше
+# POLL_REUSE_DAYS. Если все подходящие вопросы на кулдауне — опроса нет.
 
 @dataclass
 class PollSpec:
     question: str
     options: List[str]
+    key: str = ""
     multiple: bool = False
     anonymous: bool = True
+    # poll — обычный опрос, quiz — викторина с правильным ответом (Telegram type=quiz)
+    kind: str = "poll"
+    correct_option_id: Optional[int] = None
+    explanation: str = ""
+
+
+@dataclass(frozen=True)
+class QuizTemplate:
+    question: str
+    options: Tuple[str, ...]
+    correct: int
+    explanation: str
 
 
 POLL_TEMPLATES = {
+    # обход блокировок и VPN
+    "connection": (
+        "Соединение сейчас работает?",
+        ["Да, всё работает", "Частично", "Нет, не подключается", "Не проверял"],
+    ),
+    "client_problem": (
+        "На каком клиенте возникла проблема?",
+        ["Karing", "v2rayN / HAPP", "sing-box", "Другой"],
+    ),
     "protocol": (
         "Какой протокол у вас работает в этой сети?",
         ["VLESS/Reality", "XHTTP", "Hysteria2", "Ни один не подключается"],
     ),
-    "client": (
-        "На каком клиенте возникла проблема?",
-        ["Karing", "v2rayN / HAPP", "sing-box", "Другой"],
+    "client_choice": (
+        "Каким клиентом пользуетесь чаще?",
+        ["Karing", "v2rayN / HAPP", "sing-box", "Hiddify"],
     ),
-    "recovered": (
-        "После обновления соединение восстановилось?",
-        ["Да, всё работает", "Частично", "Нет, не подключается", "Ещё не проверял"],
+    # ИИ и техника — основная тематика канала
+    "llm_tools": (
+        "Каким ИИ-инструментом пользуетесь чаще?",
+        ["ChatGPT", "Claude", "Gemini", "DeepSeek", "Другое"],
+    ),
+    "ai_pay": (
+        "Платите за ИИ-подписки?",
+        ["Да, одну", "Да, несколько", "Только бесплатные", "Не пользуюсь"],
+    ),
+    "local_ai": (
+        "Запускаете модели локально?",
+        ["Да, на GPU", "Да, только на CPU", "Нет, пользуюсь облаком", "Не запускаю"],
+    ),
+    "ai_work": (
+        "Используете ИИ в работе?",
+        ["Каждый день", "Несколько раз в неделю", "Редко", "Не использую"],
     ),
 }
 
+VPN_TOPICS = (Topic.BYPASS, Topic.BLOCK, Topic.WHITELIST)
+
+QUIZ_BANK = {
+    # обход блокировок
+    "vpn_dpi": QuizTemplate(
+        "Что делает DPI в сети провайдера?",
+        ("Анализирует содержимое пакетов и блокирует по признакам",
+         "Шифрует трафик абонента",
+         "Ускоряет доставку пакетов",
+         "Выдаёт абоненту новый IP"),
+        0,
+        "DPI смотрит не только адреса: SNI, заголовки, шаблоны рукопожатия.",
+    ),
+    "vpn_reality": QuizTemplate(
+        "Чем VLESS/Reality отличается от обычного TLS-туннеля?",
+        ("Шифрует трафик слабее",
+         "Маскируется под чужой настоящий сайт",
+         "Работает только по UDP",
+         "Не требует клиента"),
+        1,
+        "Reality подставляет TLS-параметры чужого популярного сайта, и фильтру нечего сверять со списком.",
+    ),
+    "vpn_mtu": QuizTemplate(
+        "Соединение поднимается, но страницы не грузятся. Что проверить первым?",
+        ("Пароль от Wi-Fi",
+         "Часовой пояс",
+         "MTU и MSS",
+         "Версию браузера"),
+        2,
+        "При слишком большом MTU рукопожатие проходит, а крупные пакеты режутся.",
+    ),
+    # ИИ
+    "ai_context": QuizTemplate(
+        "Что такое контекстное окно модели?",
+        ("Сколько текста модель видит за один запрос",
+         "Сколько она весит на диске",
+         "Сколько запросов в минуту держит",
+         "Размер её базы знаний"),
+        0,
+        "Контекстное окно — объём текста, который модель обрабатывает за один раз, вместе с ответом.",
+    ),
+    "ai_rag": QuizTemplate(
+        "Зачем к модели подключают RAG?",
+        ("Чтобы ускорить обучение",
+         "Чтобы уменьшить модель",
+         "Чтобы отключить фильтры",
+         "Чтобы отвечать по внешним документам"),
+        3,
+        "RAG подмешивает в запрос найденные фрагменты документов, и ответ опирается на них, а не на память модели.",
+    ),
+    "ai_quant": QuizTemplate(
+        "Что даёт квантизация модели?",
+        ("Больше параметров",
+         "Меньше размер и требования к памяти",
+         "Полную точность вычислений",
+         "Доступ к интернету"),
+        1,
+        "Квантизация переводит веса в более короткие числа: модель меньше и быстрее, точность немного падает.",
+    ),
+}
+
+PROBLEM_TERMS = ("перестал", "не работает", "не подключа", "сбой", "обрыв", "замедл", "отвалил")
+PROTOCOL_TERMS = ("vless", "xhttp", "reality", "hysteria", "протокол")
+VPN_TERMS = ("vless", "xhttp", "reality", "hysteria", "wireguard", "v2ray", "обход", "dpi")
+CLIENT_NAMES = ("karing", "happ", "v2rayn", "sing-box", "hiddify")
+PAY_TERMS = ("подписк", "тариф", "цен", "платн", "$")
+LLM_TERMS = ("gpt", "chatgpt", "claude", "gemini", "deepseek", "llm", "модел", "нейросет")
+LOCAL_TERMS = ("локальн", "gpu", "видеокарт", "nvidia", "оперативн")
+
+# К какому материалу какой вопрос викторины ближе (для порядка выбора)
+QUIZ_TRIGGERS = {
+    "vpn_dpi": ("dpi", "блокиров", "фильтр", "провайдер"),
+    "vpn_reality": ("vless", "reality", "xhttp", "tls", "маскир"),
+    "vpn_mtu": ("mtu", "mss", "не груз", "зависа", "перестал", "не работает"),
+    "ai_context": ("контекст", "окно", "токен", "модел"),
+    "ai_rag": ("rag", "поиск", "документ", "база знаний", "выдач"),
+    "ai_quant": ("квант", "локальн", "gpu", "памят", "vram", "gguf"),
+}
+
+
+def _is_vpn_material(text: str, topic: str) -> bool:
+    return (topic in VPN_TOPICS or _matches(text, VPN_TERMS) or _matches(text, CLIENT_NAMES))
+
+
+def _poll_keys_for(text: str, topic: str) -> List[str]:
+    """Ключи опросов, уместных для материала, в порядке приоритета."""
+    if _is_vpn_material(text, topic):
+        keys = []
+        if _matches(text, PROBLEM_TERMS):
+            keys.append("connection")
+            if _matches(text, CLIENT_NAMES):
+                keys.append("client_problem")
+        if _matches(text, PROTOCOL_TERMS) or topic in (Topic.BYPASS, Topic.BLOCK):
+            keys.append("protocol")
+        # любой VPN-материал: спросить, чем пользуется читатель, уместно всегда
+        keys.append("client_choice")
+        return keys
+
+    keys = []
+    if _matches(text, PAY_TERMS):
+        keys.append("ai_pay")
+    if _matches(text, LLM_TERMS):
+        keys.append("llm_tools")
+    if _matches(text, LOCAL_TERMS):
+        keys.append("local_ai")
+    keys.append("ai_work")
+    return keys
+
+
+def _quiz_keys_for(text: str, topic: str) -> List[str]:
+    """Вопросы викторины для материала: сначала по совпадению темы, потом остальные."""
+    prefix = "vpn_" if _is_vpn_material(text, topic) else "ai_"
+    keys = [key for key in QUIZ_BANK if key.startswith(prefix)]
+    matched = [key for key in keys if _matches(text, QUIZ_TRIGGERS.get(key, ()))]
+    # чем больше совпадений с материалом, тем раньше вопрос; при равенстве — порядок банка
+    matched.sort(key=lambda key: _match_score(text, QUIZ_TRIGGERS.get(key, ())), reverse=True)
+    return matched + [key for key in keys if key not in matched]
+
+
+def _key_on_cooldown(key: str, recent: dict, days: int,
+                     now: Optional[datetime] = None) -> bool:
+    """Был ли этот вопрос задан раньше, чем `days` дней назад."""
+    raw = (recent or {}).get(key)
+    if not raw:
+        return False
+    try:
+        when = datetime.strptime(str(raw)[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return False
+    now = now or datetime.now(timezone.utc)
+    return (now - when).total_seconds() < days * 86400
+
+
+def _days_since(raw: Optional[str]) -> Optional[float]:
+    if not raw:
+        return None
+    try:
+        when = datetime.strptime(str(raw)[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return (datetime.now(timezone.utc) - when).total_seconds() / 86400
+
 
 def build_poll(article: Article, post_format: str, state: Optional[dict] = None) -> Optional[PollSpec]:
-    """Опрос, привязанный к теме материала, или None.
+    """Опрос или викторина по теме материала, или None.
 
-    state: {"polls_today": int, "posts_since_last_poll": int} — предохранители,
-    чтобы опросы не превратились в способ поднять активность.
+    state: {"polls_today": int, "posts_since_last_poll": int,
+            "recent_keys": {key: ts}, "quiz_last_at": ts}
+    — предохранители, чтобы вовлечение не превратилось в способ поднять активность
+    и не повторяло один и тот же вопрос.
     """
     if not config.polls_enabled:
         return None
@@ -221,19 +408,33 @@ def build_poll(article: Article, post_format: str, state: Optional[dict] = None)
 
     text = article.text.lower()
     topic = Topic.detect(article.text)
+    recent = state.get("recent_keys") or {}
 
-    if "обновлен" in text or "после обновления" in text:
-        key = "recovered"
-    elif any(term in text for term in CLIENT_TERMS):
-        key = "client"
-    elif topic in (Topic.BYPASS, Topic.BLOCK) and any(
-            term in text for term in ("vless", "xhttp", "reality", "протокол", "vpn", "proxy", "прокси")):
-        key = "protocol"
-    else:
-        return None
+    # викторина идёт реже опроса: не чаще раза в QUIZ_EVERY_DAYS, каждый вопрос — раз в QUIZ_REUSE_DAYS
+    if config.quizzes_enabled:
+        since_quiz = _days_since(state.get("quiz_last_at"))
+        if since_quiz is None or since_quiz >= config.quiz_every_days:
+            for key in _quiz_keys_for(text, topic):
+                if _key_on_cooldown(key, recent, config.quiz_reuse_days):
+                    continue
+                template = QUIZ_BANK[key]
+                return PollSpec(
+                    key=key,
+                    question=template.question,
+                    options=list(template.options),
+                    kind="quiz",
+                    correct_option_id=template.correct,
+                    explanation=template.explanation,
+                )
 
-    question, options = POLL_TEMPLATES[key]
-    return PollSpec(question=question, options=list(options))
+    for key in _poll_keys_for(text, topic):
+        if _key_on_cooldown(key, recent, config.poll_reuse_days):
+            continue
+        question, options = POLL_TEMPLATES[key]
+        return PollSpec(key=key, question=question, options=list(options))
+
+    logger.info("📊 Опрос не отправлен: подходящие вопросы на кулдауне")
+    return None
 
 
 __all__ = [

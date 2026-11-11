@@ -89,14 +89,22 @@ def _topic_state(extra_keys=(), **overrides) -> dict:
     return _state(recent_keys=recent, **overrides)
 
 
-def test_poll_starts_with_our_paid_bot(monkeypatch):
+def test_poll_starts_with_our_bot(monkeypatch):
     monkeypatch.setattr(config, "quizzes_enabled", False)
     article = make_article("Microsoft показала новую нейросеть для офисных задач")
     spec = engagement.build_poll(article, PostFormat.TOOL, _state())
     assert spec is not None
-    # главная задача опросов — узнать, как пользуются нашим ботом после перехода на оплату
+    # главная задача — привычка говорить о нашем боте, без слов про оплату
     assert spec.key == "svc_usage"
-    assert "наш" in spec.question.lower()
+    assert "доступ к интернету" in spec.question.lower()
+
+
+def test_service_polls_do_not_mention_payment():
+    forbidden = ("плат", "оплат", "подписк", "тариф", "цен", "₽", "руб", "деньг")
+    for key in SERVICE_KEYS:
+        question, options = engagement.POLL_TEMPLATES[key]
+        text = f"{question} {' '.join(options)}".lower()
+        assert not any(word in text for word in forbidden), (key, text)
 
 
 def test_mood_poll_after_service_ones(monkeypatch):

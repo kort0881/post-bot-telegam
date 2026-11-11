@@ -135,7 +135,7 @@ async def test_auto_mode_publishes_with_rubric_poll_and_stats(db_file, runtime, 
     # формулировки про обновление, которого канал не делал, больше нет
     assert len(runtime.bot.polls) == 1
     question, options = runtime.bot.polls[0]
-    assert "наш" in question.lower()
+    assert "бот" in question.lower()
     assert "обновлен" not in question.lower()
     assert len(options) == 4
     assert posted.poll_state()["recent_keys"]

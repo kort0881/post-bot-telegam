@@ -276,6 +276,10 @@ class Config:
         self.poll_daily_limit = _int_env("POLL_DAILY_LIMIT", 2)
         # Один и тот же вопрос не повторяется чаще, чем раз в N дней
         self.poll_reuse_days = _int_env("POLL_REUSE_DAYS", 14)
+        # Опросы про наш платный бот — главная задача; повтор реже, чем вопросы по теме
+        self.poll_usage_days = _int_env("POLL_USAGE_DAYS", 30)
+        # Опросы про настроения на канале
+        self.poll_mood_days = _int_env("POLL_MOOD_DAYS", 21)
         # Викторины (Telegram type=quiz): реже опросов, каждый вопрос — со своим кулдауном
         self.quizzes_enabled = os.getenv("QUIZZES_ENABLED", "1").strip().lower() not in ("0", "false", "no")
         self.quiz_every_days = _int_env("QUIZ_EVERY_DAYS", 5)

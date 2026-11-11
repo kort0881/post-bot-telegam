@@ -211,7 +211,46 @@ class QuizTemplate:
 
 
 POLL_TEMPLATES = {
-    # обход блокировок и VPN
+    # 1. Наш платный бот: как пользуются, что работает, что мешает (главная задача опросов)
+    "svc_usage": (
+        "Пользуетесь нашим VPN после перехода на платную основу?",
+        ["Да, оплачиваю", "Только пробный период", "Перестал(а) после введения оплаты",
+         "Ещё не подключался"],
+    ),
+    "svc_how_often": (
+        "Как часто включаете наш VPN?",
+        ["Каждый день", "Несколько раз в неделю", "Изредка", "Не пользуюсь"],
+    ),
+    "svc_devices": (
+        "Сколько устройств подключаете через нашего бота?",
+        ["Одно", "Два", "Три и больше", "Ни одного"],
+    ),
+    "svc_works": (
+        "Что сейчас с соединением через нашего бота?",
+        ["Всё работает", "Иногда обрывается", "Медленно", "Не подключается"],
+    ),
+    "svc_pay": (
+        "Какой у вас сейчас доступ?",
+        ["Оплаченный месяц", "Пробный период", "Закончился, не продлевал", "Не оформлял"],
+    ),
+    "svc_use_what": (
+        "Что чаще всего открываете через наш VPN?",
+        ["YouTube", "Рабочие сервисы", "Соцсети и мессенджеры", "Всё подряд"],
+    ),
+    "svc_price": (
+        "Устраивает цена 100 ₽ за 30 дней?",
+        ["Да, нормально", "Дорого", "Готов(а) платить больше за больший трафик", "Мне это не нужно"],
+    ),
+    # 2. Настроения на канале
+    "mood_channel": (
+        "Что вам полезнее в канале?",
+        ["Новости ИИ", "Обход блокировок", "Инструкции и разборы", "Всё понемногу"],
+    ),
+    "mood_format": (
+        "Как вам материалы канала за последнюю неделю?",
+        ["Стало полезнее", "Как раньше", "Слишком много ИИ", "Читаю только про обход"],
+    ),
+    # 3. По теме конкретного поста — обход блокировок и VPN
     "connection": (
         "Соединение сейчас работает?",
         ["Да, всё работает", "Частично", "Нет, не подключается", "Не проверял"],
@@ -228,7 +267,7 @@ POLL_TEMPLATES = {
         "Каким клиентом пользуетесь чаще?",
         ["Karing", "v2rayN / HAPP", "sing-box", "Hiddify"],
     ),
-    # ИИ и техника — основная тематика канала
+    # 3. По теме конкретного поста — ИИ и техника
     "llm_tools": (
         "Каким ИИ-инструментом пользуетесь чаще?",
         ["ChatGPT", "Claude", "Gemini", "DeepSeek", "Другое"],
@@ -246,6 +285,14 @@ POLL_TEMPLATES = {
         ["Каждый день", "Несколько раз в неделю", "Редко", "Не использую"],
     ),
 }
+
+# Порядок приоритета: сервис → настроения → тема поста
+SERVICE_POLL_KEYS = ("svc_usage", "svc_works", "svc_pay", "svc_how_often",
+                     "svc_devices", "svc_use_what", "svc_price")
+MOOD_POLL_KEYS = ("mood_channel", "mood_format")
+
+# Свой кулдаун на группу: сервисные вопросы реже, чем вопросы по теме поста
+POLL_COOLDOWN_PREFIX = {"svc_": "poll_usage_days", "mood_": "poll_mood_days"}
 
 VPN_TOPICS = (Topic.BYPASS, Topic.BLOCK, Topic.WHITELIST)
 
@@ -331,8 +378,8 @@ def _is_vpn_material(text: str, topic: str) -> bool:
     return (topic in VPN_TOPICS or _matches(text, VPN_TERMS) or _matches(text, CLIENT_NAMES))
 
 
-def _poll_keys_for(text: str, topic: str) -> List[str]:
-    """Ключи опросов, уместных для материала, в порядке приоритета."""
+def _topic_poll_keys(text: str, topic: str) -> List[str]:
+    """Вопросы по теме материала, в порядке приоритета."""
     if _is_vpn_material(text, topic):
         keys = []
         if _matches(text, PROBLEM_TERMS):
@@ -354,6 +401,14 @@ def _poll_keys_for(text: str, topic: str) -> List[str]:
         keys.append("local_ai")
     keys.append("ai_work")
     return keys
+
+
+def _poll_cooldown_days(key: str) -> int:
+    """Кулдаун вопроса: у сервисных и «настроенческих» он свой, длиннее."""
+    for prefix, attr in POLL_COOLDOWN_PREFIX.items():
+        if key.startswith(prefix):
+            return int(getattr(config, attr))
+    return int(config.poll_reuse_days)
 
 
 def _quiz_keys_for(text: str, topic: str) -> List[str]:
@@ -390,8 +445,20 @@ def _days_since(raw: Optional[str]) -> Optional[float]:
     return (datetime.now(timezone.utc) - when).total_seconds() / 86400
 
 
+def _poll_for_keys(keys: Sequence[str], recent: dict) -> Optional[PollSpec]:
+    for key in keys:
+        if _key_on_cooldown(key, recent, _poll_cooldown_days(key)):
+            continue
+        question, options = POLL_TEMPLATES[key]
+        return PollSpec(key=key, question=question, options=list(options))
+    return None
+
+
 def build_poll(article: Article, post_format: str, state: Optional[dict] = None) -> Optional[PollSpec]:
-    """Опрос или викторина по теме материала, или None.
+    """Опрос или викторина, или None.
+
+    Приоритет (ТЗ §6.4, уточнение владельца): 1) как люди пользуются нашим платным
+    ботом, 2) настроения на канале, 3) викторина, 4) вопрос по теме поста.
 
     state: {"polls_today": int, "posts_since_last_poll": int,
             "recent_keys": {key: ts}, "quiz_last_at": ts}
@@ -410,7 +477,12 @@ def build_poll(article: Article, post_format: str, state: Optional[dict] = None)
     topic = Topic.detect(article.text)
     recent = state.get("recent_keys") or {}
 
-    # викторина идёт реже опроса: не чаще раза в QUIZ_EVERY_DAYS, каждый вопрос — раз в QUIZ_REUSE_DAYS
+    # 1–2. наш платный бот и настроения канала — не зависят от темы поста
+    spec = _poll_for_keys(list(SERVICE_POLL_KEYS) + list(MOOD_POLL_KEYS), recent)
+    if spec:
+        return spec
+
+    # 3. викторина: не чаще раза в QUIZ_EVERY_DAYS, каждый вопрос — раз в QUIZ_REUSE_DAYS
     if config.quizzes_enabled:
         since_quiz = _days_since(state.get("quiz_last_at"))
         if since_quiz is None or since_quiz >= config.quiz_every_days:
@@ -427,11 +499,10 @@ def build_poll(article: Article, post_format: str, state: Optional[dict] = None)
                     explanation=template.explanation,
                 )
 
-    for key in _poll_keys_for(text, topic):
-        if _key_on_cooldown(key, recent, config.poll_reuse_days):
-            continue
-        question, options = POLL_TEMPLATES[key]
-        return PollSpec(key=key, question=question, options=list(options))
+    # 4. вопрос по теме поста
+    spec = _poll_for_keys(_topic_poll_keys(text, topic), recent)
+    if spec:
+        return spec
 
     logger.info("📊 Опрос не отправлен: подходящие вопросы на кулдауне")
     return None

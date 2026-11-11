@@ -78,12 +78,40 @@ def _ts(days_ago: float) -> str:
 
 VPN_KEYS = ("connection", "client_problem", "protocol", "client_choice")
 AI_KEYS = ("llm_tools", "ai_pay", "local_ai", "ai_work")
+SERVICE_KEYS = tuple(engagement.SERVICE_POLL_KEYS)
+MOOD_KEYS = tuple(engagement.MOOD_POLL_KEYS)
 
 
-def test_poll_follows_topic_vpn(monkeypatch):
+def _topic_state(extra_keys=(), **overrides) -> dict:
+    """Состояние, когда вопросы про наш бот и про настроения уже заданы."""
+    recent = {key: _ts(1) for key in SERVICE_KEYS + MOOD_KEYS}
+    recent.update({key: _ts(1) for key in extra_keys})
+    return _state(recent_keys=recent, **overrides)
+
+
+def test_poll_starts_with_our_paid_bot(monkeypatch):
+    monkeypatch.setattr(config, "quizzes_enabled", False)
+    article = make_article("Microsoft показала новую нейросеть для офисных задач")
+    spec = engagement.build_poll(article, PostFormat.TOOL, _state())
+    assert spec is not None
+    # главная задача опросов — узнать, как пользуются нашим ботом после перехода на оплату
+    assert spec.key == "svc_usage"
+    assert "наш" in spec.question.lower()
+
+
+def test_mood_poll_after_service_ones(monkeypatch):
+    monkeypatch.setattr(config, "quizzes_enabled", False)
+    article = make_article("Microsoft показала новую нейросеть для офисных задач")
+    state = _state(recent_keys={key: _ts(1) for key in SERVICE_KEYS})
+    spec = engagement.build_poll(article, PostFormat.TOOL, state)
+    assert spec is not None
+    assert spec.key in MOOD_KEYS
+
+
+def test_poll_topic_question_after_service_and_mood(monkeypatch):
     monkeypatch.setattr(config, "quizzes_enabled", False)
     article = make_article("VLESS перестал подключаться после обновления у провайдера")
-    spec = engagement.build_poll(article, PostFormat.CONSEQUENCE, _state())
+    spec = engagement.build_poll(article, PostFormat.CONSEQUENCE, _topic_state())
     assert spec is not None
     assert spec.key == "connection"
     # формулировка не должна намекать на обновление, которого канал не делал
@@ -94,7 +122,7 @@ def test_poll_follows_topic_vpn(monkeypatch):
 def test_poll_generic_update_does_not_trigger_vpn_question(monkeypatch):
     monkeypatch.setattr(config, "quizzes_enabled", False)
     article = make_article("Масштабное обновление продуктов Adobe: новые функции")
-    spec = engagement.build_poll(article, PostFormat.TOOL, _state())
+    spec = engagement.build_poll(article, PostFormat.TOOL, _topic_state())
     assert spec is not None
     assert spec.key not in VPN_KEYS
 
@@ -102,7 +130,7 @@ def test_poll_generic_update_does_not_trigger_vpn_question(monkeypatch):
 def test_poll_ai_topic_gets_ai_question(monkeypatch):
     monkeypatch.setattr(config, "quizzes_enabled", False)
     article = make_article("Google открыла доступ к своей самой мощной модели")
-    spec = engagement.build_poll(article, PostFormat.TOOL, _state())
+    spec = engagement.build_poll(article, PostFormat.TOOL, _topic_state())
     assert spec is not None
     assert spec.key in AI_KEYS
 
@@ -111,24 +139,33 @@ def test_poll_does_not_repeat_same_key(monkeypatch):
     monkeypatch.setattr(config, "quizzes_enabled", False)
     monkeypatch.setattr(config, "poll_reuse_days", 14)
     article = make_article("VLESS перестал подключаться после обновления у провайдера")
-    state = _state(recent_keys={"connection": _ts(1)})
-    spec = engagement.build_poll(article, PostFormat.CONSEQUENCE, state)
+    spec = engagement.build_poll(article, PostFormat.CONSEQUENCE,
+                                 _topic_state(extra_keys=("connection",)))
     assert spec is not None
     assert spec.key != "connection"
+
+
+def test_service_poll_not_repeated_within_month(monkeypatch):
+    monkeypatch.setattr(config, "quizzes_enabled", False)
+    monkeypatch.setattr(config, "poll_usage_days", 30)
+    article = make_article("Microsoft показала новую нейросеть для офисных задач")
+    state = _state(recent_keys={"svc_usage": _ts(2)})
+    spec = engagement.build_poll(article, PostFormat.TOOL, state)
+    assert spec is not None
+    assert spec.key != "svc_usage"
 
 
 def test_poll_silent_when_all_keys_on_cooldown(monkeypatch):
     monkeypatch.setattr(config, "quizzes_enabled", False)
     article = make_article("Microsoft показала новую нейросеть для офисных задач")
-    state = _state(recent_keys={key: _ts(1) for key in AI_KEYS})
-    assert engagement.build_poll(article, PostFormat.TOOL, state) is None
+    assert engagement.build_poll(article, PostFormat.TOOL, _topic_state(extra_keys=AI_KEYS)) is None
 
 
-def test_quiz_sent_for_topic(monkeypatch):
+def test_quiz_sent_when_polls_spent(monkeypatch):
     monkeypatch.setattr(config, "quizzes_enabled", True)
     monkeypatch.setattr(config, "quiz_every_days", 5)
     article = make_article("OpenAI показала новую модель GPT для работы с компьютером")
-    spec = engagement.build_poll(article, PostFormat.TOOL, _state())
+    spec = engagement.build_poll(article, PostFormat.TOOL, _topic_state())
     assert spec is not None
     assert spec.kind == "quiz"
     assert spec.key.startswith("ai_")
@@ -141,8 +178,8 @@ def test_quiz_respects_frequency(monkeypatch):
     monkeypatch.setattr(config, "quizzes_enabled", True)
     monkeypatch.setattr(config, "quiz_every_days", 5)
     article = make_article("OpenAI показала новую модель GPT для работы с компьютером")
-    state = _state(quiz_last_at=_ts(1))
-    spec = engagement.build_poll(article, PostFormat.TOOL, state)
+    spec = engagement.build_poll(article, PostFormat.TOOL,
+                                 _topic_state(quiz_last_at=_ts(1)))
     assert spec is not None
     assert spec.kind == "poll"
 
@@ -151,10 +188,10 @@ def test_quiz_key_not_repeated(monkeypatch):
     monkeypatch.setattr(config, "quizzes_enabled", True)
     monkeypatch.setattr(config, "quiz_reuse_days", 30)
     article = make_article("VLESS перестал подключаться после блокировки у провайдера")
-    first = engagement.build_poll(article, PostFormat.CONSEQUENCE, _state())
+    first = engagement.build_poll(article, PostFormat.CONSEQUENCE, _topic_state())
     assert first is not None and first.kind == "quiz"
-    state = _state(recent_keys={first.key: _ts(1)})
-    second = engagement.build_poll(article, PostFormat.CONSEQUENCE, state)
+    second = engagement.build_poll(article, PostFormat.CONSEQUENCE,
+                                   _topic_state(extra_keys=(first.key,)))
     assert second is not None
     assert second.key != first.key
 
@@ -166,6 +203,13 @@ def test_quiz_bank_is_valid():
         assert len(template.question) <= 300, key
         assert all(len(option) <= 100 for option in template.options), key
         assert template.explanation and len(template.explanation) <= 200, key
+
+
+def test_poll_templates_are_valid():
+    for key, (question, options) in engagement.POLL_TEMPLATES.items():
+        assert 2 <= len(options) <= 10, key
+        assert len(question) <= 300, key
+        assert all(len(option) <= 100 for option in options), key
 
 
 def test_poll_limits_block_spam(monkeypatch):
@@ -187,9 +231,9 @@ def test_db_remembers_poll_keys(db_file):
     from bot.db import PostedManager
 
     posted = PostedManager(db_file)
-    posted.note_poll_sent("connection", "poll")
+    posted.note_poll_sent("svc_usage", "poll")
     state = posted.poll_state()
-    assert "connection" in state["recent_keys"]
+    assert "svc_usage" in state["recent_keys"]
     assert state["quiz_last_at"] == ""
 
     posted.note_poll_sent("ai_rag", "quiz")
@@ -197,11 +241,12 @@ def test_db_remembers_poll_keys(db_file):
     assert "ai_rag" in state["recent_keys"]
     assert state["quiz_last_at"]
 
-    # повтор того же вопроса внутри кулдауна отсекается на уровне выбора
+    # заданный вопрос не повторяется: на очереди следующий сервисный
     state = dict(state)
     state.update({"polls_today": 0, "posts_since_last_poll": 10})
     article = make_article("VLESS перестал подключаться после обновления у провайдера")
     spec = engagement.build_poll(article, PostFormat.CONSEQUENCE, state)
     assert spec is not None
-    assert spec.key != "connection"
+    assert spec.key != "svc_usage"
+
 

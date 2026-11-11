@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from bot import pipeline
+from bot import engagement, pipeline
 from bot.assessment import Assessment
 from bot.config import config
 from bot.db import PostedManager
@@ -131,23 +131,29 @@ async def test_auto_mode_publishes_with_rubric_poll_and_stats(db_file, runtime, 
     assert rows[0]["message_id"] == 901
     assert rows[0]["rubric"] == "Что делать"
 
-    # опрос привязан к теме материала: пост про сбой VLESS, значит спрашиваем
-    # про работающее соединение, а не про обновление, которого канал не делал
+    # опрос привязан к теме: сначала главная задача — как пользуются нашим ботом,
+    # формулировки про обновление, которого канал не делал, больше нет
     assert len(runtime.bot.polls) == 1
     question, options = runtime.bot.polls[0]
-    assert "соединение" in question.lower()
+    assert "наш" in question.lower()
     assert "обновлен" not in question.lower()
     assert len(options) == 4
     assert posted.poll_state()["recent_keys"]
 
 
 async def test_auto_mode_sends_quiz_as_telegram_quiz(db_file, runtime, monkeypatch):
+    import json
+
     monkeypatch.setattr(config, "channel_id", "@test_channel")
     monkeypatch.setattr(config, "polls_enabled", True)
     monkeypatch.setattr(config, "quizzes_enabled", True)
     monkeypatch.setattr(config, "quiz_every_days", 5)
     posted = PostedManager(db_file)
     posted.set_posting_mode("auto")
+    # вопросы про наш бот и про настроения уже выходили — доходит очередь до викторины
+    done = {key: "2026-11-10 08:00:00"
+            for key in list(engagement.SERVICE_POLL_KEYS) + list(engagement.MOOD_POLL_KEYS)}
+    posted.set_setting("poll_recent_keys", json.dumps(done))
 
     result = await pipeline.run_cycle(runtime, posted)
     assert result["published"] is True
@@ -158,7 +164,6 @@ async def test_auto_mode_sends_quiz_as_telegram_quiz(db_file, runtime, monkeypat
     assert call["kwargs"].get("explanation")
     assert "allows_multiple_answers" not in call["kwargs"]
     assert posted.poll_state()["quiz_last_at"]
-
 
 
 async def test_engagement_guidance_reaches_generation(db_file, runtime, monkeypatch):

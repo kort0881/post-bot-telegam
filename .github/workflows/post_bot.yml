@@ -103,6 +103,10 @@ jobs:
           GEMINI_API_KEY_3: ${{ secrets.GEMINI_API_KEY_3 }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+          # 12.11.2026 по слову владельца: опросы и викторины в канал не публикуем.
+          # Вернуть — убрать эти две строки (или поставить 1).
+          POLLS_ENABLED: "0"
+          QUIZZES_ENABLED: "0"
         run: python telegrambot.py
 
       - name: Debug - after

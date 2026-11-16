@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
 from .config import config
+from .entities import extract_entities
 from .models import Article, Topic
 from .textutils import (
     calculate_similarity,
@@ -282,6 +283,53 @@ class PostedManager:
 
         return True, ""
 
+    # ===== субъекты (компании/люди) =====
+    def get_recent_entity_usage(self, hours: int) -> Dict[str, List[str]]:
+        """Субъект -> даты публикаций за окно.
+
+        Старые строки писались с пустым `entities`, поэтому для них субъект
+        восстанавливается из заголовка.
+        """
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute('''
+                SELECT title, entities, posted_date
+                FROM posted_articles
+                WHERE posted_date > datetime('now', ?)
+                ORDER BY posted_date DESC
+            ''', (f'-{hours} hours',))
+            usage: Dict[str, List[str]] = {}
+            for title, raw_entities, posted_date in cursor.fetchall():
+                names = safe_json_loads(raw_entities) if raw_entities else None
+                if not isinstance(names, list) or not names:
+                    names = extract_entities(title or "")
+                for name in names:
+                    usage.setdefault(str(name), []).append(posted_date)
+            return usage
+
+    def check_entity_limit(self, entities: List[str]) -> Tuple[bool, str]:
+        """Не чаще N материалов про одного субъекта за окно кулдауна."""
+        if not entities:
+            return True, ""
+
+        max_hours = max(config.entity_cooldown_hours, config.core_entity_cooldown_hours)
+        usage = self.get_recent_entity_usage(max_hours)
+        now = datetime.now(timezone.utc)
+
+        for name in entities:
+            core = name in config.core_entities
+            window = config.core_entity_cooldown_hours if core else config.entity_cooldown_hours
+            limit = config.core_entity_max_posts if core else config.entity_max_posts
+            recent = 0
+            for raw_date in usage.get(name, []):
+                posted = parse_db_datetime(raw_date)
+                if posted and (now - posted).total_seconds() / 3600 <= window:
+                    recent += 1
+            if recent >= limit:
+                return (False,
+                        f"ENTITY_COOLDOWN ({name}: {recent}/{limit} за {window}h)")
+        return True, ""
+
     # ===== дубли =====
     def is_duplicate(self, url: str, title: str, summary: str = "") -> DuplicateCheckResult:
         result = DuplicateCheckResult()
@@ -412,6 +460,7 @@ class PostedManager:
             title_words = list(get_title_words(article.title))
             word_signature = get_sorted_word_signature(article.title)
             content_hash = get_content_hash(f"{article.title} {article.summary}")
+            entities = extract_entities(f"{article.title} {article.summary} {(article.full_text or '')[:4000]}")
             try:
                 cursor.execute('''
                     INSERT INTO posted_articles
@@ -422,7 +471,7 @@ class PostedManager:
                 ''', (
                     article.link, norm_url, domain_val, article.title, title_normalized,
                     json.dumps(title_words), word_signature, (article.summary or "")[:1000],
-                    content_hash, json.dumps([]), topic, subject, article.source,
+                    content_hash, json.dumps(entities), topic, subject, article.source,
                     post_format, score, message_id, rubric,
                 ))
                 conn.commit()

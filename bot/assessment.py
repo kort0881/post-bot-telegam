@@ -32,12 +32,13 @@ ASSESS_PROMPT = """Ты — технический редактор Telegram-к�
 ИСТОЧНИК: {source}
 ТЕКСТ (может быть неполным):
 {text}
-
+{recent_block}
 Верни СТРОГО JSON без пояснений:
 {{
   "topic_relevance": 0-10,   // насколько тема соответствует каналу (блокировки, VPN, сети, безопасность, ИИ)
   "usefulness": 0-10,        // практическая польза: можно ли что-то применить или проверить
-  "novelty": 0-10,           // новая информация или пересказ старого
+  "novelty": 0-10,           // новая информация или пересказ старого (с учётом списка выше)
+  "repeats_recent": true|false,  // true — тот же герой/компания и тот же сюжет, что в списке уже вышедшего
   "discussion": 0-10,        // вызовет ли обсуждение, желание проверить, переслать
   "format": "howto|experiment|consequence|analysis|tool",
   "trigger": "угроза|неожиданность|конфликт|любопытство|выгода|срочность|разоблачение|сравнение|последствия",
@@ -57,7 +58,9 @@ JSON обязан быть закрытым: не обрывай его на с�
 - analysis — технический разбор механизма;
 - tool — инструмент, клиент, сервис, репозиторий.
 
-Не выдумывай факты: если данных нет — не добавляй. Никаких оценок без опоры на текст."""
+Не выдумывай факты: если данных нет — не добавляй. Никаких оценок без опоры на текст.
+Если материал повторяет сюжет из списка вышедшего (тот же субъект, то же событие) —
+novelty не выше 3 и repeats_recent=true, даже если новость свежая и полезная."""
 
 VALID_FORMATS = set(PostFormat.ALL)
 
@@ -109,6 +112,7 @@ class Assessment:
     reason: str = ""
     main_point: str = ""
     facts: List[str] = field(default_factory=list)
+    repeats_recent: bool = False
     source: str = "heuristic"  # heuristic | llm | llm+fallback
 
     @property
@@ -148,10 +152,22 @@ def parse_assessment(raw: str) -> Optional[Dict]:
         "discussion": _clamp(data.get("discussion", 0)),
         "trigger": trigger if trigger in VALID_TRIGGERS else "последствия",
         "worth_publishing": bool(data.get("worth_publishing", True)),
+        "repeats_recent": bool(data.get("repeats_recent", False)),
         "reason": str(data.get("reason", ""))[:300],
         "main_point": str(data.get("main_point", ""))[:500],
         "facts": [str(f)[:300] for f in facts[:8]],
     }
+
+
+def build_recent_block(titles: Optional[List[str]]) -> str:
+    """Список последних заголовков канала для промпта: память о повторах."""
+    if not titles:
+        return ""
+    lines = [f"- {str(title).strip()[:120]}" for title in titles[: config.recent_prompt_size] if title]
+    if not lines:
+        return ""
+    return ("УЖЕ ВЫШЛО В КАНАЛЕ (последние материалы, от новых к старым):\n"
+            + "\n".join(lines) + "\n\n")
 
 
 def heuristic_format(article: Article) -> str:
@@ -195,14 +211,20 @@ def heuristic_assessment(article: Article, reason: str = "эвристика") -
     )
 
 
-async def assess_article(article: Article, llm: Optional[GroqLLM] = None) -> Assessment:
-    """Оценка материала моделью с откатом на эвристику."""
+async def assess_article(article: Article, llm: Optional[GroqLLM] = None,
+                        recent_titles: Optional[List[str]] = None) -> Assessment:
+    """Оценка материала моделью с откатом на эвристику.
+
+    `recent_titles` — заголовки последних постов канала: модель должна видеть
+    повторы сюжета, а не оценивать новизну в вакууме.
+    """
     llm = llm or GroqLLM()
     text = article.full_text or article.summary or ""
     prompt = ASSESS_PROMPT.format(
         title=article.title,
         source=article.source,
         text=text[: config.max_fulltext_chars],
+        recent_block=build_recent_block(recent_titles),
     )
     try:
         raw = await llm.complete(prompt, max_tokens=1200, temperature=0.2, json_mode=True)
@@ -228,6 +250,16 @@ async def assess_article(article: Article, llm: Optional[GroqLLM] = None) -> Ass
             f"  ⛔ вне профиля канала (тематика {data['topic_relevance']}/10, "
             f"профильных слов нет): {article.title[:50]}"
         )
+
+    # Повтор сюжета: тот же субъект уже был в канале. Публикуем только при
+    # принципиально новой информации (novelty 8+), иначе третий материал про
+    # того же Claude не несёт читателю ничего нового.
+    repeats = data["repeats_recent"]
+    if worth and repeats and data["novelty"] < 8:
+        worth = False
+        logger.info(
+            f"  ⛔ повтор сюжета (novelty {data['novelty']}/10): {article.title[:50]}"
+        )
     post_format = data["format"] or heuristic_format(article)
     if not data["format"]:
         logger.info(f"  ℹ️ формат выбран эвристикой: {post_format}")
@@ -239,6 +271,7 @@ async def assess_article(article: Article, llm: Optional[GroqLLM] = None) -> Ass
         reason=data["reason"],
         main_point=data["main_point"],
         facts=data["facts"],
+        repeats_recent=repeats,
         source="llm",
     )
 
@@ -259,6 +292,7 @@ def format_shares(recent_formats: List[str]) -> Dict[str, float]:
 __all__ = [
     "Assessment",
     "assess_article",
+    "build_recent_block",
     "heuristic_assessment",
     "heuristic_format",
     "parse_assessment",

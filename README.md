@@ -45,6 +45,16 @@ python telegrambot.py
 текст переписывается или не публикуется. Не больше двух подряд одного формата
 и одной темы.
 
+Повторы сюжета режутся на двух уровнях. Первый — кулдаун на субъекта
+(`bot/entities.py`): компания или человек из словаря (Nvidia/Хуанг, Anthropic/Claude,
+OpenAI, Google, РКН, Telegram и др.) не чаще `ENTITY_MAX_POSTS` раз за
+`ENTITY_COOLDOWN_HOURS`; у профильных субъектов из `CORE_ENTITIES` лимит мягче
+(`CORE_ENTITY_MAX_POSTS` за `CORE_ENTITY_COOLDOWN_HOURS`). Субъекты пишутся в
+колонку `entities` при публикации, старые строки считаются по заголовку. Второй —
+модель-анализатор получает последние `RECENT_PROMPT_SIZE` заголовков канала и флаг
+`repeats_recent`: повтор сюжета при новизне ниже 8 не публикуется. Причина отказа
+видна в `rejected_urls` (`ENTITY_COOLDOWN (...)`).
+
 **Этап 3 — вовлечение.** Серийные рубрики с кулдауном (не подряд, не чаще
 `RUBRIC_COOLDOWN_DAYS`). Одна встроенная механика на публикацию: проверка
 гипотезы, сбор пользовательских случаев или продолжение популярной темы.
@@ -100,6 +110,9 @@ python telegrambot.py
 - `CHANNEL_USERNAME` — публичный канал для сбора просмотров
 - `PUBLISH_MIN_SCORE`, `QUEUE_MIN_SCORE` — пороги рейтинга
 - `MAX_SAME_FORMAT_IN_ROW`, `MAX_SAME_TOPIC_IN_ROW` — баланс публикаций
+- `ENTITY_COOLDOWN_HOURS`, `ENTITY_MAX_POSTS` — кулдаун на компанию/человека в материалах
+- `CORE_ENTITIES`, `CORE_ENTITY_COOLDOWN_HOURS`, `CORE_ENTITY_MAX_POSTS` — профильные субъекты (по умолчанию `rkn,telegram`)
+- `RECENT_PROMPT_SIZE` — сколько последних заголовков видит анализатор
 - `RUBRIC_COOLDOWN_DAYS`, `POLLS_ENABLED`, `POLL_MIN_POSTS_BETWEEN`, `POLL_DAILY_LIMIT`, `POLL_REUSE_DAYS`
 - `POLL_USAGE_DAYS`, `POLL_MOOD_DAYS` — кулдаун вопросов про наш бот и про настроения канала
 - `QUIZZES_ENABLED`, `QUIZ_EVERY_DAYS`, `QUIZ_REUSE_DAYS` — викторины

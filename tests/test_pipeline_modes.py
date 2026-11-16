@@ -72,7 +72,7 @@ def runtime(monkeypatch):
     async def fake_feeds():
         return [make_article()]
 
-    async def fake_assess(article, llm=None):
+    async def fake_assess(article, llm=None, recent_titles=None):
         return fake_assessment(article)
 
     async def fake_generate(article, assessment, fmt, llm=None, extra_guidance=None):

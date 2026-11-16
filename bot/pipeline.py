@@ -23,6 +23,7 @@ from .engagement import (
     choose_rubric,
     engagement_request,
 )
+from .entities import extract_entities
 from .extract import enrich_with_full_text
 from .feeds import load_all_feeds
 from .filters import evaluate_relevance
@@ -85,7 +86,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
     stats = {
         "not_relevant": 0, "batch_dup": 0, "db_dup": 0, "diversity": 0,
-        "subject_limit": 0, "batch_subject": 0, "passed": 0,
+        "subject_limit": 0, "batch_subject": 0, "entity_limit": 0, "passed": 0,
     }
 
     for article in articles:
@@ -126,6 +127,13 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
             stats["subject_limit"] += 1
             continue
 
+        entities = extract_entities(f"{article.title} {article.summary}")
+        ent_ok, ent_reason = posted.check_entity_limit(entities)
+        if not ent_ok:
+            posted.log_rejected(article, ent_reason)
+            stats["entity_limit"] += 1
+            continue
+
         dup_result = posted.is_duplicate(article.link, article.title, article.summary)
         if dup_result.is_duplicate:
             posted.log_rejected(article, "DB_DUP: " + "; ".join(dup_result.reasons[:3]))
@@ -149,7 +157,8 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
     logger.info(
         "📊 Фильтр: прошло {passed}, не по теме {not_relevant}, дубли в пачке {batch_dup}, "
-        "дубли в БД {db_dup}, лимит темы {subject_limit}/{batch_subject}, разнообразие {diversity}".format(**stats)
+        "лимит темы {subject_limit}/{batch_subject}, лимит субъекта {entity_limit}, "
+        "разнообразие {diversity}".format(**stats)
     )
     return candidates
 
@@ -280,12 +289,17 @@ async def check_telegram_connection(bot: Bot) -> bool:
         return False
 
 
-async def _evaluate_candidate(article: Article, llm: GroqLLM, extracted: int):
-    """Полный текст (пока есть квота на скачивание) + оценка материала."""
+async def _evaluate_candidate(article: Article, llm: GroqLLM, extracted: int,
+                             recent_titles: Optional[List[str]] = None):
+    """Полный текст (пока есть квота на скачивание) + оценка материала.
+
+    В анализ передаются последние заголовки канала: без них модель ставит новизну
+    «вообще» и пропускает четвёртый материал про того же Claude за неделю.
+    """
     if extracted < config.max_extractions and not article.full_text:
         await enrich_with_full_text(article)
         extracted += 1
-    assessment = await assess_article(article, llm)
+    assessment = await assess_article(article, llm, recent_titles=recent_titles)
     return assessment, extracted
 
 
@@ -359,7 +373,9 @@ async def run_cycle(runtime: Runtime, posted: PostedManager,
             posted.log_rejected(article, f"TOPIC_IN_ROW ({topic})")
             continue
 
-        assessment, extracted = await _evaluate_candidate(article, runtime.llm, extracted)
+        recent_titles = [p.get("title") or "" for p in recent]
+        assessment, extracted = await _evaluate_candidate(
+            article, runtime.llm, extracted, recent_titles)
         score = assessment.total
         band = priority_band(score)
         logger.info(

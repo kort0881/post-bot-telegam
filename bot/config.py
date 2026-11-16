@@ -233,6 +233,22 @@ class Config:
 
         self.batch_subject_limit = _int_env("BATCH_SUBJECT_LIMIT", 10)
 
+        # Кулдаун на субъекта: компания/человек не чаще N раз за окно.
+        # Тематические лимиты этого не ловят — Nvidia (hardware) и Claude (llm)
+        # считаются разными темами, хотя для читателя это один и тот же сюжет.
+        self.entity_cooldown_hours = _int_env("ENTITY_COOLDOWN_HOURS", 72)
+        self.entity_max_posts = _int_env("ENTITY_MAX_POSTS", 1)
+        # Профильные субъекты (РКН, Telegram) — тема канала, лимит мягче
+        self.core_entities = tuple(
+            e.strip().lower()
+            for e in (os.getenv("CORE_ENTITIES") or "rkn,telegram").split(",")
+            if e.strip()
+        )
+        self.core_entity_cooldown_hours = _int_env("CORE_ENTITY_COOLDOWN_HOURS", 48)
+        self.core_entity_max_posts = _int_env("CORE_ENTITY_MAX_POSTS", 2)
+        # Сколько последних заголовков показывать анализатору, чтобы он видел повторы
+        self.recent_prompt_size = _int_env("RECENT_PROMPT_SIZE", 8)
+
         # Рейтинг: минимальный балл для публикации (ТЗ §3)
         self.publish_min_score = _int_env("PUBLISH_MIN_SCORE", 55)
         self.queue_min_score = _int_env("QUEUE_MIN_SCORE", 50)

@@ -107,7 +107,8 @@ def format_settings(posted: PostedManager) -> str:
         f"Не больше подряд: формат {config.max_same_format_in_row}, тема {config.max_same_topic_in_row}\n"
         f"Кулдаун рубрики: {config.rubric_cooldown_days} дн.\n"
         f"Опросы: {'вкл' if config.polls_enabled else 'выкл'}, "
-        f"не чаще 1 на {config.poll_min_posts_between} постов и {config.poll_daily_limit} в сутки\n"
+        f"не чаще 1 раза в {config.poll_every_days} дн. и {config.poll_daily_limit} в сутки; "
+        f"викторины {'вкл' if config.quizzes_enabled else 'выкл'}, раз в {config.quiz_every_days} дн.\n"
         f"Очередь: до {config.queue_max_items} материалов, хранение {config.queue_ttl_days} дн.\n"
         f"Админы: {len(config.admin_ids)} id"
     )

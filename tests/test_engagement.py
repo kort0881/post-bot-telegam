@@ -65,7 +65,7 @@ def test_engagement_none_for_plain_news():
 
 
 def _state(**overrides) -> dict:
-    base = {"polls_today": 0, "posts_since_last_poll": 10,
+    base = {"polls_today": 0, "last_poll_at": "",
             "recent_keys": {}, "quiz_last_at": ""}
     base.update(overrides)
     return base
@@ -222,11 +222,39 @@ def test_poll_templates_are_valid():
 
 def test_poll_limits_block_spam(monkeypatch):
     monkeypatch.setattr(config, "quizzes_enabled", False)
+    monkeypatch.setattr(config, "poll_every_days", 3)
     article = make_article("Проверка протокола VLESS после блокировки")
     assert engagement.build_poll(article, PostFormat.HOWTO,
                                  _state(polls_today=5)) is None
+    # каденция по времени: вчерашний опрос блокирует новый
     assert engagement.build_poll(article, PostFormat.HOWTO,
-                                 _state(posts_since_last_poll=1)) is None
+                                 _state(last_poll_at=_ts(1))) is None
+
+
+def test_poll_cadence_three_days(monkeypatch):
+    monkeypatch.setattr(config, "quizzes_enabled", False)
+    monkeypatch.setattr(config, "poll_every_days", 3)
+    article = make_article("Microsoft показала новую нейросеть для офисных задач")
+    assert engagement.build_poll(article, PostFormat.TOOL,
+                                 _state(last_poll_at=_ts(2.5))) is None
+    spec = engagement.build_poll(article, PostFormat.TOOL,
+                                 _state(last_poll_at=_ts(3.1)))
+    assert spec is not None and spec.kind == "poll"
+
+
+def test_quiz_cadence_five_days(monkeypatch):
+    monkeypatch.setattr(config, "quizzes_enabled", True)
+    monkeypatch.setattr(config, "quiz_every_days", 5)
+    monkeypatch.setattr(config, "poll_every_days", 3)
+    article = make_article("OpenAI показала новую модель GPT для работы с компьютером")
+    # 4 дня назад была викторина → рано, уходит обычный опрос
+    spec = engagement.build_poll(article, PostFormat.TOOL,
+                                 _state(quiz_last_at=_ts(4), last_poll_at=_ts(4)))
+    assert spec is not None and spec.kind == "poll"
+    # 5+ дней назад → викторина
+    spec = engagement.build_poll(article, PostFormat.TOOL,
+                                 _state(quiz_last_at=_ts(5.2), last_poll_at=_ts(0.1)))
+    assert spec is not None and spec.kind == "quiz"
 
 
 def test_poll_disabled_by_config(monkeypatch):
@@ -243,15 +271,19 @@ def test_db_remembers_poll_keys(db_file):
     state = posted.poll_state()
     assert "svc_usage" in state["recent_keys"]
     assert state["quiz_last_at"] == ""
+    poll_at = state["last_poll_at"]
+    assert poll_at
 
     posted.note_poll_sent("ai_rag", "quiz")
     state = posted.poll_state()
     assert "ai_rag" in state["recent_keys"]
     assert state["quiz_last_at"]
+    # викторина не сдвигает таймер опроса: у них разные каденции
+    assert state["last_poll_at"] == poll_at
 
     # заданный вопрос не повторяется: на очереди следующий сервисный
     state = dict(state)
-    state.update({"polls_today": 0, "posts_since_last_poll": 10})
+    state.update({"polls_today": 0, "last_poll_at": _ts(4), "quiz_last_at": _ts(1)})
     article = make_article("VLESS перестал подключаться после обновления у провайдера")
     spec = engagement.build_poll(article, PostFormat.CONSEQUENCE, state)
     assert spec is not None

@@ -249,7 +249,16 @@ POLL_TEMPLATES = {
         "Как вам материалы канала за последнюю неделю?",
         ["Стало полезнее", "Как раньше", "Слишком много ИИ", "Читаю только про обход"],
     ),
+    "mood_next": (
+        "Что разобрать следующим?",
+        ["Настройку клиента с нуля", "Обход на мобильном интернете",
+         "Свою серверную часть", "Новости блокировок"],
+    ),
     # 3. По теме конкретного поста — обход блокировок и VPN
+    "svc_platform": (
+        "На чём чаще открываете канал и подключаетесь?",
+        ["Windows", "Android", "iPhone / iPad", "Роутер или Linux"],
+    ),
     "connection": (
         "Соединение сейчас работает?",
         ["Да, всё работает", "Частично", "Нет, не подключается", "Не проверял"],
@@ -287,8 +296,8 @@ POLL_TEMPLATES = {
 
 # Порядок приоритета: сервис → настроения → тема поста
 SERVICE_POLL_KEYS = ("svc_usage", "svc_works", "svc_how_often", "svc_devices",
-                     "svc_use_what", "svc_tenure", "svc_missing")
-MOOD_POLL_KEYS = ("mood_channel", "mood_format")
+                     "svc_use_what", "svc_tenure", "svc_missing", "svc_platform")
+MOOD_POLL_KEYS = ("mood_channel", "mood_format", "mood_next")
 
 # Свой кулдаун на группу: сервисные вопросы реже, чем вопросы по теме поста
 POLL_COOLDOWN_PREFIX = {"svc_": "poll_usage_days", "mood_": "poll_mood_days"}
@@ -351,6 +360,25 @@ QUIZ_BANK = {
          "Доступ к интернету"),
         1,
         "Квантизация переводит веса в более короткие числа: модель меньше и быстрее, точность немного падает.",
+    ),
+    # транспорт и клиенты
+    "vpn_port443": QuizTemplate(
+        "Зачем VLESS обычно ставят на 443-й порт?",
+        ("Чтобы трафик был похож на обычный HTTPS",
+         "На этом порту выше скорость",
+         "Он единственный открыт у провайдеров",
+         "Так требует Telegram"),
+        0,
+        "443-й — штатный порт HTTPS: фильтру сложнее отличить туннель от обычного сайта.",
+    ),
+    "ai_tokens": QuizTemplate(
+        "Почему длинный диалог с моделью выходит дороже?",
+        ("Модель каждый раз дообучается",
+         "Каждый запрос заново отправляет всю историю в контексте",
+         "Ответы становятся длиннее",
+         "Растёт размер файла модели"),
+        1,
+        "В контекст каждого запроса входит вся переписка: платят за все токены, а не только за новый вопрос.",
     ),
 }
 
@@ -456,32 +484,32 @@ def _poll_for_keys(keys: Sequence[str], recent: dict) -> Optional[PollSpec]:
 def build_poll(article: Article, post_format: str, state: Optional[dict] = None) -> Optional[PollSpec]:
     """Опрос или викторина, или None.
 
-    Приоритет (ТЗ §6.4, уточнение владельца): 1) как люди пользуются нашим платным
-    ботом, 2) настроения на канале, 3) викторина, 4) вопрос по теме поста.
+    Приоритет: 1) викторина, если прошла 5 дней, 2) опрос, если прошло 3 дня
+    (наш бот → настроения канала → вопрос по теме поста).
 
-    state: {"polls_today": int, "posts_since_last_poll": int,
+    state: {"polls_today": int, "last_poll_at": "ГГГГ-ММ-ДД ЧЧ:ММ:СС",
             "recent_keys": {key: ts}, "quiz_last_at": ts}
     — предохранители, чтобы вовлечение не превратилось в способ поднять активность
     и не повторяло один и тот же вопрос.
+
+    Каденция по времени (слово владельца 18.11.2026): викторина — раз в 5 дней,
+    опрос — раз в 3 дня. Викторина не сбрасывает таймер опроса: это разные
+    механики, и викторина по расписанию не должна съедать плановый опрос.
     """
     if not config.polls_enabled:
         return None
     state = state or {}
     if int(state.get("polls_today", 0)) >= config.poll_daily_limit:
         return None
-    if int(state.get("posts_since_last_poll", 10 ** 6)) < config.poll_min_posts_between:
-        return None
+
+    last_poll_days = _days_since(state.get("last_poll_at"))
+    poll_due = last_poll_days is None or last_poll_days >= config.poll_every_days
 
     text = article.text.lower()
     topic = Topic.detect(article.text)
     recent = state.get("recent_keys") or {}
 
-    # 1–2. наш платный бот и настроения канала — не зависят от темы поста
-    spec = _poll_for_keys(list(SERVICE_POLL_KEYS) + list(MOOD_POLL_KEYS), recent)
-    if spec:
-        return spec
-
-    # 3. викторина: не чаще раза в QUIZ_EVERY_DAYS, каждый вопрос — раз в QUIZ_REUSE_DAYS
+    # 1. викторина: раз в QUIZ_EVERY_DAYS (по умолчанию 5), вопрос — раз в QUIZ_REUSE_DAYS
     if config.quizzes_enabled:
         since_quiz = _days_since(state.get("quiz_last_at"))
         if since_quiz is None or since_quiz >= config.quiz_every_days:
@@ -498,7 +526,17 @@ def build_poll(article: Article, post_format: str, state: Optional[dict] = None)
                     explanation=template.explanation,
                 )
 
-    # 4. вопрос по теме поста
+    # 2. опрос: не чаще раза в POLL_EVERY_DAYS (по умолчанию 3 дня)
+    if not poll_due:
+        logger.info("📊 Опрос не отправлен: прошлый был меньше %s дн. назад", config.poll_every_days)
+        return None
+
+    # 2.1–2.2. наш бот и настроения канала — не зависят от темы поста
+    spec = _poll_for_keys(list(SERVICE_POLL_KEYS) + list(MOOD_POLL_KEYS), recent)
+    if spec:
+        return spec
+
+    # 2.3. вопрос по теме поста
     spec = _poll_for_keys(_topic_poll_keys(text, topic), recent)
     if spec:
         return spec

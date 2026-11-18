@@ -610,10 +610,12 @@ class PostedManager:
         count = int(self.get_setting("poll_count_today") or 0) if stored_day == today else 0
         self.set_setting("poll_day", today)
         self.set_setting("poll_count_today", str(count + 1))
-        self.set_setting("poll_last_at", now)
         self.set_setting("poll_last_kind", kind)
         if kind == "quiz":
+            # Викторина не сдвигает таймер опроса — у них разные каденции (3 и 5 дней)
             self.set_setting("quiz_last_at", now)
+        else:
+            self.set_setting("poll_last_at", now)
         if key:
             recent = self._poll_recent_keys()
             recent[str(key)] = now

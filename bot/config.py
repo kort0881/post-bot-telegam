@@ -287,9 +287,13 @@ class Config:
         # Серийная рубрика не выходит чаще, чем раз в N дней
         self.rubric_cooldown_days = _int_env("RUBRIC_COOLDOWN_DAYS", 3)
         self.polls_enabled = os.getenv("POLLS_ENABLED", "1").strip().lower() not in ("0", "false", "no")
-        # Опрос не чаще, чем раз в N публикаций, и не больше N в сутки
-        self.poll_min_posts_between = _int_env("POLL_MIN_POSTS_BETWEEN", 6)
-        self.poll_daily_limit = _int_env("POLL_DAILY_LIMIT", 2)
+        # Каденция по времени, а не по числу постов: опрос не чаще раза в N дней
+        # (владелец, 18.11.2026: опрос — раз в 3 дня)
+        self.poll_every_days = _int_env("POLL_EVERY_DAYS", 3)
+        # Устаревший предохранитель «не чаще, чем раз в N постов»: оставлен только
+        # для совместимости конфигов, в выборе опроса больше не участвует
+        self.poll_min_posts_between = _int_env("POLL_MIN_POSTS_BETWEEN", 1)
+        self.poll_daily_limit = _int_env("POLL_DAILY_LIMIT", 1)
         # Один и тот же вопрос не повторяется чаще, чем раз в N дней
         self.poll_reuse_days = _int_env("POLL_REUSE_DAYS", 14)
         # Опросы про наш платный бот — главная задача; повтор реже, чем вопросы по теме

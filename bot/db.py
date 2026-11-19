@@ -14,6 +14,14 @@ from typing import Dict, List, Optional, Set, Tuple
 from .config import config
 from .entities import extract_entities
 from .models import Article, Topic
+from .stories import (
+    STORY_RULES,
+    build_df,
+    find_story,
+    normalise_rows,
+    story_rule,
+    story_tokens,
+)
 from .textutils import (
     calculate_similarity,
     get_content_hash,
@@ -329,6 +337,75 @@ class PostedManager:
                 return (False,
                         f"ENTITY_COOLDOWN ({name}: {recent}/{limit} за {window}h)")
         return True, ""
+
+    # ===== сюжеты: один сюжет в разных изданиях =====
+    def check_story_limit(self, title: str, summary: str = "") -> Tuple[bool, str]:
+        """Тот же сюжет другим заголовком и другим изданием — не публикуем.
+
+        Сравнение идёт по заголовку и описанию против постов за
+        `STORY_WINDOW_HOURS`; словарь IDF считается по `STORY_SAMPLE` последним
+        постам, поэтому редкое имя («роскомнадзор») весит больше частого.
+        """
+        if not config.story_dedupe or not title:
+            return True, ""
+        text = f"{title} {summary or ''}"
+        candidate = story_tokens(text)
+        if not candidate:
+            return True, ""
+
+        with self._lock:
+            cursor = self._get_conn().cursor()
+            cursor.execute(
+                'SELECT title, summary, posted_date FROM posted_articles '
+                'ORDER BY posted_date DESC LIMIT ?', (config.story_sample,))
+            rows = cursor.fetchall()
+        if not rows:
+            return True, ""
+
+        now = datetime.now(timezone.utc)
+
+        def _age_hours(raw_date) -> Optional[float]:
+            posted_at = parse_db_datetime(raw_date)
+            if posted_at is None:
+                return None
+            return (now - posted_at).total_seconds() / 3600
+
+        # 1. Правило темы: серия материалов с разными фактами об одном и том же
+        #    (РКН и блокировки: 0.177 близости — лексика такое не ловит).
+        rule_key = story_rule(text)
+        if rule_key:
+            rule = STORY_RULES[rule_key]
+            same_rule = 0
+            for raw_title, raw_summary, raw_date in rows:
+                hours = _age_hours(raw_date)
+                if hours is None or hours > config.story_rule_hours:
+                    continue
+                if story_rule(f"{raw_title or ''} {raw_summary or ''}") == rule_key:
+                    same_rule += 1
+            if same_rule >= config.story_rule_limit:
+                return (False,
+                        f"STORY_RULE ({rule['name']}: {same_rule}/{config.story_rule_limit} "
+                        f"за {config.story_rule_hours}h)")
+
+        # 2. Лексическая близость: тот же сюжет другим заголовком и другим изданием.
+        fresh: List[Tuple[str, str]] = []
+        for raw_title, raw_summary, raw_date in rows:
+            hours = _age_hours(raw_date)
+            if hours is not None and hours <= config.story_window_hours:
+                fresh.append((raw_title or "", raw_summary or ""))
+        if not fresh:
+            return True, ""
+
+        docs, titles = normalise_rows(fresh)
+        df = build_df(docs)
+        match = find_story(candidate, docs, titles, df, len(docs),
+                           min_score=config.story_similarity,
+                           rare_df=config.story_rare_df)
+        if match is None:
+            return True, ""
+        return (False,
+                f"STORY_DUP ({match['score']:.0%} с «{match['title'][:45]}», "
+                f"общее: {', '.join(match['rare'])})")
 
     # ===== дубли =====
     def is_duplicate(self, url: str, title: str, summary: str = "") -> DuplicateCheckResult:

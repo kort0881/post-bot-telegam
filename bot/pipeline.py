@@ -86,7 +86,8 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
 
     stats = {
         "not_relevant": 0, "batch_dup": 0, "db_dup": 0, "diversity": 0,
-        "subject_limit": 0, "batch_subject": 0, "entity_limit": 0, "passed": 0,
+        "subject_limit": 0, "batch_subject": 0, "entity_limit": 0, "story_dup": 0,
+        "passed": 0,
     }
 
     for article in articles:
@@ -134,6 +135,12 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
             stats["entity_limit"] += 1
             continue
 
+        story_ok, story_reason = posted.check_story_limit(article.title, article.summary)
+        if not story_ok:
+            posted.log_rejected(article, story_reason)
+            stats["story_dup"] += 1
+            continue
+
         dup_result = posted.is_duplicate(article.link, article.title, article.summary)
         if dup_result.is_duplicate:
             posted.log_rejected(article, "DB_DUP: " + "; ".join(dup_result.reasons[:3]))
@@ -158,7 +165,7 @@ def filter_and_dedupe(articles: List[Article], posted: PostedManager) -> List[Ar
     logger.info(
         "📊 Фильтр: прошло {passed}, не по теме {not_relevant}, дубли в пачке {batch_dup}, "
         "лимит темы {subject_limit}/{batch_subject}, лимит субъекта {entity_limit}, "
-        "разнообразие {diversity}".format(**stats)
+        "повтор сюжета {story_dup}, разнообразие {diversity}".format(**stats)
     )
     return candidates
 
@@ -394,6 +401,11 @@ async def run_cycle(runtime: Runtime, posted: PostedManager,
         dup_result = posted.is_duplicate(article.link, article.title, article.summary)
         if dup_result.is_duplicate:
             posted.log_rejected(article, f"FINAL_DUP: {'; '.join(dup_result.reasons[:2])}")
+            continue
+
+        story_ok, story_reason = posted.check_story_limit(article.title, article.summary)
+        if not story_ok:
+            posted.log_rejected(article, f"FINAL_{story_reason}")
             continue
 
         post_format = choose_format(assessment, recent_formats)

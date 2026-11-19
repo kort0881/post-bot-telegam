@@ -249,6 +249,20 @@ class Config:
         # Сколько последних заголовков показывать анализатору, чтобы он видел повторы
         self.recent_prompt_size = _int_env("RECENT_PROMPT_SIZE", 8)
 
+        # Сюжетный слой: один сюжет в разных изданиях (РКН+ИИ семь раз за неделю).
+        # Порог 0.25 и редкость 3 замерены на 200 последних постах 19.11.2026:
+        # «свой сюжет» даёт 0.22…0.48, чужие пары — до 0.05 (исключение 0.43
+        # отсекает требование общего редкого слова).
+        self.story_dedupe = _int_env("STORY_DEDUPE", 1)
+        self.story_window_hours = _int_env("STORY_WINDOW_HOURS", 168)
+        self.story_similarity = _float_env("STORY_SIMILARITY", 0.25)
+        self.story_rare_df = _int_env("STORY_RARE_DF", 3)
+        self.story_sample = _int_env("STORY_SAMPLE", 400)
+        # Правило темы (цензура и блокировки в РФ): серия материалов не чаще
+        # `STORY_RULE_LIMIT` за `STORY_RULE_HOURS`. Лексика такую серию не ловит.
+        self.story_rule_hours = _int_env("STORY_RULE_HOURS", 72)
+        self.story_rule_limit = _int_env("STORY_RULE_LIMIT", 1)
+
         # Рейтинг: минимальный балл для публикации (ТЗ §3)
         self.publish_min_score = _int_env("PUBLISH_MIN_SCORE", 55)
         self.queue_min_score = _int_env("QUEUE_MIN_SCORE", 50)

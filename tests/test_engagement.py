@@ -290,3 +290,18 @@ def test_db_remembers_poll_keys(db_file):
     assert spec.key != "svc_usage"
 
 
+def test_used_question_never_comes_back(monkeypatch):
+    """Слово владельца 19.11.2026: вопрос задан один раз — больше никогда."""
+    recent = {"svc_usage": "2020-01-01 00:00:00"}
+
+    monkeypatch.setattr(config, "question_never_repeat", 1)
+    assert engagement._key_on_cooldown("svc_usage", recent, 0) is True
+    assert engagement._key_on_cooldown("svc_usage", recent, 3650) is True
+    assert engagement._key_on_cooldown("svc_devices", recent, 0) is False
+
+    # с выключенным флагом работает старый кулдаун по времени
+    monkeypatch.setattr(config, "question_never_repeat", 0)
+    assert engagement._key_on_cooldown("svc_usage", recent, 14) is False
+    assert engagement._key_on_cooldown("svc_usage", recent, 3650) is True
+
+

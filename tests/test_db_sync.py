@@ -189,3 +189,65 @@ def test_backup_is_read_only_for_server(tmp_path):
 
     assert _urls(local) == ["https://e.com/1", "https://e.com/2"]
     assert _urls(server / DB_NAME) == ["https://e.com/1"]
+
+
+SETTINGS_SCHEMA = "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);"
+
+
+def _make_db_with_settings(path, settings: dict):
+    _make_db(path)
+    conn = sqlite3.connect(path)
+    try:
+        conn.executescript(SETTINGS_SCHEMA)
+        conn.executemany("INSERT INTO settings (key, value) VALUES (?, ?)", list(settings.items()))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _settings(path) -> dict:
+    conn = sqlite3.connect(path)
+    try:
+        return dict(conn.execute("SELECT key, value FROM settings").fetchall())
+    finally:
+        conn.close()
+
+
+def test_push_keeps_state_written_by_this_run(tmp_path):
+    """poll_last_at, записанный прогоном, обязан доехать до сервера.
+
+    19.11.2026 из-за обратного слияния сервер затирал свежее значение, бот не видел
+    прошлый опрос и выпустил тот же вопрос второй раз за 15 часов.
+    """
+    server = tmp_path / "server"
+    server.mkdir()
+    local = tmp_path / DB_NAME
+
+    _make_db_with_settings(server / DB_NAME, {
+        "poll_last_at": "2026-11-07 11:23:24",
+        "poll_recent_keys": '{"svc_usage": "2026-11-12 06:13:21"}',
+    })
+    _make_db_with_settings(local, {
+        "poll_last_at": "2026-11-19 09:12:31",
+        "poll_recent_keys": '{"svc_usage": "2026-11-19 09:12:31"}',
+    })
+
+    push(str(local), LocalTransport(str(server)), log=lambda *_: None)
+
+    server_settings = _settings(server / DB_NAME)
+    assert server_settings["poll_last_at"] == "2026-11-19 09:12:31"
+    assert "2026-11-19" in server_settings["poll_recent_keys"]
+
+
+def test_push_keeps_admin_setting_from_server(tmp_path):
+    """Правки админки (posting_mode) по-прежнему главнее локальной копии."""
+    server = tmp_path / "server"
+    server.mkdir()
+    local = tmp_path / DB_NAME
+
+    _make_db_with_settings(server / DB_NAME, {"posting_mode": "approval"})
+    _make_db_with_settings(local, {"posting_mode": "auto"})
+
+    push(str(local), LocalTransport(str(server)), log=lambda *_: None)
+
+    assert _settings(server / DB_NAME)["posting_mode"] == "approval"

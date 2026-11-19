@@ -450,10 +450,16 @@ def _quiz_keys_for(text: str, topic: str) -> List[str]:
 
 def _key_on_cooldown(key: str, recent: dict, days: int,
                      now: Optional[datetime] = None) -> bool:
-    """Был ли этот вопрос задан раньше, чем `days` дней назад."""
+    """Был ли этот вопрос задан раньше, чем `days` дней назад.
+
+    При `QUESTION_NEVER_REPEAT=1` (слово владельца 19.11.2026) вопрос, заданный
+    хоть раз, не выходит больше никогда: кулдаун по времени не применяется.
+    """
     raw = (recent or {}).get(key)
     if not raw:
         return False
+    if config.question_never_repeat:
+        return True
     try:
         when = datetime.strptime(str(raw)[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
     except ValueError:

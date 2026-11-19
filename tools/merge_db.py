@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Слияние двух баз post-bot без потерь: union по ключам, метрики — по максимуму."""
+import os
 import sqlite3
 import sys
 
@@ -92,6 +93,61 @@ def merge_settings(target: sqlite3.Connection, source: sqlite3.Connection) -> tu
             target.execute("UPDATE settings SET value = ? WHERE key = ?", (value, key))
             updated += 1
     return added, updated
+
+
+# Состояние вовлечения пишет только прогон бота, и именно оно терялось при заливке:
+# push сначала сливал сервер → локально (сервер главнее) и уже потом локально → сервер,
+# поэтому свежие poll_last_at / quiz_last_at затирались старым значением сервера.
+# Итог 18–19.11.2026: опрос «Как сейчас работает доступ через бота?» вышел дважды
+# за 15 часов, и опрос раз в 3 дня не соблюдался. Эти ключи при заливке главнее сервера;
+# остальные (posting_mode и правки админки) — по-прежнему сервер главнее.
+RUN_STATE_KEYS = frozenset({
+    "poll_day",
+    "poll_count_today",
+    "poll_last_at",
+    "poll_last_kind",
+    "poll_recent_keys",
+    "quiz_last_at",
+})
+
+
+def read_settings(path: str, keys: frozenset = RUN_STATE_KEYS) -> dict:
+    """Значения настроек из базы. Нет файла или таблицы — пустой словарь."""
+    if not os.path.exists(path):
+        return {}
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        if not has_table(conn, "settings"):
+            return {}
+        placeholders = ", ".join("?" for _ in keys)
+        rows = conn.execute(
+            f"SELECT key, value FROM settings WHERE key IN ({placeholders})", tuple(keys)
+        ).fetchall()
+        return {key: value for key, value in rows}
+    finally:
+        conn.close()
+
+
+def write_settings(path: str, mapping: dict) -> int:
+    """Записать настройки поверх базы (последний писатель — прогон бота)."""
+    if not mapping:
+        return 0
+    conn = sqlite3.connect(path)
+    try:
+        if not has_table(conn, "settings"):
+            return 0
+        written = 0
+        for key, value in mapping.items():
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+            written += 1
+        conn.commit()
+        return written
+    finally:
+        conn.close()
 
 
 def quick_check(conn) -> str:

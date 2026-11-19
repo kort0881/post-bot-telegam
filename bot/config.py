@@ -310,6 +310,10 @@ class Config:
         self.poll_daily_limit = _int_env("POLL_DAILY_LIMIT", 1)
         # Один и тот же вопрос не повторяется чаще, чем раз в N дней
         self.poll_reuse_days = _int_env("POLL_REUSE_DAYS", 14)
+        # 19.11.2026 слово владельца: вопрос задаётся один раз за всю жизнь бота.
+        # Банк конечный: когда вопросы кончатся, вовлечение просто молчит —
+        # новые добавляются в POLL_TEMPLATES / QUIZ_BANK, а не переиспользуются.
+        self.question_never_repeat = _int_env("QUESTION_NEVER_REPEAT", 1)
         # Опросы про наш платный бот — главная задача; повтор реже, чем вопросы по теме
         self.poll_usage_days = _int_env("POLL_USAGE_DAYS", 30)
         # Опросы про настроения на канале

@@ -43,7 +43,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from merge_db import merge, quick_check  # noqa: E402
+from merge_db import merge, quick_check, read_settings, write_settings  # noqa: E402
 
 DB_NAME = "posted_articles.db"
 TABLES = ("posted_articles", "post_stats", "editorial_queue")
@@ -246,14 +246,21 @@ def push(db_path: str, transport, attempts: int = 3, delay: float = 5.0, log=pri
             with tempfile.TemporaryDirectory() as tmp:
                 snap = os.path.join(tmp, "snapshot.db")
                 transport.fetch_snapshot(snap)
+                # Состояние вовлечения (poll_last_at, quiz_last_at, poll_recent_keys)
+                # пишет только этот прогон: слияние сервер → локально его затирало,
+                # поэтому снимаем значения ДО слияния и возвращаем их на сервер после.
+                run_state = read_settings(db_path)
                 # в обе стороны: наши посты на сервер, метрики и правки админа к нам
                 back = merge(db_path, snap)
                 info = merge(snap, db_path)
+                restored = write_settings(snap, run_state)
                 checkpoint(snap)
                 result = transport.upload(snap)
                 log(f"📤 локально → сервер (попытка {attempt}): {_merge_report(back)}; "
-                    f"{_merge_report(info)}; на сервере {result.get('remote_counts')}")
-                return {"attempts": attempt, "merged_from_server": back, "merged_to_server": info, **result}
+                    f"{_merge_report(info)}; состояние опросов ключей: {restored}; "
+                    f"на сервере {result.get('remote_counts')}")
+                return {"attempts": attempt, "merged_from_server": back, "merged_to_server": info,
+                        "run_state_keys": restored, **result}
         except Exception as exc:  # noqa: BLE001 — транспорт бывает любой, важен ретрай
             last_error = exc
             log(f"⚠️ заливка на сервер не удалась (попытка {attempt}/{attempts}): {exc}")

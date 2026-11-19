@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from .config import config
 from .entities import extract_entities
 from .models import Article, Topic
+from .question_history import merge_legacy
 from .stories import (
     STORY_RULES,
     build_df,
@@ -671,14 +672,14 @@ class PostedManager:
         """Когда какой вопрос опроса задавался: {ключ: 'ГГГГ-ММ-ДД ЧЧ:ММ:СС'}."""
         raw = self.get_setting("poll_recent_keys")
         if not raw:
-            return {}
+            return merge_legacy({})
         try:
             parsed = json.loads(raw)
         except (ValueError, TypeError):
-            return {}
+            return merge_legacy({})
         if not isinstance(parsed, dict):
-            return {}
-        return {str(k): str(v) for k, v in parsed.items()}
+            return merge_legacy({})
+        return merge_legacy({str(k): str(v) for k, v in parsed.items()})
 
     def note_poll_sent(self, key: str = "", kind: str = "poll") -> None:
         today = datetime.now(timezone.utc).strftime('%Y-%m-%d')

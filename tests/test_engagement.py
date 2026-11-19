@@ -305,3 +305,13 @@ def test_used_question_never_comes_back(monkeypatch):
     assert engagement._key_on_cooldown("svc_usage", recent, 3650) is True
 
 
+def test_legacy_questions_are_treated_as_asked(db_file):
+    """Вопросы, вышедшие до появления реестра, тоже считаются заданными."""
+    from bot.db import PostedManager
+    from bot.question_history import LEGACY_ASKED
+
+    state = PostedManager(db_file).poll_state()
+    for key in LEGACY_ASKED:
+        assert key in state["recent_keys"], key
+
+

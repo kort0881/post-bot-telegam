@@ -67,6 +67,8 @@ RSS_FEEDS = [
     ("https://rkn.gov.ru/rss/news.xml", "РКН"),
     ("https://www.comnews.ru/rss/news", "ComNews"),
     ("https://news.google.com/rss/search?q=блокировка+РКН+VPN+россия&hl=ru&gl=RU&ceid=RU:ru", "Google News (Блокировки)"),
+    ("https://news.google.com/rss/search?q=обход+блокировок+VPN&hl=ru&gl=RU&ceid=RU:ru", "Google News (Обход блокировок)"),
+    ("https://news.google.com/rss/search?q=ТСПУ+DPI+замедление+трафика&hl=ru&gl=RU&ceid=RU:ru", "Google News (ТСПУ/DPI)"),
     ("https://techcrunch.com/category/artificial-intelligence/feed/", "TechCrunch AI"),
     ("https://venturebeat.com/category/ai/feed/", "VentureBeat AI"),
     ("https://arstechnica.com/tag/artificial-intelligence/feed/", "Ars Technica AI"),
@@ -79,6 +81,8 @@ RSS_FEEDS = [
     ("https://blog.google/technology/ai/rss/", "Google AI Blog"),
     ("https://engineering.fb.com/category/ml-applications/feed/", "Meta AI Blog"),
     ("https://kod.ru/rss", "Kod.ru"),
+    ("https://xakep.ru/feed/", "Xakep"),
+    ("https://te-st.ru/feed/", "Теплица"),
     ("https://news.ycombinator.com/rss", "Hacker News"),
     ("https://habr.com/ru/rss/feed/1cf1798b4d67ac63d1869bba8f26920f"
      "?fl=ru&complexity=high&rating=10&types%5B%5D=article"
@@ -133,6 +137,10 @@ PROFILE_KEYWORDS = BLOCK_KEYWORDS + [
     "утечка ip", "утечка данных", "цензура", "роскомсвобода", "ркн",
     "blocking", "censorship", "circumvent", "deep packet inspection",
     "интернет-доступ", "доступ к интернету", "обход",
+    # Telegram — профильная тема канала: блокировки мессенджера, платные функции,
+    # клиенты, ограничения. Без этих слов новости про Telegram отсекались как
+    # «вне профиля» (случай 21.11.2026: «Скрытые функции Telegram 13.3»).
+    "телеграм", "telegram",
 ]
 
 GAMES_EXCLUDE = [

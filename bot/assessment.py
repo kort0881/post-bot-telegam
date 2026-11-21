@@ -25,7 +25,7 @@ from .textutils import TermMatcher, parse_json_object
 
 logger = logging.getLogger(__name__)
 
-ASSESS_PROMPT = """Ты — технический редактор Telegram-канала про блокировки, VPN, сети и ИИ.
+ASSESS_PROMPT = """Ты — технический редактор Telegram-канала про блокировки, VPN, сети, ИИ и Telegram.
 Оцени материал по шести критериям и предложи формат публикации.
 
 ЗАГОЛОВОК: {title}

@@ -141,6 +141,9 @@ PROFILE_KEYWORDS = BLOCK_KEYWORDS + [
     # клиенты, ограничения. Без этих слов новости про Telegram отсекались как
     # «вне профиля» (случай 21.11.2026: «Скрытые функции Telegram 13.3»).
     "телеграм", "telegram",
+    # Gemini: модель Google в ленте идёт пачками (Gemini 4 Carbon/Hydrogen и т.п.),
+    # без слова она считалась вне профиля, хотя остальные AI-модели (gpt-, claude) в списке.
+    "gemini",
 ]
 
 GAMES_EXCLUDE = [

@@ -130,13 +130,28 @@ def test_json_with_missing_format_falls_back_to_heuristics():
 
 
 @pytest.mark.asyncio
-async def test_offtopic_material_is_not_worth_publishing():
-    """Nvidia/шпионаж вне профиля канала не должен публиковаться даже при интересе."""
+async def test_ai_material_is_profile_worth_publishing():
+    """С 23.11.2026 ИИ — профиль канала (слово владельца): Nvidia/шпионаж публикуется."""
     off = Article(
         title="Китайские шпионы следили за главой Nvidia, утверждает NYT",
         summary="Расследование о поставках чипов",
         link="https://example.com/nvidia",
         source="The Decoder",
+    )
+    payload = dict(GOOD, topic_relevance=7, worth_publishing=True, format="consequence")
+    llm = FakeLLM(json.dumps(payload, ensure_ascii=False))
+    result = await assess_article(off, llm)
+    assert result.worth_publishing is True
+
+
+@pytest.mark.asyncio
+async def test_offtopic_material_is_not_worth_publishing():
+    """Вне тем канала (VPN, ИИ, Telegram) при релевантности 7 — не публикуем."""
+    off = Article(
+        title="Три вертикальных пылесоса JIMMY для разных задач",
+        summary="Обзор бытовой техники и уборки",
+        link="https://example.com/vacuum",
+        source="3DNews Hardware",
     )
     payload = dict(GOOD, topic_relevance=7, worth_publishing=True, format="consequence")
     llm = FakeLLM(json.dumps(payload, ensure_ascii=False))

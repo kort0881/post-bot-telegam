@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from .config import PRIMARY_SOURCES, config
-from .filters import is_profile_topic
+from .filters import AI_STRONG, is_profile_topic
 from .llm import GroqLLM, LLMError
 from .models import Article, PostFormat, Topic
 from .rating import (
@@ -27,6 +27,16 @@ logger = logging.getLogger(__name__)
 
 ASSESS_PROMPT = """Ты — технический редактор Telegram-канала про блокировки, VPN, сети, ИИ и Telegram.
 Оцени материал по шести критериям и предложи формат публикации.
+
+ИЕРАРХИЯ ТЕМ КАНАЛА (все три — профиль канала):
+1) блокировки, VPN, обход, цензура, DPI, сети — главная тема, публикуй охотнее всего;
+2) ИИ: модели, чипы, агенты, дата-центры, атаки и безопасность ИИ — тоже профиль,
+   topic_relevance не ниже 7 для содержательной новости (даже если про Nvidia, а не про VPN);
+3) Telegram: клиенты, функции, ограничения, оплата.
+Не отказывай материалу из этих трёх тем за «отсутствие практической пользы для VPN»:
+достаточно новизны, конфликта или последствий. worth_publishing=false ставь только
+рекламе и мусору: обзоры гаджетов и телевизоров, игры, спорт, светская хроника,
+политика без техники, курсы акций и криптовалют.
 
 ЗАГОЛОВОК: {title}
 ИСТОЧНИК: {source}
@@ -237,9 +247,10 @@ async def assess_article(article: Article, llm: Optional[GroqLLM] = None,
         logger.warning(f"  ⚠️ Оценка LLM не разобрана, считаю эвристикой; ответ модели: {raw[:300]!r}")
         return heuristic_assessment(article, "некорректный JSON модели")
 
-    # Тема канала узкая: материал не по профилю (блокировки/VPN/сети/безопасность)
-    # не должен проходить только за счёт «интересности» — нужна очень высокая оценка.
-    profile = is_profile_topic(article.text)
+    # Темы канала: VPN/блокировки — главная, ИИ и Telegram — тоже профильные
+    # (слово владельца 23.11.2026). Материал вне этих трёх тем проходит только
+    # при очень высокой оценке релевантности.
+    profile = is_profile_topic(article.text) or AI_STRONG.any(article.text.lower())
     worth = (
         data["worth_publishing"]
         and data["topic_relevance"] >= config.llm_min_worth

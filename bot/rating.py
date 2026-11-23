@@ -118,12 +118,18 @@ def _topic_score(text: str) -> tuple:
     profile = len(PROFILE.matches(text))
     blocks = len(BLOCK.matches(text))
     strong_ai = len(AI_STRONG.matches(text))
-    if blocks >= 2 or profile >= 4:
+    # 23.11.2026: VPN/блокировки — приоритетная тема канала, ИИ и Telegram — тоже
+    # профильные, но ниже. Раньше blocks=1 давал 22 и AI-материал (15) проигрывал
+    # только по очкам; теперь любой материал с явными блокировочными словами
+    # стоит выше чисто-AI новости при прочих равных.
+    if blocks >= 1 or profile >= 4:
         return 25, "профильная тема канала"
-    if blocks >= 1 or profile >= 2:
+    if profile >= 2:
         return 22, "профильная тема канала"
-    if profile == 1 or strong_ai >= 1:
-        return 15, "тематика рядом"
+    if strong_ai >= 1:
+        return 15, "тематика рядом (ИИ)"
+    if profile == 1:
+        return 12, "тематика рядом"
     return 5, "слабое соответствие тематике"
 
 

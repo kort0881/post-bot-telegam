@@ -1,0 +1,37 @@
+name: "Канал: служебные действия (кто постит / удалить пост)"
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "getme | delete"
+        required: true
+        default: "getme"
+      message_ids:
+        description: "id сообщений через запятую (для delete)"
+        required: false
+        default: ""
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Telegram API
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHANNEL: ${{ secrets.CHANNEL_ID }}
+          ACTION: ${{ github.event.inputs.action }}
+          IDS: ${{ github.event.inputs.message_ids }}
+        run: |
+          set -e
+          echo "== getMe"
+          curl -s "https://api.telegram.org/bot$TOKEN/getMe" | python3 -c 'import sys,json;d=json.load(sys.stdin);r=d.get("result") or {};print("ok=",d.get("ok"),"id=",r.get("id"),"username=@",r.get("username"),d.get("description",""))'
+          echo "== getChat"
+          curl -s "https://api.telegram.org/bot$TOKEN/getChat?chat_id=$CHANNEL" | python3 -c 'import sys,json;d=json.load(sys.stdin);r=d.get("result") or {};print("ok=",d.get("ok"),"id=",r.get("id"),"title=",r.get("title"),d.get("description",""))'
+          if [ "$ACTION" = "delete" ]; then
+            IFS=',' read -ra ARR <<< "$IDS"
+            for m in "${ARR[@]}"; do
+              m=$(echo "$m" | tr -d ' ')
+              [ -z "$m" ] && continue
+              res=$(curl -s -X POST "https://api.telegram.org/bot$TOKEN/deleteMessage" -d "chat_id=$CHANNEL" -d "message_id=$m")
+              echo "$m -> $(echo "$res" | python3 -c 'import sys,json;d=json.load(sys.stdin);print("ok=",d.get("ok"),d.get("description",""))')"
+            done
+          fi

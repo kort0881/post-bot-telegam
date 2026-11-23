@@ -12,10 +12,11 @@ from typing import List, Optional
 
 from .config import PRIMARY_SOURCES, config
 from .filters import (
-    AI_STRONG,
+    AI_MARK,
     BLOCK,
     LISTICLE_MARKERS,
     PROFILE,
+    RUSSIA,
     TECHNICAL_MARKERS,
 )
 from .models import Article
@@ -117,13 +118,19 @@ def priority_band(total: int) -> str:
 def _topic_score(text: str) -> tuple:
     profile = len(PROFILE.matches(text))
     blocks = len(BLOCK.matches(text))
-    strong_ai = len(AI_STRONG.matches(text))
+    strong_ai = len(AI_MARK.matches(text))
     # 23.11.2026: VPN/блокировки — приоритетная тема канала, ИИ и Telegram — тоже
     # профильные, но ниже. Раньше blocks=1 давал 22 и AI-материал (15) проигрывал
     # только по очкам; теперь любой материал с явными блокировочными словами
     # стоит выше чисто-AI новости при прочих равных.
     if blocks >= 1 or profile >= 4:
         return 25, "профильная тема канала"
+    # Российская повестка (разработки, регулирование, рынок РФ) — то, что владелец
+    # просил поднимать выше: 23.11.2026 «новости разработка в России для русских
+    # актуальная, а не Трамп в Америке». Работает только на профильном материале,
+    # чтобы не вытягивать случайный политический мусор с упоминанием России.
+    if (profile >= 1 or strong_ai >= 1) and RUSSIA.any(text):
+        return 25, "профильная тема: российская повестка"
     if profile >= 2:
         return 22, "профильная тема канала"
     if strong_ai >= 1:

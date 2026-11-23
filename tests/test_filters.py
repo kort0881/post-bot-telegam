@@ -95,3 +95,33 @@ def test_old_article_rejected():
 
 def test_is_relevant_compat_api():
     assert is_relevant(make("РКН заблокировал новый протокол VLESS")) is True
+
+
+# ===== 23.11.2026: политика вне канала =====
+
+def _art(title, summary="", source="3DNews Software"):
+    from bot.models import Article
+    return Article(title=title, summary=summary, link="https://ex.com/x", source=source)
+
+
+def test_trump_nvidia_story_is_rejected_as_politics():
+    # именно этот пост ушёл в канал 23.11.2026 (msg 7079) и вызвал ругань владельца
+    ok, reason = evaluate_relevance(_art(
+        "Trump endorses Jensen Huang’s return to Nvidia, says US has no evidence of wrongdoing"))
+    assert ok is False
+    assert reason.startswith("POLITICS")
+
+
+def test_russian_govt_tech_news_is_not_politics():
+    # Минцифры/Госдума/РКН — ядро темы канала, их исключать нельзя
+    ok, reason = evaluate_relevance(_art(
+        "Минцифры предложило новый порядок блокировки VPN-протоколов"))
+    assert ok is True, reason
+
+
+def test_russian_ai_news_outranks_foreign_ai():
+    from bot.rating import score_article
+    ru = score_article(_art("Российские разработчики выпустили ИИ-модель для госсектора"))
+    en = score_article(_art("OpenAI показала новую версию модели ИИ"))
+    assert ru.topic >= 25
+    assert ru.total > en.total

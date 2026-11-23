@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from .config import PRIMARY_SOURCES, config
-from .filters import AI_STRONG, is_profile_topic
+from .filters import AI_MARK, is_profile_topic
 from .llm import GroqLLM, LLMError
 from .models import Article, PostFormat, Topic
 from .rating import (
@@ -250,7 +250,7 @@ async def assess_article(article: Article, llm: Optional[GroqLLM] = None,
     # Темы канала: VPN/блокировки — главная, ИИ и Telegram — тоже профильные
     # (слово владельца 23.11.2026). Материал вне этих трёх тем проходит только
     # при очень высокой оценке релевантности.
-    profile = is_profile_topic(article.text) or AI_STRONG.any(article.text.lower())
+    profile = is_profile_topic(article.text) or AI_MARK.any(article.text.lower())
     worth = (
         data["worth_publishing"]
         and data["topic_relevance"] >= config.llm_min_worth

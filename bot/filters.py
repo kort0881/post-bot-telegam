@@ -17,6 +17,7 @@ from .config import (
     COMMERCIAL_MARKERS,
     GAMES_EXCLUDE,
     JUNK_PATTERNS,
+    POLITICS_EXCLUDE,
     PROFILE_KEYWORDS,
     PROMO_PATTERNS,
     REVIEW_KEYWORDS,
@@ -30,15 +31,21 @@ logger = logging.getLogger(__name__)
 
 AI_STRONG = TermMatcher(AI_KEYWORDS_STRONG, name="ai_strong")
 AI_WEAK = TermMatcher(AI_KEYWORDS_WEAK, name="ai_weak")
+# 23.11.2026: «ИИ-модель», «ИИ-агент» не ловились — «ии-» в списке профиля требует
+# границы слова после дефиса. Для профиля и рейтинга берём сильные слова плюс
+# ключевые слабые: голое «ИИ»/«AI» как отдельное слово, nvidia, нейро.
+AI_MARK = TermMatcher(
+    AI_KEYWORDS_STRONG + ["ии", "ai", "nvidia", "нейро", "нейросет"], name="ai_mark")
 BLOCK = TermMatcher(BLOCK_KEYWORDS, name="block")
 PROFILE = TermMatcher(PROFILE_KEYWORDS, name="profile")
 GAMES = TermMatcher(GAMES_EXCLUDE, name="games")
+POLITICS = TermMatcher(POLITICS_EXCLUDE, name="politics")
 BUSINESS = TermMatcher(BUSINESS_EXCLUDE, name="business")
 PROMO = TermMatcher(PROMO_PATTERNS, name="promo")
 COMMERCIAL = TermMatcher(COMMERCIAL_MARKERS, name="commercial")
 REVIEW = TermMatcher(REVIEW_KEYWORDS, name="review")
 JUNK = TermMatcher(JUNK_PATTERNS, name="junk")
-RUSSIA = TermMatcher(RUSSIA_KEYWORDS, stem=False, name="russia")
+RUSSIA = TermMatcher(RUSSIA_KEYWORDS, name="russia")
 
 # Технические маркеры: если они есть, скидка/обзор не отменяют пользу материала.
 TECHNICAL_MARKERS = TermMatcher(
@@ -108,6 +115,12 @@ def evaluate_relevance(article: Article) -> Tuple[bool, str]:
     age_hours = article.age_hours()
     if age_hours > config.max_article_age_hours:
         return False, f"TOO_OLD ({age_hours:.0f}h)"
+
+    # 23.11.2026, слово владельца: политика вне канала (Трамп/US-политика).
+    # Проверяется до профиля: «Трамп и Nvidia» не должен проходить по слову Nvidia.
+    politics = POLITICS.matches(lowered)
+    if politics:
+        return False, f"POLITICS ({politics[0]})"
 
     games = GAMES.matches(lowered)
     if games:

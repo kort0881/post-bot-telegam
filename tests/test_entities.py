@@ -57,7 +57,9 @@ def test_entity_stored_on_add(manager):
     assert "nvidia" in usage
 
 
-def test_second_post_about_same_entity_blocked(manager):
+def test_second_post_about_same_entity_blocked(manager, monkeypatch):
+    # тест про поведение при ENTITY_MAX_POSTS=1; в проде с 23.11.2026 стоит 2
+    monkeypatch.setattr(config, "entity_max_posts", 1)
     ok, _ = manager.check_entity_limit(["nvidia"])
     assert ok is True
 
@@ -88,7 +90,8 @@ def test_core_entity_has_softer_limit(manager):
     assert "rkn" in reason
 
 
-def test_legacy_rows_without_entities_are_counted(manager):
+def test_legacy_rows_without_entities_are_counted(manager, monkeypatch):
+    monkeypatch.setattr(config, "entity_max_posts", 1)
     # строки, записанные старым кодом (entities == []), тоже учитываются
     conn = manager._get_conn()
     conn.execute('''

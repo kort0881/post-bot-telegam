@@ -181,7 +181,7 @@ def select_candidates(candidates: List[Article], posted: PostedManager) -> List[
     recent_topics = [p.get('topic', '') for p in recent]
 
     ranked = rank_candidates(candidates, recent_sources=recent_sources, recent_topics=recent_topics)
-    ranked = diversify(ranked, max_per_source=2, max_per_topic=2)
+    ranked = diversify(ranked, max_per_source=3, max_per_topic=3)
 
     logger.info("🎯 Топ кандидатов по единому рейтингу:")
     for i, item in enumerate(ranked[:10], start=1):

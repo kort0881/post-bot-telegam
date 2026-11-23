@@ -253,8 +253,8 @@ class Config:
         # Кулдаун на субъекта: компания/человек не чаще N раз за окно.
         # Тематические лимиты этого не ловят — Nvidia (hardware) и Claude (llm)
         # считаются разными темами, хотя для читателя это один и тот же сюжет.
-        self.entity_cooldown_hours = _int_env("ENTITY_COOLDOWN_HOURS", 72)
-        self.entity_max_posts = _int_env("ENTITY_MAX_POSTS", 1)
+        self.entity_cooldown_hours = _int_env("ENTITY_COOLDOWN_HOURS", 48)
+        self.entity_max_posts = _int_env("ENTITY_MAX_POSTS", 2)
         # Профильные субъекты (РКН, Telegram) — тема канала, лимит мягче
         self.core_entities = tuple(
             e.strip().lower()
@@ -277,7 +277,7 @@ class Config:
         self.story_sample = _int_env("STORY_SAMPLE", 400)
         # Правило темы (цензура и блокировки в РФ): серия материалов не чаще
         # `STORY_RULE_LIMIT` за `STORY_RULE_HOURS`. Лексика такую серию не ловит.
-        self.story_rule_hours = _int_env("STORY_RULE_HOURS", 72)
+        self.story_rule_hours = _int_env("STORY_RULE_HOURS", 48)
         self.story_rule_limit = _int_env("STORY_RULE_LIMIT", 1)
 
         # Рейтинг: минимальный балл для публикации (ТЗ §3)
@@ -312,7 +312,7 @@ class Config:
         self.quality_max_problems = _int_env("QUALITY_MAX_PROBLEMS", 1)
         # Не более N публикаций подряд одного формата (ТЗ §12)
         self.max_same_format_in_row = _int_env("MAX_SAME_FORMAT_IN_ROW", 2)
-        self.max_same_topic_in_row = _int_env("MAX_SAME_TOPIC_IN_ROW", 2)
+        self.max_same_topic_in_row = _int_env("MAX_SAME_TOPIC_IN_ROW", 3)
 
         # ===== Этап 3: рубрики, вовлечение, опросы (ТЗ §6) =====
         # Серийная рубрика не выходит чаще, чем раз в N дней

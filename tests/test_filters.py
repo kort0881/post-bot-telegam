@@ -125,3 +125,11 @@ def test_russian_ai_news_outranks_foreign_ai():
     en = score_article(_art("OpenAI показала новую версию модели ИИ"))
     assert ru.topic >= 25
     assert ru.total > en.total
+
+
+def test_us_congress_hearing_in_russian_is_politics():
+    # msg 7081 ушёл в канал 23.11.2026: «показания Палате представителей США»
+    ok, reason = evaluate_relevance(_art(
+        "Новоиспечённый глава Nvidia даст в начале декабря показания Палате представителей США"))
+    assert ok is False
+    assert reason.startswith("POLITICS")

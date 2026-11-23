@@ -21,6 +21,7 @@ jobs:
           ACTION: ${{ github.event.inputs.action }}
           IDS: ${{ github.event.inputs.message_ids }}
         run: |
+          CHANNEL=$(printf '%s' "$CHANNEL" | tr -d '[:space:]')
           echo "== getMe"
           curl -s "https://api.telegram.org/bot$TOKEN/getMe" | head -c 300; echo
           echo "== CHANNEL_LEN=${#CHANNEL}"

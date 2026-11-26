@@ -165,6 +165,8 @@ class PostedManager:
                 "ALTER TABLE posted_articles ADD COLUMN message_id INTEGER",
                 "ALTER TABLE rejected_urls ADD COLUMN source TEXT",
                 "ALTER TABLE posted_articles ADD COLUMN rubric TEXT",
+                # 26.11.2026: отметка удалённого из канала поста — гейт не должен его считать
+                "ALTER TABLE posted_articles ADD COLUMN deleted_at TEXT",
             ):
                 try:
                     cursor.execute(ddl)

@@ -14,6 +14,20 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        if: ${{ github.event.inputs.action == 'delete' && github.event.inputs.message_ids != '' }}
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        if: ${{ github.event.inputs.action == 'delete' && github.event.inputs.message_ids != '' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        if: ${{ github.event.inputs.action == 'delete' && github.event.inputs.message_ids != '' }}
+        run: pip install paramiko
+
       - name: Call Telegram API
         env:
           TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -36,3 +50,14 @@ jobs:
               curl -s -X POST "https://api.telegram.org/bot$TOKEN/deleteMessage" -d "chat_id=$CHANNEL" -d "message_id=$m" | head -c 300; echo
             done
           fi
+      # 26.11.2026: удалённый пост помечается deleted_at, иначе гейт считает его вышедшим
+      # и до конца суток не пускает новые (случай 23.11: 5/5 при двух удалённых).
+      - name: "Пометить удалённые в базе"
+        if: ${{ github.event.inputs.action == 'delete' && github.event.inputs.message_ids != '' }}
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+          TARGET_DIR: /opt/post-bot
+          IDS: ${{ github.event.inputs.message_ids }}
+        run: python tools/mark_deleted.py "$IDS"
